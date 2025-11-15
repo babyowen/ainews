@@ -167,7 +167,7 @@ const ReportGenerator = () => {
         if (res.ok) {
           const list = await res.json();
           setPromptOptions(list);
-          const def = list.find(p => p.id === 'default');
+          const def = list.find(p => p.isDefault) || list.find(p => p.id === 'default');
           setSelectedPromptId(def ? def.id : (list[0]?.id || ''));
         } else {
           setPromptOptions([]);

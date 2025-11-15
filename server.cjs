@@ -42,7 +42,7 @@ app.get('/api/keyword-prompts', async (req, res) => {
       return res.json([]);
     }
     const prompts = json.keywords[keyword].prompts || [];
-    const result = prompts.map(p => ({ id: p.id, name: p.name, description: p.description }));
+    const result = prompts.map(p => ({ id: p.id, name: p.name, description: p.description, isDefault: !!p.isDefault }));
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: 'Failed to load keyword prompts', details: err.message });
@@ -2205,7 +2205,7 @@ app.post('/api/google-search', async (req, res) => {
 // 字数统计API
 app.get('/api/word-count-stats', async (req, res) => {
   try {
-    const keywords = ['养老', '公积金', '政府基金', '江苏省国资委', '高考', '数字政务'];
+    const keywords = ['养老', '公积金', '政府基金', '江苏省国资委', '数字政务', '高考', '中国烟草'];
     const { days = 90 } = req.query; // 默认显示最近90天
     
     // 计算日期范围

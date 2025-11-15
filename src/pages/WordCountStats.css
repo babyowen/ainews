@@ -230,6 +230,29 @@
   font-weight: 500;
 }
 
+/* 来源明细与徽章样式 */
+.source-details {
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.source-badge {
+  display: inline-block;
+  padding: 0 6px;
+  border-radius: 10px;
+  font-weight: 700;
+  font-size: 0.7em;
+  line-height: 1.4;
+  vertical-align: middle;
+}
+
+.source-badge.wechat {
+  background: #1aad19; /* 微信绿色 */
+  color: #fff;
+}
+
 /* 日合计样式 */
 .day-total {
   margin-top: 12px;

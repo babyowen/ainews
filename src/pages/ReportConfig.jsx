@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import PasswordProtection from '../components/PasswordProtection';
 import './ReportConfig.css';
 
 const ReportConfig = () => {
@@ -308,6 +309,7 @@ const ReportConfig = () => {
         )}
 
         {activeSection === 'keyword' && (
+          <PasswordProtection title="🔐 管理员验证" description="请输入管理员密码访问关键词 Prompt 配置">
           <div className="config-section">
             <div className="section-header">
               <h2>🏷️ 关键词提示词配置</h2>
@@ -320,25 +322,6 @@ const ReportConfig = () => {
             <div className="keyword-manager">
               <div className="keyword-sidebar">
                 <div className="keyword-toolbar">
-                  <input
-                    className="keyword-input"
-                    placeholder="输入新关键词后按回车"
-                    value={selectedKeyword}
-                    onChange={(e) => setSelectedKeyword(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && selectedKeyword.trim()) {
-                        setEditForm({
-                          keyword: selectedKeyword.trim(),
-                          promptId: 'v' + Math.random().toString(36).slice(2, 8),
-                          name: '新版本',
-                          description: '',
-                          systemPrompt: '',
-                          userPrompt: '',
-                          isDefault: true
-                        });
-                      }
-                    }}
-                  />
                   <button className="refresh-btn" onClick={fetchKeywordConfig} disabled={keywordLoading}>
                     <span className="btn-icon">🔄</span>刷新关键词
                   </button>
@@ -519,6 +502,7 @@ const ReportConfig = () => {
               </div>
             </div>
           </div>
+          </PasswordProtection>
         )}
 
         {/* LLM Configuration */}
