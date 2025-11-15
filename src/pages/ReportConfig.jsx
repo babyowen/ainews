@@ -78,6 +78,7 @@ const ReportConfig = () => {
     const loadKeywordPrompts = async () => {
       if (!selectedKeyword) {
         setPromptVersions([]);
+        setEditForm({ keyword: '', promptId: '', name: '', description: '', systemPrompt: '', userPrompt: '', isDefault: false });
         return;
       }
       try {
@@ -85,11 +86,14 @@ const ReportConfig = () => {
         if (r.ok) {
           const data = await r.json();
           setPromptVersions(data.prompts || []);
+          setEditForm({ keyword: selectedKeyword, promptId: '', name: '', description: '', systemPrompt: '', userPrompt: '', isDefault: false });
         } else {
           setPromptVersions([]);
+          setEditForm({ keyword: selectedKeyword, promptId: '', name: '', description: '', systemPrompt: '', userPrompt: '', isDefault: false });
         }
       } catch {
         setPromptVersions([]);
+        setEditForm({ keyword: selectedKeyword, promptId: '', name: '', description: '', systemPrompt: '', userPrompt: '', isDefault: false });
       }
     };
     loadKeywordPrompts();
@@ -320,12 +324,17 @@ const ReportConfig = () => {
             </div>
 
             <div className="keyword-manager">
-              <div className="keyword-sidebar">
-                <div className="keyword-toolbar">
-                  <button className="refresh-btn" onClick={fetchKeywordConfig} disabled={keywordLoading}>
-                    <span className="btn-icon">🔄</span>刷新关键词
-                  </button>
-                </div>
+                <div className="keyword-sidebar">
+                  <div className="keyword-toolbar">
+                    <button className="refresh-btn" onClick={fetchKeywordConfig} disabled={keywordLoading}>
+                      <span className="btn-icon">🔄</span>刷新关键词
+                    </button>
+                    <button
+                      className="retry-btn"
+                      onClick={() => setEditForm({ keyword: selectedKeyword, promptId: '', name: '', description: '', systemPrompt: '', userPrompt: '', isDefault: false })}
+                      disabled={!selectedKeyword}
+                    >新增版本</button>
+                  </div>
                 <div className="keyword-list">
                   {keywordLoading && <div className="loading-tip">加载中...</div>}
                   {keywordList.length === 0 && !keywordLoading && (
@@ -401,7 +410,7 @@ const ReportConfig = () => {
                     />
                   </div>
                   <div className="form-row">
-                    <label>版本ID</label>
+                    <label>版本ID（选填）</label>
                     <input
                       value={editForm.promptId}
                       onChange={(e) => setEditForm({ ...editForm, promptId: e.target.value })}
@@ -459,13 +468,13 @@ const ReportConfig = () => {
                           keyword: (editForm.keyword || selectedKeyword || '').trim(),
                           promptId: (editForm.promptId || '').trim(),
                           name: (editForm.name || '').trim(),
-                          description: editForm.description || '',
+                          description: (editForm.description || '').trim(),
                           systemPrompt: editForm.systemPrompt || '',
                           userPrompt: editForm.userPrompt || '',
                           isDefault: !!editForm.isDefault
                         };
-                        if (!body.keyword || !body.promptId || !body.name || !body.systemPrompt || !body.userPrompt) {
-                          alert('请完整填写关键词、版本ID、名称、System/User Prompt');
+                        if (!body.keyword || !body.name || !body.description || !body.systemPrompt || !body.userPrompt) {
+                          alert('请完整填写关键词、版本名称、描述、System Prompt、User Prompt');
                           return;
                         }
                         setSaving(true);
