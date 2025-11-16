@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import ErrorBoundary from '../components/ErrorBoundary';
 import html2canvas from 'html2canvas';
@@ -38,6 +38,15 @@ const ReportGenerator = () => {
   const [summaryVersion, setSummaryVersion] = useState('short');
   const [promptOptions, setPromptOptions] = useState([]);
   const [selectedPromptId, setSelectedPromptId] = useState('');
+
+  const selectedChars = useMemo(() => {
+    return selectedNews.reduce((sum, news) => {
+      const text = summaryVersion === 'short'
+        ? (news.short_summary || news.content || '')
+        : (news.content || news.short_summary || '');
+      return sum + (text ? text.length : 0);
+    }, 0);
+  }, [selectedNews, summaryVersion]);
   
   // 二轮修改相关状态
   const [showModifyInput, setShowModifyInput] = useState(false);
@@ -1783,7 +1792,7 @@ const ReportGenerator = () => {
               >
                 取消全选
               </button>
-              <span className="selected-count">已选择: {selectedNews.length} 条</span>
+              <span className="selected-count">已选择: {selectedNews.length} 条，共{selectedChars}字</span>
             </div>
           </div>
           
