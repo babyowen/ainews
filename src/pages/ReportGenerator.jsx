@@ -1676,38 +1676,12 @@ const ReportGenerator = () => {
   return (
     <ErrorBoundary>
     <div className="report-generator">
-      <div className="page-header" style={{
-        background: 'linear-gradient(90deg, #232526 0%, #3d8bfd 100%)',
-        borderRadius: '12px',
-        padding: '32px 0 24px 0',
-        marginBottom: '28px',
-        boxShadow: '0 4px 24px 0 rgba(61,139,253,0.10)',
-        position: 'relative',
-        textAlign: 'center',
-        overflow: 'hidden',
-      }}>
-        <div style={{
-          fontSize: 22,
-          fontWeight: 900,
-          letterSpacing: 2,
-          color: '#fff',
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: 12,
-          textShadow: '0 2px 8px #3d8bfd88',
-        }}>
-          <span style={{fontSize: 32, marginRight: 8, filter: 'drop-shadow(0 2px 8px #3d8bfd88)'}}>🧬</span>
-          <span style={{fontSize: 36, fontFamily: 'Inter, Roboto, Helvetica, Arial, sans-serif'}}>AI News Report Generator</span>
+      <div className="page-header bg-gradient-to-r from-neutral-900 to-blue-500 rounded-xl py-8 mb-7 shadow-[0_4px_24px_rgba(61,139,253,0.10)] relative text-center overflow-hidden">
+        <div className="inline-flex items-center gap-3 font-black tracking-wider text-white drop-shadow-md">
+          <span className="text-4xl mr-2 [filter:drop-shadow(0_2px_8px_#3d8bfd88)]">🧬</span>
+          <span className="text-4xl font-sans">AI News Report Generator</span>
         </div>
-        <div style={{
-          height: 4,
-          background: 'linear-gradient(90deg, #3d8bfdcc 0%, #5f6cffcc 100%)',
-          margin: '18px auto 0 auto',
-          maxWidth: 320,
-          borderRadius: 4,
-          boxShadow: '0 0 12px 2px #3d8bfd44',
-          opacity: 0.85
-        }}></div>
+        <div className="h-1.5 bg-gradient-to-r from-blue-500/80 to-indigo-500/80 mt-4 mx-auto max-w-[320px] rounded shadow-[0_0_12px_2px_rgba(61,139,253,0.27)] opacity-85"></div>
       </div>
 
       {/* 筛选区域 */}
