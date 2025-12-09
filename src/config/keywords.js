@@ -11,9 +11,9 @@ export const KEYWORDS = [
 export const KEYWORD_COLORS = {
   '养老': '#e74c3c',
   '公积金': '#3498db',
-  '政府基金': '#2ecc71',
+  '政府基金': '#2c3e50',
   '江苏省国资委': '#f39c12',
   '数字政务': '#8e44ad',
   '高考': '#1abc9c',
-  '中国烟草': '#2c3e50'
+  '中国烟草': '#2ecc71'
 };

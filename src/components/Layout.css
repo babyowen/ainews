@@ -45,11 +45,7 @@
 }
 
 /* 给logo添加AI图标 */
-.logo::before {
-  content: '🤖';
-  margin-right: 10px;
-  font-size: 1.6rem;
-}
+/* 移除旧的emoji前缀，使用SVG图标 */
 
 .sidebar nav {
   display: flex;

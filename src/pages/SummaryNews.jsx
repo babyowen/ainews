@@ -125,34 +125,81 @@ export default function SummaryNewsPage() {
       <header style={{
         textAlign: 'center',
         marginBottom: 32,
-        paddingTop: 32,
-        paddingBottom: 28,
-        background: 'linear-gradient(120deg, #fafdff 60%, #eaf3ff 100%)',
+        paddingTop: 40,
+        paddingBottom: 32,
+        background: 'radial-gradient(1200px 800px at 8% 0%, #f1f7ff 0%, #fafdff 55%), radial-gradient(1200px 800px at 92% 0%, #e8f2ff 0%, #fafdff 55%)',
         borderRadius: '0 0 24px 24px',
-        boxShadow: '0 4px 24px 0 rgba(60,80,120,0.07)',
+        boxShadow: '0 6px 28px 0 rgba(60,80,120,0.08)',
         width: '100%',
         position: 'relative',
         margin: 0,
         maxWidth: '100%',
         paddingLeft: 0,
         paddingRight: 0,
+        overflow: 'hidden'
       }}>
-        <div style={{fontSize: 18, color: '#3d4673', letterSpacing: 2, fontWeight: 600, marginBottom: 2, opacity:0.7}}>KeyDigest</div>
+        <div style={{
+          position: 'absolute',
+          inset: 0,
+          background: 'repeating-linear-gradient(90deg, rgba(61,139,253,0.06) 0px, rgba(61,139,253,0.06) 1px, transparent 1px, transparent 14px), repeating-linear-gradient(0deg, rgba(95,108,255,0.05) 0px, rgba(95,108,255,0.05) 1px, transparent 1px, transparent 14px)',
+          opacity: 0.35
+        }}></div>
+        <div style={{
+          position: 'absolute',
+          top: -60,
+          left: -60,
+          width: 240,
+          height: 240,
+          background: 'radial-gradient(circle at 30% 30%, rgba(26,115,232,0.28), rgba(26,115,232,0) 65%)',
+          filter: 'blur(40px)',
+          animation: 'float1 7s ease-in-out infinite alternate'
+        }}></div>
+        <div style={{
+          position: 'absolute',
+          top: -40,
+          right: -60,
+          width: 300,
+          height: 300,
+          background: 'radial-gradient(circle at 70% 30%, rgba(95,108,255,0.26), rgba(95,108,255,0) 65%)',
+          filter: 'blur(46px)',
+          animation: 'float2 8s ease-in-out infinite alternate'
+        }}></div>
+        <style>{`
+          @keyframes float1 { from { transform: translateY(0px); } to { transform: translateY(12px); } }
+          @keyframes float2 { from { transform: translateY(0px); } to { transform: translateY(-10px); } }
+        `}</style>
+        <div style={{fontSize: 18, color: '#3d4673', letterSpacing: 2, fontWeight: 600, marginBottom: 2, opacity:0.7, display:'flex',alignItems:'center',justifyContent:'center',gap:8}}>
+          <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
+            <defs>
+              <linearGradient id="aiGradH" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0%" stopColor="#1a73e8"/>
+                <stop offset="100%" stopColor="#5f6cff"/>
+              </linearGradient>
+            </defs>
+            <circle cx="12" cy="12" r="9" fill="url(#aiGradH)" opacity="0.15"/>
+            <path d="M6 12h12M12 6v12" stroke="url(#aiGradH)" strokeWidth="1.6" strokeLinecap="round"/>
+            <circle cx="6" cy="12" r="1.6" fill="#1a73e8"/>
+            <circle cx="12" cy="6" r="1.6" fill="#5f6cff"/>
+            <circle cx="12" cy="18" r="1.6" fill="#5f6cff"/>
+            <circle cx="18" cy="12" r="1.6" fill="#1a73e8"/>
+          </svg>
+          Ai News
+        </div>
         <h1 style={{
-          fontSize: 38,
+          fontSize: 40,
           fontWeight: 900,
-          background: 'linear-gradient(90deg, #3d8bfd 0%, #5f6cff 100%)',
+          background: 'linear-gradient(90deg, #1a73e8 0%, #5f6cff 100%)',
           WebkitBackgroundClip: 'text',
           WebkitTextFillColor: 'transparent',
           margin: 0,
-          letterSpacing: 1,
-          lineHeight: 1.18,
+          letterSpacing: 0.5,
+          lineHeight: 1.2,
         }}>每日新闻简报</h1>
         <div style={{
           height: 4,
           background: 'linear-gradient(90deg, #3d8bfd66 0%, #5f6cffcc 100%)',
           margin: '18px auto 0 auto',
-          maxWidth: 320,
+          maxWidth: 360,
           borderRadius: 4,
           boxShadow: '0 0 12px 2px #3d8bfd44',
           opacity: 0.85

@@ -95,6 +95,8 @@ export default function WordCountStats() {
       totalWords: 0,
       highScoreNews: 0,
       highScoreWords: 0,
+      veryHighScoreNews: 0,
+      veryHighScoreWords: 0,
       keywordStats: {}
     };
 
@@ -103,7 +105,9 @@ export default function WordCountStats() {
         newsCount: 0,
         totalWords: 0,
         highScoreCount: 0,
-        highScoreWords: 0
+        highScoreWords: 0,
+        veryHighScoreCount: 0,
+        veryHighScoreWords: 0
       };
     });
 
@@ -114,12 +118,16 @@ export default function WordCountStats() {
           stats.totalWords += Number(item.totalWords) || 0;
           stats.highScoreNews += Number(item.highScoreCount) || 0;
           stats.highScoreWords += Number(item.highScoreWords) || 0;
+          stats.veryHighScoreNews += Number(item.veryHighScoreCount) || 0;
+          stats.veryHighScoreWords += Number(item.veryHighScoreWords) || 0;
           
           if (stats.keywordStats[item.keyword]) {
             stats.keywordStats[item.keyword].newsCount += Number(item.newsCount) || 0;
             stats.keywordStats[item.keyword].totalWords += Number(item.totalWords) || 0;
             stats.keywordStats[item.keyword].highScoreCount += Number(item.highScoreCount) || 0;
             stats.keywordStats[item.keyword].highScoreWords += Number(item.highScoreWords) || 0;
+            stats.keywordStats[item.keyword].veryHighScoreCount += Number(item.veryHighScoreCount) || 0;
+            stats.keywordStats[item.keyword].veryHighScoreWords += Number(item.veryHighScoreWords) || 0;
           }
         });
       }
@@ -255,14 +263,47 @@ export default function WordCountStats() {
                                   📰 {formatNumber(keywordData.newsCount)}条 
                                   📝 {formatWordCount(keywordData.totalWords)}
                                 </div>
-                                <div className="stats-line high-score">
-                                  ⭐ {formatNumber(keywordData.highScoreCount)}条 
-                                  📝 {formatWordCount(keywordData.highScoreWords)}
-                                </div>
+                            <div className="stats-line high-score">
+                              3️⃣ {formatNumber(keywordData.highScoreCount)}条 {formatWordCount(keywordData.highScoreWords)}
+                            </div>
+                            <div className="stats-line high-score">
+                              4️⃣ {formatNumber(keywordData.veryHighScoreCount)}条 {formatWordCount(keywordData.veryHighScoreWords)}
+                            </div>
+                            {keyword === '江苏省国资委' && (keywordData.customGrabDetails || keywordData.wechatDetails) && Array.from(new Set([
+                              ...Object.keys(keywordData.customGrabDetails || {}),
+                              ...Object.keys(keywordData.wechatDetails || {})
+                            ])).some(sk => {
+                              const c = Number((keywordData.customGrabDetails || {})[sk]) || 0;
+                              const w = Number((keywordData.wechatDetails || {})[sk]) || 0;
+                              return c > 0 || w > 0;
+                            }) ? (
+                              <div className="source-details">
+                                {Array.from(new Set([
+                                  ...Object.keys(keywordData.customGrabDetails || {}),
+                                  ...Object.keys(keywordData.wechatDetails || {})
+                                ]))
+                                  .filter(sk => {
+                                    const c = Number((keywordData.customGrabDetails || {})[sk]) || 0;
+                                    const w = Number((keywordData.wechatDetails || {})[sk]) || 0;
+                                    return c > 0 || w > 0;
+                                  })
+                                  .map(sk => {
+                                    const customCount = Number((keywordData.customGrabDetails || {})[sk]) || 0;
+                                    const wechatCount = Number((keywordData.wechatDetails || {})[sk]) || 0;
+                                    return (
+                                      <div key={sk} className="stats-line">
+                                        <span className="keyword-detail-name">{sk || '未知'}</span>
+                                        {customCount > 0 && <span> 🏛️ {formatNumber(customCount)}条</span>}
+                                        {wechatCount > 0 && <span> 📱 {formatNumber(wechatCount)}条</span>}
+                                      </div>
+                                    );
+                                  })}
                               </div>
-                            );
-                          })}
-                        </div>
+                            ) : null}
+                          </div>
+                        );
+                      })}
+                    </div>
                         
                         {/* 日合计 */}
                         <div className="day-total">
@@ -280,23 +321,29 @@ export default function WordCountStats() {
                                 return sum + (data ? (Number(data.totalWords) || 0) : 0);
                               }, 0))}
                             </div>
-                            <div className="total-line high-score-total">
-                              ⭐ 3分以上: {formatNumber(KEYWORDS.reduce((sum, keyword) => {
-                                const data = day.data[keyword];
-                                return sum + (data ? (Number(data.highScoreCount) || 0) : 0);
-                              }, 0))}条
-                            </div>
-                            <div className="total-line high-score-total">
-                              📈 高分字数: {formatWordCount(KEYWORDS.reduce((sum, keyword) => {
-                                const data = day.data[keyword];
-                                return sum + (data ? (Number(data.highScoreWords) || 0) : 0);
-                              }, 0))}
-                            </div>
+                          <div className="total-line high-score-total">
+                            3️⃣ {formatNumber(KEYWORDS.reduce((sum, keyword) => {
+                              const data = day.data[keyword];
+                              return sum + (data ? (Number(data.highScoreCount) || 0) : 0);
+                            }, 0))}条 {formatWordCount(KEYWORDS.reduce((sum, keyword) => {
+                              const data = day.data[keyword];
+                              return sum + (data ? (Number(data.highScoreWords) || 0) : 0);
+                            }, 0))}
+                          </div>
+                          <div className="total-line high-score-total">
+                            4️⃣ {formatNumber(KEYWORDS.reduce((sum, keyword) => {
+                              const data = day.data[keyword];
+                              return sum + (data ? (Number(data.veryHighScoreCount) || 0) : 0);
+                            }, 0))}条 {formatWordCount(KEYWORDS.reduce((sum, keyword) => {
+                              const data = day.data[keyword];
+                              return sum + (data ? (Number(data.veryHighScoreWords) || 0) : 0);
+                            }, 0))}
                           </div>
                         </div>
-                      </>
-                    ) : (
-                      <div className="empty-day"></div>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="empty-day"></div>
                     )}
                   </div>
                 ))}
@@ -311,10 +358,10 @@ export default function WordCountStats() {
                       📝 总字数: {formatWordCount(weekStats.totalWords)}
                     </div>
                     <div className="summary-line high-score">
-                      ⭐ 3分以上: {formatNumber(weekStats.highScoreNews)}条
+                      3️⃣ {formatNumber(weekStats.highScoreNews)}条 {formatWordCount(weekStats.highScoreWords)}
                     </div>
                     <div className="summary-line high-score">
-                      📝 高分字数: {formatWordCount(weekStats.highScoreWords)}
+                      4️⃣ {formatNumber(weekStats.veryHighScoreNews)}条 {formatWordCount(weekStats.veryHighScoreWords)}
                     </div>
                     
                     <div className="keyword-summary">
@@ -340,9 +387,15 @@ export default function WordCountStats() {
                                 </span>
                               </div>
                               <div className="stats-row high-score-stats">
-                                <span className="stats-label">⭐ 高分:</span>
+                                <span className="stats-label">3️⃣</span>
                                 <span className="stats-value">
-                                  {formatNumber(stats.highScoreCount)}条 / {formatWordCount(stats.highScoreWords)}
+                                  {formatNumber(stats.highScoreCount)}条 {formatWordCount(stats.highScoreWords)}
+                                </span>
+                              </div>
+                              <div className="stats-row high-score-stats">
+                                <span className="stats-label">4️⃣</span>
+                                <span className="stats-value">
+                                  {formatNumber(stats.veryHighScoreCount)}条 {formatWordCount(stats.veryHighScoreWords)}
                                 </span>
                               </div>
                             </div>

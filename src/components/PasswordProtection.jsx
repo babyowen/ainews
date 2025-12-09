@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import './PasswordProtection.css';
 
-const PasswordProtection = ({ children, onAuthenticated }) => {
+const PasswordProtection = ({ children, onAuthenticated, title = '🔐 管理员验证', description = '请输入管理员密码来访问修改评分功能' }) => {
   const [password, setPassword] = useState('');
   const [isAuthenticated, setIsAuthenticated] = useState(() => {
     // 检查是否在30分钟内已经验证过
@@ -26,13 +26,6 @@ const PasswordProtection = ({ children, onAuthenticated }) => {
     await new Promise(resolve => setTimeout(resolve, 800));
 
     const correctPassword = import.meta.env.VITE_ADMIN_PASSWORD;
-    
-    // 调试日志
-    console.log('输入的密码:', password);
-    console.log('环境变量密码:', correctPassword);
-    console.log('环境变量是否存在:', correctPassword !== undefined);
-    
-    // 如果没有设置环境变量，使用默认密码
     const targetPassword = correctPassword || 'keydigest2024';
     
     if (password === targetPassword) {
@@ -93,8 +86,8 @@ const PasswordProtection = ({ children, onAuthenticated }) => {
     <div className="password-protection">
       <div className="password-card">
         <div className="password-header">
-          <h2>🔐 管理员验证</h2>
-          <p>请输入管理员密码来访问修改评分功能</p>
+          <h2>{title}</h2>
+          <p>{description}</p>
         </div>
         
         <form onSubmit={handleSubmit} className="password-form">
@@ -144,4 +137,4 @@ const PasswordProtection = ({ children, onAuthenticated }) => {
   );
 };
 
-export default PasswordProtection; 
+export default PasswordProtection;

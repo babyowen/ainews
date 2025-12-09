@@ -42,7 +42,7 @@ app.get('/api/keyword-prompts', async (req, res) => {
       return res.json([]);
     }
     const prompts = json.keywords[keyword].prompts || [];
-    const result = prompts.map(p => ({ id: p.id, name: p.name, description: p.description }));
+    const result = prompts.map(p => ({ id: p.id, name: p.name, description: p.description, isDefault: !!p.isDefault }));
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: 'Failed to load keyword prompts', details: err.message });
@@ -1726,9 +1726,9 @@ app.post('/api/config/keyword-prompts', async (req, res) => {
     const fs = require('fs');
     const path = require('path');
     const { keyword, promptId, name, description, systemPrompt, userPrompt, isDefault } = req.body;
-    
-    if (!keyword || !promptId || !name || !systemPrompt || !userPrompt) {
-      return res.status(400).json({ error: '缺少必要参数' });
+
+    if (!keyword || !name || !description || !systemPrompt || !userPrompt) {
+      return res.status(400).json({ error: '缺少必要参数：关键词、版本名称、描述、System Prompt、User Prompt为必填' });
     }
     
     const keywordPromptsPath = path.join(__dirname, 'config/keyword-prompts.json');
@@ -1756,11 +1756,25 @@ app.post('/api/config/keyword-prompts', async (req, res) => {
       };
     }
     
+    // 生成或使用版本ID（选填）
+    const rawId = (promptId || '').trim();
+    const slugify = (s) => s.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]+/g, '-').replace(/^-+|-+$/g, '');
+    const ts = new Date();
+    const tsStr = `${ts.getFullYear()}${String(ts.getMonth()+1).padStart(2,'0')}${String(ts.getDate()).padStart(2,'0')}${String(ts.getHours()).padStart(2,'0')}${String(ts.getMinutes()).padStart(2,'0')}`;
+    let effectiveId = rawId || `${slugify(name)}-${tsStr}`;
+    // 保证ID在该关键词下唯一
+    const existingIds = new Set(keywordPrompts.keywords[keyword].prompts.map(p => p.id));
+    if (existingIds.has(effectiveId)) {
+      let counter = 2;
+      while (existingIds.has(`${effectiveId}-${counter}`)) counter++;
+      effectiveId = `${effectiveId}-${counter}`;
+    }
+
     // 查找现有prompt配置
-    const existingPromptIndex = keywordPrompts.keywords[keyword].prompts.findIndex(p => p.id === promptId);
-    
+    const existingPromptIndex = keywordPrompts.keywords[keyword].prompts.findIndex(p => p.id === effectiveId || p.id === rawId);
+
     const promptConfig = {
-      id: promptId,
+      id: existingPromptIndex >= 0 ? keywordPrompts.keywords[keyword].prompts[existingPromptIndex].id : effectiveId,
       name,
       description: description || '',
       systemPrompt,
@@ -2205,7 +2219,7 @@ app.post('/api/google-search', async (req, res) => {
 // 字数统计API
 app.get('/api/word-count-stats', async (req, res) => {
   try {
-    const keywords = ['养老', '公积金', '政府基金', '江苏省国资委', '高考', '数字政务'];
+    const keywords = ['养老', '公积金', '政府基金', '江苏省国资委', '数字政务', '高考', '中国烟草'];
     const { days = 90 } = req.query; // 默认显示最近90天
     
     // 计算日期范围
