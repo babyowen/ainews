@@ -785,6 +785,12 @@ app.post('/api/preview-report-message', async (req, res) => {
       const text = summaryVersion === 'short' ? (news.short_summary || news.content || '内容不详') : (news.content || news.short_summary || '内容不详');
       return `新闻${index + 1}标题:${news.title}\n新闻${index + 1}内容:${text}`;
     }).join('\n\n');
+
+    // 拼接潜在客户专用新闻内容 {qianzai_news}
+    const qianzaiNewsContent = selectedNews.map((news, index) => {
+      const text = summaryVersion === 'short' ? (news.short_summary || news.content || '内容不详') : (news.content || news.short_summary || '内容不详');
+      return `这是我的潜在客户<${news.search_keyword || '未知客户'}>，以下是我搜索到的新闻<${text}>`;
+    }).join('\n\n');
     
     // 替换用户提示词中的变量
     const finalUserPrompt = userPromptTemplate
@@ -792,6 +798,7 @@ app.post('/api/preview-report-message', async (req, res) => {
       .replace('{startDate}', startDate)
       .replace('{endDate}', endDate)
       .replace('{news}', newsContent)
+      .replace('{qianzai_news}', qianzaiNewsContent)
       .replace('{usertopic}', userPrompt || '无特别要求');
     
     // 计算字数和Token估算
@@ -883,6 +890,12 @@ app.post('/api/generate-report', async (req, res) => {
       const text = summaryVersion === 'short' ? (news.short_summary || news.content || '内容不详') : (news.content || news.short_summary || '内容不详');
       return `新闻${index + 1}标题:${news.title}\n新闻${index + 1}内容:${text}`;
     }).join('\n\n');
+
+    // 拼接潜在客户专用新闻内容 {qianzai_news}
+    const qianzaiNewsContent = selectedNews.map((news, index) => {
+      const text = summaryVersion === 'short' ? (news.short_summary || news.content || '内容不详') : (news.content || news.short_summary || '内容不详');
+      return `这是我的潜在客户<${news.search_keyword || '未知客户'}>，以下是我搜索到的新闻<${text}>`;
+    }).join('\n\n');
     
     // 替换用户提示词中的变量
     const finalUserPrompt = userPromptTemplate
@@ -890,6 +903,7 @@ app.post('/api/generate-report', async (req, res) => {
       .replace('{startDate}', startDate)
       .replace('{endDate}', endDate)
       .replace('{news}', newsContent)
+      .replace('{qianzai_news}', qianzaiNewsContent)
       .replace('{usertopic}', userPrompt || '无特别要求');
 
     // Token估算函数 (基于DeepSeek官方标准: 1个中文字符≈0.6token, 1个英文字符≈0.3token)
