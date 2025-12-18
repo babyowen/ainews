@@ -5,7 +5,8 @@ export const KEYWORDS = [
   '江苏省国资委',
   '数字政务',
   '高考',
-  '中国烟草'
+  '中国烟草',
+  '潜在招标客户'
 ];
 
 export const KEYWORD_COLORS = {
@@ -15,5 +16,6 @@ export const KEYWORD_COLORS = {
   '江苏省国资委': '#f39c12',
   '数字政务': '#8e44ad',
   '高考': '#1abc9c',
-  '中国烟草': '#2ecc71'
+  '中国烟草': '#2ecc71',
+  '潜在招标客户': '#ff6f61'
 };
