@@ -31,6 +31,7 @@ export default function Layout({ children }) {
           <Link className={pathname === "/config" ? "active" : ""} to="/config">周报参数</Link>
           <Link className={pathname === "/analysis" ? "active" : ""} to="/analysis">来源分析</Link>
           <Link className={pathname === "/quality" ? "active" : ""} to="/quality">质量分析</Link>
+          <Link className={pathname === "/history" ? "active" : ""} to="/history">历史周报</Link>
         </nav>
       </aside>
       <main className="main-content">{children}</main>

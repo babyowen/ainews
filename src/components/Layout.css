@@ -109,6 +109,12 @@
   font-size: 1.2rem;
 }
 
+/* 历史周报页面的图标 */
+.sidebar a[href="/history"]::before {
+  content: '📚';
+  font-size: 1.2rem;
+}
+
 .sidebar a:hover {
   background: rgba(255, 255, 255, 0.15);
   color: #fff;

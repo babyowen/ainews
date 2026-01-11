@@ -6,6 +6,7 @@ import ReportConfigPage from './pages/ReportConfig';
 import QualityAnalysisPage from './pages/QualityAnalysis';
 import ScoreEditPage from './pages/ScoreEdit';
 import WordCountStatsPage from './pages/WordCountStats';
+import HistoryReports from './pages/HistoryReports';
 import Layout from './components/Layout';
 import './App.css'
 
@@ -22,6 +23,7 @@ function App() {
             <Route path="/quality" element={<QualityAnalysisPage />} />
             <Route path="/score-edit" element={<ScoreEditPage />} />
             <Route path="/word-count" element={<WordCountStatsPage />} />
+            <Route path="/history" element={<HistoryReports />} />
             <Route path="*" element={<Navigate to="/summary" />} />
           </Routes>
         </Layout>

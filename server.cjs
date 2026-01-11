@@ -617,11 +617,8 @@ app.post('/api/modify-report', async (req, res) => {
       
       res.write(`data: ${JSON.stringify({ type: 'debug', data: debugInfo })}\n\n`);
       res.write(`data: ${JSON.stringify({ type: 'status', message: '🔗 正在连接DeepSeek R1...' })}\n\n`);
-      
-      // 调试：检查API密钥
-      console.log('DeepSeek API Key:', process.env.DEEPSEEK_API_KEY ? `${process.env.DEEPSEEK_API_KEY.substring(0, 10)}...` : 'NOT FOUND');
       console.log('DeepSeek API Request - Token estimate:', estimateTokens(totalContent));
-      
+
       // 调用DeepSeek API with stream
       console.log('Calling DeepSeek API...');
       const response = await fetch('https://api.deepseek.com/chat/completions', {
@@ -937,9 +934,6 @@ app.post('/api/generate-report', async (req, res) => {
       
       res.write(`data: ${JSON.stringify({ type: 'debug', data: debugInfo })}\n\n`);
       res.write(`data: ${JSON.stringify({ type: 'status', message: '🔗 正在连接DeepSeek R1...' })}\n\n`);
-      
-      // 调试：检查API密钥
-      console.log('DeepSeek API Key:', process.env.DEEPSEEK_API_KEY ? `${process.env.DEEPSEEK_API_KEY.substring(0, 10)}...` : 'NOT FOUND');
       console.log('DeepSeek API Request - Token estimate:', estimateTokens(totalContent));
       console.log('Calling DeepSeek API...');
       
@@ -1005,6 +999,18 @@ app.post('/api/generate-report', async (req, res) => {
           if (line.startsWith('data: ')) {
             const data = line.slice(6);
             if (data === '[DONE]') {
+              // 保存报告到数据库
+              try {
+                await pool.query(
+                  `INSERT INTO weekly_reports (keyword, start_date, end_date, report_content, model_used, news_count)
+                   VALUES (?, ?, ?, ?, ?, ?)`,
+                  [keyword, startDate, endDate, fullReport, 'deepseek-reasoner', selectedNews.length]
+                );
+                console.log('✅ 周报已保存到数据库, keyword:', keyword, 'dates:', startDate, '-', endDate);
+              } catch (saveError) {
+                console.error('❌ 保存周报到数据库失败:', saveError);
+              }
+
               res.write(`data: ${JSON.stringify({ type: 'done', report: fullReport })}\n\n`);
               res.end();
               return;
@@ -1087,7 +1093,20 @@ app.post('/api/generate-report', async (req, res) => {
         return;
       }
       const report = data.choices?.[0]?.message?.content || '生成周报失败';
-      res.json({ 
+
+      // 保存报告到数据库
+      try {
+        await pool.query(
+          `INSERT INTO weekly_reports (keyword, start_date, end_date, report_content, model_used, news_count)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [keyword, startDate, endDate, report, 'deepseek-reasoner', selectedNews.length]
+        );
+        console.log('✅ 周报已保存到数据库 (非流式), keyword:', keyword, 'dates:', startDate, '-', endDate);
+      } catch (saveError) {
+        console.error('❌ 保存周报到数据库失败 (非流式):', saveError);
+      }
+
+      res.json({
         report,
         debug: {
           systemPrompt,
@@ -1216,9 +1235,6 @@ app.post('/api/generate-siliconflow-report', async (req, res) => {
       
       res.write(`data: ${JSON.stringify({ type: 'debug', data: debugInfo })}\n\n`);
       res.write(`data: ${JSON.stringify({ type: 'status', message: '🔗 正在连接硅基流动...' })}\n\n`);
-      
-      // 调试：检查API密钥
-      console.log('SiliconFlow API Key:', process.env.SILICONFLOW_API_KEY ? `${process.env.SILICONFLOW_API_KEY.substring(0, 10)}...` : 'NOT FOUND');
       console.log('SiliconFlow API Request - Token estimate:', estimateTokens(totalContent));
       console.log('Calling SiliconFlow API...');
       
@@ -1269,7 +1285,7 @@ app.post('/api/generate-siliconflow-report', async (req, res) => {
         }
         
         res.write(`data: ${JSON.stringify({ type: 'status', message: '🤖 硅基流动 DeepSeek-R1 开始思考...' })}\n\n`);
-        
+
         console.log('SiliconFlow API Response OK, starting stream processing...');
         let fullReport = '';
         const reader = response.body.getReader();
@@ -1284,6 +1300,18 @@ app.post('/api/generate-siliconflow-report', async (req, res) => {
             if (line.startsWith('data: ')) {
               const data = line.slice(6);
               if (data === '[DONE]') {
+                // 保存报告到数据库
+                try {
+                  await pool.query(
+                    `INSERT INTO weekly_reports (keyword, start_date, end_date, report_content, model_used, news_count)
+                     VALUES (?, ?, ?, ?, ?, ?)`,
+                    [keyword, startDate, endDate, fullReport, 'deepseek-ai/DeepSeek-R1', selectedNews.length]
+                  );
+                  console.log('✅ SiliconFlow周报已保存到数据库, keyword:', keyword, 'dates:', startDate, '-', endDate);
+                } catch (saveError) {
+                  console.error('❌ 保存SiliconFlow周报到数据库失败:', saveError);
+                }
+
                 res.write(`data: ${JSON.stringify({ type: 'done', report: fullReport })}\n\n`);
                 res.end();
                 return;
@@ -1366,7 +1394,20 @@ app.post('/api/generate-siliconflow-report', async (req, res) => {
         return;
       }
       const report = data.choices?.[0]?.message?.content || '生成周报失败';
-      res.json({ 
+
+      // 保存报告到数据库
+      try {
+        await pool.query(
+          `INSERT INTO weekly_reports (keyword, start_date, end_date, report_content, model_used, news_count)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [keyword, startDate, endDate, report, 'deepseek-ai/DeepSeek-R1', selectedNews.length]
+        );
+        console.log('✅ SiliconFlow周报已保存到数据库 (非流式), keyword:', keyword, 'dates:', startDate, '-', endDate);
+      } catch (saveError) {
+        console.error('❌ 保存SiliconFlow周报到数据库失败 (非流式):', saveError);
+      }
+
+      res.json({
         report,
         debug: {
           systemPrompt,
@@ -1497,10 +1538,6 @@ app.post('/api/generate-kimi-report', async (req, res) => {
       
       res.write(`data: ${JSON.stringify({ type: 'debug', data: debugInfo })}\n\n`);
       res.write(`data: ${JSON.stringify({ type: 'status', message: '🔗 正在连接KIMI K2...' })}\n\n`);
-      
-      // 调试：检查API密钥
-      console.log('KIMI API Key:', process.env.KIMI_API_KEY ? `${process.env.KIMI_API_KEY.substring(0, 10)}...` : 'NOT FOUND');
-      
       // 调用KIMI API with stream
       const response = await fetch('https://api.moonshot.cn/v1/chat/completions', {
         method: 'POST',
@@ -1534,11 +1571,11 @@ app.post('/api/generate-kimi-report', async (req, res) => {
       }
       
       res.write(`data: ${JSON.stringify({ type: 'status', message: '🤖 KIMI K2 开始生成...' })}\n\n`);
-      
+
       let fullReport = '';
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
-      
+
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
@@ -1548,6 +1585,18 @@ app.post('/api/generate-kimi-report', async (req, res) => {
           if (line.startsWith('data: ')) {
             const data = line.slice(6);
             if (data === '[DONE]') {
+              // 保存报告到数据库
+              try {
+                await pool.query(
+                  `INSERT INTO weekly_reports (keyword, start_date, end_date, report_content, model_used, news_count)
+                   VALUES (?, ?, ?, ?, ?, ?)`,
+                  [keyword, startDate, endDate, fullReport, 'kimi-k2-0905-preview', selectedNews.length]
+                );
+                console.log('✅ KIMI周报已保存到数据库, keyword:', keyword, 'dates:', startDate, '-', endDate);
+              } catch (saveError) {
+                console.error('❌ 保存KIMI周报到数据库失败:', saveError);
+              }
+
               res.write(`data: ${JSON.stringify({ type: 'done', report: fullReport })}\n\n`);
               res.end();
               return;
@@ -1571,8 +1620,6 @@ app.post('/api/generate-kimi-report', async (req, res) => {
       }
     } else {
       // 非流式模式
-      console.log('KIMI API Key (non-stream):', process.env.KIMI_API_KEY ? `${process.env.KIMI_API_KEY.substring(0, 10)}...` : 'NOT FOUND');
-      
       const response = await fetch('https://api.moonshot.cn/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -1600,10 +1647,23 @@ app.post('/api/generate-kimi-report', async (req, res) => {
         });
         throw new Error(`KIMI API error: ${response.status} ${response.statusText} - ${text}`);
       }
-      
+
       const data = await response.json();
       const report = data.choices?.[0]?.message?.content || '生成周报失败';
-      res.json({ 
+
+      // 保存报告到数据库
+      try {
+        await pool.query(
+          `INSERT INTO weekly_reports (keyword, start_date, end_date, report_content, model_used, news_count)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [keyword, startDate, endDate, report, 'kimi-k2-0905-preview', selectedNews.length]
+        );
+        console.log('✅ KIMI周报已保存到数据库 (非流式), keyword:', keyword, 'dates:', startDate, '-', endDate);
+      } catch (saveError) {
+        console.error('❌ 保存KIMI周报到数据库失败 (非流式):', saveError);
+      }
+
+      res.json({
         report,
         debug: {
           systemPrompt,
@@ -2340,6 +2400,147 @@ app.get('/api/word-count-stats', async (req, res) => {
   } catch (error) {
     console.error('字数统计API错误:', error);
     res.status(500).json({ error: '获取字数统计失败', details: error.message });
+  }
+});
+
+// ============ 历史周报相关 API ============
+
+// 获取历史周报列表（支持分页和筛选）
+app.get('/api/reports/history', async (req, res) => {
+  try {
+    const {
+      keyword,
+      startDate,
+      endDate,
+      model,
+      page = 1,
+      limit = 20,
+      sortBy = 'created_at',
+      sortOrder = 'DESC'
+    } = req.query;
+
+    // 构建 WHERE 条件
+    const conditions = [];
+    const params = [];
+
+    if (keyword) {
+      conditions.push('keyword LIKE ?');
+      params.push(`%${keyword}%`);
+    }
+
+    if (startDate) {
+      conditions.push('start_date >= ?');
+      params.push(startDate);
+    }
+
+    if (endDate) {
+      conditions.push('end_date <= ?');
+      params.push(endDate);
+    }
+
+    if (model) {
+      conditions.push('model_used = ?');
+      params.push(model);
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    // 计算总数
+    const countQuery = `
+      SELECT COUNT(*) as total
+      FROM weekly_reports
+      ${whereClause}
+    `;
+    const [countResult] = await pool.query(countQuery, params);
+    const total = countResult[0].total;
+
+    // 查询数据
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+    const dataQuery = `
+      SELECT
+        id,
+        keyword,
+        start_date,
+        end_date,
+        LEFT(report_content, 200) as report_preview,
+        model_used,
+        news_count,
+        created_at
+      FROM weekly_reports
+      ${whereClause}
+      ORDER BY ${sortBy} ${sortOrder}
+      LIMIT ? OFFSET ?
+    `;
+
+    const [rows] = await pool.query(dataQuery, [...params, parseInt(limit), offset]);
+
+    res.json({
+      data: rows,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        totalPages: Math.ceil(total / parseInt(limit))
+      }
+    });
+  } catch (error) {
+    console.error('获取历史周报列表失败:', error);
+    res.status(500).json({ error: '获取历史周报列表失败', details: error.message });
+  }
+});
+
+// 获取单个周报详情
+app.get('/api/reports/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const [rows] = await pool.query(
+      'SELECT * FROM weekly_reports WHERE id = ?',
+      [id]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ error: '报告不存在' });
+    }
+
+    res.json(rows[0]);
+  } catch (error) {
+    console.error('获取周报详情失败:', error);
+    res.status(500).json({ error: '获取周报详情失败', details: error.message });
+  }
+});
+
+// 删除周报
+app.delete('/api/reports/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const [result] = await pool.query(
+      'DELETE FROM weekly_reports WHERE id = ?',
+      [id]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: '报告不存在' });
+    }
+
+    res.json({ success: true, message: '删除成功' });
+  } catch (error) {
+    console.error('删除周报失败:', error);
+    res.status(500).json({ error: '删除周报失败', details: error.message });
+  }
+});
+
+// 获取所有关键词（用于筛选）
+app.get('/api/reports/keywords/list', async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      'SELECT DISTINCT keyword FROM weekly_reports ORDER BY keyword'
+    );
+    res.json(rows.map(r => r.keyword));
+  } catch (error) {
+    console.error('获取关键词列表失败:', error);
+    res.status(500).json({ error: '获取关键词列表失败', details: error.message });
   }
 });
 
