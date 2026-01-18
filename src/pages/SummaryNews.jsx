@@ -194,7 +194,7 @@ export default function SummaryNewsPage() {
           margin: 0,
           letterSpacing: 0.5,
           lineHeight: 1.2,
-        }}>每日新闻简报</h1>
+        }}>每日新闻</h1>
         <div style={{
           height: 4,
           background: 'linear-gradient(90deg, #3d8bfd66 0%, #5f6cffcc 100%)',
@@ -206,18 +206,12 @@ export default function SummaryNewsPage() {
         }}></div>
       </header>
       <FilterBar filters={filters} onChange={setFilters} availableRounds={availableRounds} />
-      <section style={{marginBottom: 24, width: '100%', padding: 0}}>
-        {loading ? <Loading /> : error ? <Error /> : filteredSummaries.length ? (
-          filteredSummaries.map(item => (
-            <SummaryCard key={item.id} data={item} />
-          ))
-        ) : <Empty />}
-      </section>
+      
       <section style={{
         width: '100%', 
         padding: '0 32px',
         maxWidth: '1400px',
-        margin: '0 auto',
+        margin: '0 auto 24px auto',
         position: 'relative'
       }}>
         <div style={{
@@ -304,6 +298,14 @@ export default function SummaryNewsPage() {
           </>
         ) : <Empty />}
         </div>
+      </section>
+
+      <section style={{marginBottom: 24, width: '100%', padding: 0}}>
+        {loading ? <Loading /> : error ? <Error /> : filteredSummaries.length ? (
+          filteredSummaries.map(item => (
+            <SummaryCard key={item.id} data={item} />
+          ))
+        ) : <Empty />}
       </section>
     </div>
   );

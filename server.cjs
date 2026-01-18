@@ -2293,7 +2293,7 @@ app.post('/api/google-search', async (req, res) => {
 // 字数统计API
 app.get('/api/word-count-stats', async (req, res) => {
   try {
-    const keywords = ['养老', '公积金', '政府基金', '江苏省国资委', '数字政务', '高考', '中国烟草', '潜在招标客户'];
+    const keywords = ['养老', '公积金', '政府基金', '江苏省国资委', '数字政务', '高考', '中国烟草', '潜在招标客户', '江苏地区银行'];
     const { days = 90 } = req.query; // 默认显示最近90天
     
     // 计算日期范围
