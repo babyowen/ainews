@@ -1,8 +1,18 @@
 import { Link, useLocation } from 'react-router-dom';
+import { useState, useEffect } from 'react';
 import './Layout.css';
 
 export default function Layout({ children }) {
   const { pathname } = useLocation();
+  const [isPolicyOpen, setIsPolicyOpen] = useState(false);
+
+  // 如果当前在政策相关页面，自动展开菜单
+  useEffect(() => {
+    if (pathname.startsWith('/policy')) {
+      setIsPolicyOpen(true);
+    }
+  }, [pathname]);
+
   return (
     <div className="layout-root">
       <aside className="sidebar">
@@ -32,6 +42,20 @@ export default function Layout({ children }) {
           {/* <Link className={pathname === "/analysis" ? "active" : ""} to="/analysis">来源分析</Link> */}
           {/* <Link className={pathname === "/quality" ? "active" : ""} to="/quality">质量分析</Link> */}
           <Link className={pathname === "/history" ? "active" : ""} to="/history">历史周报</Link>
+
+          <div className="menu-group">
+            <div 
+              className={`menu-trigger ${pathname.startsWith('/policy') ? 'active-group' : ''}`}
+              onClick={() => setIsPolicyOpen(!isPolicyOpen)}
+            >
+              扬公政策对比
+              <span className={`arrow ${isPolicyOpen ? 'open' : ''}`}>▼</span>
+            </div>
+            <div className={`submenu ${isPolicyOpen ? 'open' : ''}`}>
+              <Link className={pathname === "/policy/current" ? "active" : ""} to="/policy/current">现行政策编辑</Link>
+              <Link className={pathname === "/policy/comparison" ? "active" : ""} to="/policy/comparison">周报政策对比</Link>
+            </div>
+          </div>
         </nav>
       </aside>
       <main className="main-content">{children}</main>

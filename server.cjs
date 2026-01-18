@@ -1734,6 +1734,34 @@ app.get('/api/config/prompts', async (req, res) => {
   }
 });
 
+// 保存政策对比Prompt
+app.post('/api/config/policy-prompt', async (req, res) => {
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const { prompt } = req.body;
+    
+    const promptsPath = path.join(__dirname, 'config/prompts.md');
+    let content = fs.readFileSync(promptsPath, 'utf-8');
+    
+    // 检查是否存在Policy Comparison Prompt部分
+    if (content.includes('## Policy Comparison Prompt')) {
+      content = content.replace(
+        /## Policy Comparison Prompt\s*\n\s*```\s*\n[\s\S]*?\n\s*```/,
+        `## Policy Comparison Prompt\n\n\`\`\`\n${prompt}\n\`\`\``
+      );
+    } else {
+      content += `\n\n## Policy Comparison Prompt\n\n\`\`\`\n${prompt}\n\`\`\``;
+    }
+    
+    fs.writeFileSync(promptsPath, content, 'utf-8');
+    res.json({ success: true });
+  } catch (error) {
+    console.error('保存政策对比Prompt失败:', error);
+    res.status(500).json({ error: '保存失败' });
+  }
+});
+
 // 获取关键词prompt配置API
 app.get('/api/config/keyword-prompts', async (req, res) => {
   try {
@@ -1936,6 +1964,126 @@ app.delete('/api/config/keyword-prompts/:keyword/:promptId', async (req, res) =>
   } catch (error) {
     console.error('删除关键词prompt配置失败:', error);
     res.status(500).json({ error: '删除关键词prompt配置失败' });
+  }
+});
+
+// ============ 扬州公积金政策管理 API ============
+
+// 获取所有政策版本列表
+app.get('/api/policy/versions', async (req, res) => {
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    
+    const policiesDir = path.join(__dirname, 'config/policies');
+    
+    // 确保目录存在
+    if (!fs.existsSync(policiesDir)) {
+      fs.mkdirSync(policiesDir, { recursive: true });
+      return res.json([]);
+    }
+    
+    const files = fs.readdirSync(policiesDir);
+    
+    // 过滤JSON文件并获取详细信息
+    const versions = files
+      .filter(file => file.endsWith('.json'))
+      .map(file => {
+        const filePath = path.join(policiesDir, file);
+        const stats = fs.statSync(filePath);
+        return {
+          filename: file,
+          createdAt: stats.birthtime,
+          updatedAt: stats.mtime,
+          size: stats.size
+        };
+      })
+      // 按修改时间倒序排序（最新的在前）
+      .sort((a, b) => b.updatedAt - a.updatedAt);
+      
+    res.json(versions);
+  } catch (error) {
+    console.error('获取政策版本列表失败:', error);
+    res.status(500).json({ error: '获取政策版本列表失败', details: error.message });
+  }
+});
+
+// 获取最新政策内容
+app.get('/api/policy/latest', async (req, res) => {
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    
+    const policiesDir = path.join(__dirname, 'config/policies');
+    
+    if (!fs.existsSync(policiesDir)) {
+      return res.json({ content: null, filename: null });
+    }
+    
+    const files = fs.readdirSync(policiesDir)
+      .filter(file => file.endsWith('.json'))
+      .map(file => {
+        const filePath = path.join(policiesDir, file);
+        return {
+          filename: file,
+          mtime: fs.statSync(filePath).mtime
+        };
+      })
+      .sort((a, b) => b.mtime - a.mtime);
+      
+    if (files.length === 0) {
+      return res.json({ content: null, filename: null });
+    }
+    
+    const latestFile = files[0];
+    const filePath = path.join(policiesDir, latestFile.filename);
+    const content = fs.readFileSync(filePath, 'utf-8');
+    
+    res.json({
+      filename: latestFile.filename,
+      content: JSON.parse(content),
+      lastUpdated: latestFile.mtime
+    });
+  } catch (error) {
+    console.error('获取最新政策失败:', error);
+    res.status(500).json({ error: '获取最新政策失败', details: error.message });
+  }
+});
+
+// 保存新版政策（自动创建新版本）
+app.post('/api/policy/save', async (req, res) => {
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const { content } = req.body;
+    
+    if (!content) {
+      return res.status(400).json({ error: '缺少政策内容' });
+    }
+    
+    const policiesDir = path.join(__dirname, 'config/policies');
+    if (!fs.existsSync(policiesDir)) {
+      fs.mkdirSync(policiesDir, { recursive: true });
+    }
+    
+    // 生成带时间戳的文件名
+    const now = new Date();
+    const timestamp = now.toISOString().replace(/[-:T]/g, '').split('.')[0]; // YYYYMMDDHHmmss
+    const filename = `policy_${timestamp}.json`;
+    const filePath = path.join(policiesDir, filename);
+    
+    // 写入文件
+    fs.writeFileSync(filePath, JSON.stringify(content, null, 2), 'utf-8');
+    
+    res.json({
+      success: true,
+      message: '新版本政策已保存',
+      filename: filename,
+      timestamp: now
+    });
+  } catch (error) {
+    console.error('保存政策失败:', error);
+    res.status(500).json({ error: '保存政策失败', details: error.message });
   }
 });
 

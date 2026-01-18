@@ -509,10 +509,25 @@
   font-size: 13px;
 }
 
-.keyword-content {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
+.policy-prompt-editor {
+  width: 100%;
+  padding: 15px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
+  font-size: 0.95rem;
+  line-height: 1.6;
+  color: #2d3748;
+  resize: vertical;
+  transition: all 0.2s;
+}
+
+.policy-prompt-editor:focus {
+  outline: none;
+  border-color: #3182ce;
+  box-shadow: 0 0 0 3px rgba(49, 130, 206, 0.1);
+  background: #fff;
 }
 
 .prompt-version-list {
