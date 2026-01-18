@@ -24,13 +24,14 @@ export default function Layout({ children }) {
           Ai News
         </h1>
         <nav>
-          <Link className={pathname === "/summary" ? "active" : ""} to="/summary">每日总结</Link>
+          <Link className={pathname === "/summary" ? "active" : ""} to="/summary">每日新闻</Link>
           <Link className={pathname === "/report" ? "active" : ""} to="/report">周报生成</Link>
           <Link className={pathname === "/score-edit" ? "active" : ""} to="/score-edit">评分修改</Link>
           <Link className={pathname === "/word-count" ? "active" : ""} to="/word-count">字数统计</Link>
           <Link className={pathname === "/config" ? "active" : ""} to="/config">周报参数</Link>
-          <Link className={pathname === "/analysis" ? "active" : ""} to="/analysis">来源分析</Link>
-          <Link className={pathname === "/quality" ? "active" : ""} to="/quality">质量分析</Link>
+          {/* <Link className={pathname === "/analysis" ? "active" : ""} to="/analysis">来源分析</Link> */}
+          {/* <Link className={pathname === "/quality" ? "active" : ""} to="/quality">质量分析</Link> */}
+          <Link className={pathname === "/history" ? "active" : ""} to="/history">历史周报</Link>
         </nav>
       </aside>
       <main className="main-content">{children}</main>
