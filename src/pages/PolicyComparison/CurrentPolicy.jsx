@@ -279,10 +279,13 @@ const CategoryItem = ({ category, onChange, onDelete }) => {
 const DomainItem = ({ domain, onChange, onDelete }) => {
   const [isExpanded, setIsExpanded] = useState(false); // 默认折叠
   const [isEditingTitle, setIsEditingTitle] = useState(false);
-  const [title, setTitle] = useState(domain['政策领域']);
+  
+  // 兼容不同的字段名: '领域名称' (新) vs '政策领域' (旧)
+  const titleKey = domain['领域名称'] !== undefined ? '领域名称' : '政策领域';
+  const [title, setTitle] = useState(domain[titleKey]);
 
   const handleTitleSave = () => {
-    onChange({ ...domain, '政策领域': title });
+    onChange({ ...domain, [titleKey]: title });
     setIsEditingTitle(false);
   };
 
@@ -324,10 +327,10 @@ const DomainItem = ({ domain, onChange, onDelete }) => {
                 className="domain-input"
               />
               <IconBtn icon={Save} className="text-green-600" onClick={handleTitleSave} />
-              <IconBtn icon={X} className="text-gray-500" onClick={() => { setTitle(domain['政策领域']); setIsEditingTitle(false); }} />
+              <IconBtn icon={X} className="text-gray-500" onClick={() => { setTitle(domain[titleKey]); setIsEditingTitle(false); }} />
             </div>
           ) : (
-            <span className="domain-title">{domain['政策领域']}</span>
+            <span className="domain-title">{domain[titleKey]}</span>
           )}
           <span className="badge-count">{(domain['政策类别'] || []).length} 项</span>
         </div>
@@ -362,25 +365,32 @@ const DomainItem = ({ domain, onChange, onDelete }) => {
 
 // 1. 主容器组件
 const PolicyTreeEditor = ({ data, onChange }) => {
-  const domains = data['政策知识库'] || [];
+  // 兼容根节点字段名: '政策领域' (新) vs '政策知识库' (旧)
+  const listKey = data['政策领域'] ? '政策领域' : '政策知识库';
+  const domains = data[listKey] || [];
 
   const handleDomainChange = (idx, newDomain) => {
     const newDomains = [...domains];
     newDomains[idx] = newDomain;
-    onChange({ ...data, '政策知识库': newDomains });
+    onChange({ ...data, [listKey]: newDomains });
   };
 
   const handleDomainDelete = (idx) => {
     if (window.confirm('确定删除该领域及其所有下属政策吗？此操作不可恢复。')) {
       const newDomains = [...domains];
       newDomains.splice(idx, 1);
-      onChange({ ...data, '政策知识库': newDomains });
+      onChange({ ...data, [listKey]: newDomains });
     }
   };
 
   const addDomain = () => {
-    const newDomains = [...domains, { '政策领域': '新建政策领域', '政策类别': [] }];
-    onChange({ ...data, '政策知识库': newDomains });
+    // 根据当前使用的键名决定新对象的结构
+    const newDomain = listKey === '政策领域' 
+      ? { '领域名称': '新建政策领域', '政策类别': [] }
+      : { '政策领域': '新建政策领域', '政策类别': [] };
+      
+    const newDomains = [...domains, newDomain];
+    onChange({ ...data, [listKey]: newDomains });
   };
 
   return (
@@ -411,6 +421,7 @@ export default function CurrentPolicy() {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [viewMode, setViewMode] = useState('ui'); // 'ui' or 'json'
+  const [jsonText, setJsonText] = useState('');
 
   useEffect(() => {
     fetchLatestPolicy();
@@ -486,7 +497,10 @@ export default function CurrentPolicy() {
               </button>
               <button 
                 className={viewMode === 'json' ? 'active' : ''}
-                onClick={() => setViewMode('json')}
+                onClick={() => {
+                  setJsonText(JSON.stringify(data, null, 2));
+                  setViewMode('json');
+                }}
               >
                 源码模式
               </button>
@@ -510,8 +524,9 @@ export default function CurrentPolicy() {
           ) : (
             <textarea
               className="json-source-editor"
-              value={JSON.stringify(data, null, 2)}
+              value={jsonText}
               onChange={(e) => {
+                setJsonText(e.target.value);
                 try {
                   setData(JSON.parse(e.target.value));
                 } catch (err) {

@@ -109,7 +109,7 @@ const ReportConfig = () => {
 
   const configSections = [
     { key: 'keyword', label: '关键词 Prompt', icon: '🏷️' },
-    { key: 'policy', label: '政策对比 Prompt', icon: '⚖️' }
+    { key: 'policy', label: '政策相关 Prompt', icon: '⚖️' }
   ];
 
   if (loading) {
@@ -376,35 +376,37 @@ const ReportConfig = () => {
           </div>
         )}
 
-        {/* Policy Comparison Prompt */}
+        {/* Policy Prompts */}
         {activeSection === 'policy' && (
           <div className="config-section">
             <div className="section-header">
-              <h2>⚖️ 政策对比 Prompt</h2>
-              <div className="section-stats">
-                <span className="stat-chip">
-                  字数: {configData?.policyPrompt ? configData.policyPrompt.length : 0}
-                </span>
-                <span className="stat-chip">
-                  Token: ~{configData?.policyPrompt ? estimateTokens(configData.policyPrompt) : 0}
-                </span>
-              </div>
+              <h2>⚖️ 政策相关 Prompt 配置</h2>
             </div>
-            <div className="prompt-card">
+            
+            {/* 1. 政策抽取提示词 */}
+            <div className="prompt-card" style={{marginBottom: '30px'}}>
               <div className="prompt-header">
-                <span className="prompt-type">政策对比指令模板</span>
-                <span className="prompt-usage">用于指导AI如何进行新旧政策对比分析</span>
+                <span className="prompt-type">周报抽取提示词 (Step 1)</span>
+                <span className="prompt-usage">用于从选定的历史周报中抽取政策信息的 JSON 结构</span>
+                <div className="section-stats" style={{marginLeft: 'auto'}}>
+                    <span className="stat-chip">
+                    字数: {configData?.policyExtractionPrompt ? configData.policyExtractionPrompt.length : 0}
+                    </span>
+                    <span className="stat-chip">
+                    Token: ~{configData?.policyExtractionPrompt ? estimateTokens(configData.policyExtractionPrompt) : 0}
+                    </span>
+                </div>
               </div>
               <div className="prompt-content">
                 <textarea
                   className="policy-prompt-editor"
-                  value={configData?.policyPrompt || ''}
-                  onChange={(e) => setConfigData({ ...configData, policyPrompt: e.target.value })}
-                  rows={15}
-                  placeholder="请输入政策对比提示词..."
+                  value={configData?.policyExtractionPrompt || ''}
+                  onChange={(e) => setConfigData({ ...configData, policyExtractionPrompt: e.target.value })}
+                  rows={10}
+                  placeholder="请输入周报抽取提示词..."
                 />
               </div>
-              <div className="prompt-actions" style={{ marginTop: '20px', display: 'flex', justifyContent: 'flex-end' }}>
+              <div className="prompt-actions" style={{ marginTop: '10px', display: 'flex', justifyContent: 'flex-end' }}>
                  <button 
                   className="refresh-btn"
                   disabled={saving}
@@ -414,7 +416,55 @@ const ReportConfig = () => {
                       await fetch('/api/config/policy-prompt', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ prompt: configData.policyPrompt })
+                        body: JSON.stringify({ prompt: configData.policyExtractionPrompt, type: 'extraction' })
+                      });
+                      alert('周报抽取提示词已保存');
+                    } catch (e) {
+                      alert('保存失败: ' + e.message);
+                    } finally {
+                      setSaving(false);
+                    }
+                  }}
+                >
+                  {saving ? '保存中...' : '保存配置'}
+                </button>
+              </div>
+            </div>
+
+            {/* 2. 政策对比提示词 */}
+            <div className="prompt-card">
+              <div className="prompt-header">
+                <span className="prompt-type">政策对比提示词 (Step 2)</span>
+                <span className="prompt-usage">用于指导AI如何进行新旧政策对比分析</span>
+                <div className="section-stats" style={{marginLeft: 'auto'}}>
+                    <span className="stat-chip">
+                    字数: {configData?.policyComparisonPrompt ? configData.policyComparisonPrompt.length : 0}
+                    </span>
+                    <span className="stat-chip">
+                    Token: ~{configData?.policyComparisonPrompt ? estimateTokens(configData.policyComparisonPrompt) : 0}
+                    </span>
+                </div>
+              </div>
+              <div className="prompt-content">
+                <textarea
+                  className="policy-prompt-editor"
+                  value={configData?.policyComparisonPrompt || ''}
+                  onChange={(e) => setConfigData({ ...configData, policyComparisonPrompt: e.target.value })}
+                  rows={15}
+                  placeholder="请输入政策对比提示词..."
+                />
+              </div>
+              <div className="prompt-actions" style={{ marginTop: '10px', display: 'flex', justifyContent: 'flex-end' }}>
+                 <button 
+                  className="refresh-btn"
+                  disabled={saving}
+                  onClick={async () => {
+                    setSaving(true);
+                    try {
+                      await fetch('/api/config/policy-prompt', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ prompt: configData.policyComparisonPrompt, type: 'comparison' })
                       });
                       alert('政策对比提示词已保存');
                     } catch (e) {
