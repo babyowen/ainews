@@ -2178,6 +2178,51 @@ app.post('/api/policy/extract', async (req, res) => {
       .replace('{report}', contentToProcess)
       .replace('{template}', currentPolicyContent);
     
+    const sanitizeJsonLikeOutput = (s) => {
+      const input = String(s ?? '');
+      let out = '';
+      let inString = false;
+      let escaped = false;
+      for (let i = 0; i < input.length; i++) {
+        const ch = input[i];
+        if (inString) {
+          if (escaped) {
+            out += ch;
+            escaped = false;
+            continue;
+          }
+          if (ch === '\\') {
+            out += ch;
+            escaped = true;
+            continue;
+          }
+          if (ch === '"') {
+            out += ch;
+            inString = false;
+            continue;
+          }
+          if (ch === '\n') {
+            out += '\\n';
+            continue;
+          }
+          if (ch === '\r') {
+            continue;
+          }
+          out += ch;
+          continue;
+        }
+
+        if (ch === '"') {
+          out += ch;
+          inString = true;
+          escaped = false;
+          continue;
+        }
+        out += ch;
+      }
+      return out;
+    };
+
     // 调用 DeepSeek R1
     const response = await fetch('https://api.deepseek.com/chat/completions', {
       method: 'POST',
@@ -2197,14 +2242,80 @@ app.post('/api/policy/extract', async (req, res) => {
     });
     
     if (!response.ok) {
-      throw new Error(`DeepSeek API error: ${response.status} ${response.statusText}`);
+      let errorText = '';
+      try {
+        errorText = await response.text();
+      } catch (e) {
+        errorText = '';
+      }
+      const snippet = (errorText || '').slice(0, 800);
+      throw new Error(`DeepSeek API error: ${response.status} ${response.statusText}${snippet ? ` | ${snippet}` : ''}`);
     }
     
     const data = await response.json();
     const result = data.choices?.[0]?.message?.content || '{}';
     
+    const tryParse = (raw) => {
+      const cleaned = sanitizeJsonLikeOutput(raw);
+      return JSON.parse(cleaned);
+    };
+
+    let parsed;
+    try {
+      parsed = tryParse(result);
+    } catch (e) {
+      const snippet = String(result || '').slice(0, 1200);
+      const eMsg = String(e?.message || e || '');
+
+      const repairSystem = '你是一个严格的JSON修复器。你只输出可被JSON.parse解析的单一JSON对象，不要任何解释或markdown。';
+      const repairUser = [
+        '请将下面文本修复为合法JSON对象：',
+        '要求：',
+        '1) 只输出一个JSON对象',
+        '2) 不要多余文字',
+        '3) 需要时将字符串中的换行转义为\\\\n，双引号转义为\\\"',
+        '',
+        '待修复文本：',
+        result
+      ].join('\n');
+
+      const repairResp = await fetch('https://api.deepseek.com/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}`
+        },
+        body: JSON.stringify({
+          model: 'deepseek-chat',
+          messages: [
+            { role: 'system', content: repairSystem },
+            { role: 'user', content: repairUser }
+          ],
+          temperature: 0,
+          response_format: { type: 'json_object' }
+        })
+      });
+
+      if (repairResp.ok) {
+        try {
+          const repairData = await repairResp.json();
+          const repaired = repairData.choices?.[0]?.message?.content || '{}';
+          parsed = tryParse(repaired);
+        } catch (repairErr) {
+          const repairMsg = String(repairErr?.message || repairErr || '');
+          throw new Error(`DeepSeek returned non-JSON content | ${eMsg} | repair_failed: ${repairMsg} | ${snippet}`);
+        }
+      } else {
+        let repairText = '';
+        try {
+          repairText = await repairResp.text();
+        } catch {}
+        throw new Error(`DeepSeek returned non-JSON content | ${eMsg} | repair_http_${repairResp.status}: ${(repairText || '').slice(0, 800)} | ${snippet}`);
+      }
+    }
+    
     res.json({ 
-      result: JSON.parse(result),
+      result: parsed,
       debug: {
         systemPrompt,
         userPrompt: finalUserPrompt
@@ -2213,7 +2324,8 @@ app.post('/api/policy/extract', async (req, res) => {
     
   } catch (error) {
     console.error('Policy extraction failed:', error);
-    res.status(500).json({ error: 'Extraction failed', details: error.message });
+    const msg = String(error?.message || error || '');
+    res.status(500).json({ error: 'Extraction failed', details: msg.slice(0, 2000) });
   }
 });
 

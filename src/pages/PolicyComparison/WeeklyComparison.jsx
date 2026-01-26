@@ -287,6 +287,9 @@ const WeeklyComparison = () => {
   const [selectedNews, setSelectedNews] = useState([]);
   const [newsDigest, setNewsDigest] = useState('');
   const [newsLoading, setNewsLoading] = useState(false);
+  const [extractionBatches, setExtractionBatches] = useState([]);
+  const [extractionBatchTotal, setExtractionBatchTotal] = useState(0);
+  const [extractionBatchCurrent, setExtractionBatchCurrent] = useState(0);
   const [extractedPolicy, setExtractedPolicy] = useState(null);
   const [comparisonResult, setComparisonResult] = useState('');
   const [debugInfo, setDebugInfo] = useState({ extraction: null, comparison: null });
@@ -356,7 +359,7 @@ const WeeklyComparison = () => {
     }
   };
 
-  const buildNewsDigest = (startDate, endDate, newsList) => {
+  const buildNewsDigest = (startDate, endDate, newsList, options = {}) => {
     const start = toLocalYMD(startDate);
     const end = toLocalYMD(endDate);
     const sorted = [...(newsList || [])].sort((a, b) => {
@@ -368,17 +371,28 @@ const WeeklyComparison = () => {
       return db - da;
     });
 
-    const maxItems = 30;
-    const picked = sorted.slice(0, maxItems);
+    const {
+      chunkIndex,
+      totalChunks,
+      totalSelected,
+      batchId,
+      maxSummaryChars = 500,
+      includeLink = true
+    } = options || {};
+
+    const picked = sorted;
     const head = [
       '【当周全部新闻（用于政策抽取）】',
       `关键词：公积金`,
       `时间范围：${start} ~ ${end}`,
       `筛选规则：评分 >= 4`,
       `内容来源：数据库 short_summary（缺失则回退 content 并截断）`,
-      `新闻条数：${sorted.length}（本次输入取前 ${picked.length} 条）`,
+      (batchId ? `批次：${batchId}` : null),
+      (chunkIndex && totalChunks) ? `分组：第 ${chunkIndex}/${totalChunks} 组` : null,
+      (typeof totalSelected === 'number') ? `本次选中新闻总数：${totalSelected} 条` : null,
+      `本组新闻条数：${picked.length} 条`,
       ''
-    ].join('\n');
+    ].filter(Boolean).join('\n');
 
     const body = picked.map((n, idx) => {
       const title = n?.title || '(无标题)';
@@ -386,19 +400,77 @@ const WeeklyComparison = () => {
       const date = n?.fetchdate ? String(n.fetchdate).slice(0, 10) : '';
       const source = n?.source || '';
       const link = n?.link || '';
-      const text = (n?.short_summary || n?.content || '').slice(0, 600);
+      const text = (n?.short_summary || n?.content || '').slice(0, maxSummaryChars);
       return [
         `【新闻${idx + 1}】${title}`,
         score !== '' ? `【评分】${score}` : null,
         date ? `【日期】${date}` : null,
         source ? `【来源】${source}` : null,
-        link ? `【链接】${link}` : null,
+        (includeLink && link) ? `【链接】${link}` : null,
         `【短总结】${text}`,
         '---'
       ].filter(Boolean).join('\n');
     }).join('\n');
 
     return `${head}${body}`.trim();
+  };
+
+  const countPolicyDetails = (policy) => {
+    const domains = policy?.政策领域;
+    if (!Array.isArray(domains)) return 0;
+    return domains.reduce((acc, d) => {
+      const cats = d?.政策类别;
+      if (!Array.isArray(cats)) return acc;
+      return acc + cats.reduce((a, c) => a + (Array.isArray(c?.政策明细) ? c.政策明细.length : 0), 0);
+    }, 0);
+  };
+
+  const mergeExtractedPolicy = (basePolicy, addPolicy) => {
+    if (!basePolicy) return addPolicy;
+    if (!addPolicy) return basePolicy;
+    if (!Array.isArray(basePolicy.政策领域) || !Array.isArray(addPolicy.政策领域)) return basePolicy;
+
+    const next = JSON.parse(JSON.stringify(basePolicy));
+    const domainMap = new Map(next.政策领域.map((d) => [d?.领域名称, d]));
+
+    for (const addDomain of addPolicy.政策领域) {
+      const name = addDomain?.领域名称;
+      if (!name) continue;
+      if (!domainMap.has(name)) {
+        next.政策领域.push(addDomain);
+        domainMap.set(name, addDomain);
+        continue;
+      }
+
+      const baseDomain = domainMap.get(name);
+      if (!Array.isArray(baseDomain.政策类别) || !Array.isArray(addDomain.政策类别)) continue;
+      const catMap = new Map(baseDomain.政策类别.map((c) => [c?.类别名称, c]));
+
+      for (const addCat of addDomain.政策类别) {
+        const catName = addCat?.类别名称;
+        if (!catName) continue;
+        if (!catMap.has(catName)) {
+          baseDomain.政策类别.push(addCat);
+          catMap.set(catName, addCat);
+          continue;
+        }
+
+        const baseCat = catMap.get(catName);
+        if (!Array.isArray(baseCat.政策明细) || !Array.isArray(addCat.政策明细)) continue;
+
+        const seen = new Set(
+          baseCat.政策明细.map((it) => `${it?.明细项 ?? ''}||${it?.内容 ?? ''}||${it?.依据文件 ?? ''}`)
+        );
+        for (const it of addCat.政策明细) {
+          const key = `${it?.明细项 ?? ''}||${it?.内容 ?? ''}||${it?.依据文件 ?? ''}`;
+          if (seen.has(key)) continue;
+          baseCat.政策明细.push(it);
+          seen.add(key);
+        }
+      }
+    }
+
+    return next;
   };
 
   const handleExtract = async () => {
@@ -412,17 +484,54 @@ const WeeklyComparison = () => {
 
     try {
       const useNewsMode = sourceMode === 'news';
-      const digestText = useNewsMode ? buildNewsDigest(selectedReport.start_date, selectedReport.end_date, selectedNews) : '';
+      const chunkSize = 30;
+      const chunks = useNewsMode
+        ? Array.from({ length: Math.ceil(selectedNews.length / chunkSize) }, (_, i) => selectedNews.slice(i * chunkSize, (i + 1) * chunkSize))
+        : [];
+      if (useNewsMode) {
+        const initial = chunks.map((chunk, idx) => ({
+          id: String(idx + 1),
+          news: chunk,
+          newsCount: chunk.length,
+          status: 'pending',
+          extractedCount: 0,
+          addedCount: 0,
+          result: null,
+          error: '',
+          depth: 0
+        }));
+        setExtractionBatchTotal(initial.length);
+        setExtractionBatchCurrent(initial.length > 0 ? 1 : 0);
+        setExtractionBatches(initial.map(({ id, newsCount, status, extractedCount, addedCount, result, error, depth }) => ({
+          id, newsCount, status, extractedCount, addedCount, result, error, depth
+        })));
+      } else {
+        setExtractionBatchTotal(0);
+        setExtractionBatchCurrent(0);
+        setExtractionBatches([]);
+      }
+
+      const digestText = useNewsMode
+        ? (chunks.length <= 1
+          ? buildNewsDigest(selectedReport.start_date, selectedReport.end_date, selectedNews, { totalSelected: selectedNews.length, includeLink: false })
+          : chunks.map((chunk, idx) => buildNewsDigest(selectedReport.start_date, selectedReport.end_date, chunk, { chunkIndex: idx + 1, totalChunks: chunks.length, totalSelected: selectedNews.length, batchId: String(idx + 1), includeLink: false })).join('\n\n==== 分组分隔 ====\n\n'))
+        : '';
+
       if (useNewsMode) setNewsDigest(digestText);
 
       // 1. Get Preview Prompt immediately
       try {
+        const previewContent = useNewsMode
+          ? (chunks.length > 1
+            ? buildNewsDigest(selectedReport.start_date, selectedReport.end_date, chunks[0], { chunkIndex: 1, totalChunks: chunks.length, totalSelected: selectedNews.length, batchId: '1', includeLink: false })
+            : digestText)
+          : null;
         const previewRes = await fetch('/api/policy/preview-prompt', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ 
             type: 'extraction',
-            ...(useNewsMode ? { reportContent: digestText } : { reportId: selectedReport.id })
+            ...(useNewsMode ? { reportContent: previewContent } : { reportId: selectedReport.id })
           })
         });
         if (previewRes.ok) {
@@ -434,20 +543,124 @@ const WeeklyComparison = () => {
       }
 
       // 2. Start actual extraction
-      const res = await fetch('/api/policy/extract', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(useNewsMode ? { reportContent: digestText } : { reportId: selectedReport.id })
-      });
+      if (!useNewsMode || chunks.length <= 1) {
+        const res = await fetch('/api/policy/extract', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(useNewsMode ? { reportContent: digestText } : { reportId: selectedReport.id })
+        });
 
-      if (!res.ok) throw new Error('提取失败');
-      
-      const data = await res.json();
-      setExtractedPolicy(data.result);
-      if (data.debug) {
-        setDebugInfo(prev => ({ ...prev, extraction: data.debug }));
+        if (!res.ok) {
+          let details = '';
+          try {
+            const j = await res.json();
+            details = j?.details || j?.error || '';
+          } catch {}
+          throw new Error(`提取失败${details ? `：${details}` : ''}`);
+        }
+        
+        const data = await res.json();
+        setExtractedPolicy(data.result);
+        if (data.debug) {
+          setDebugInfo(prev => ({ ...prev, extraction: data.debug }));
+        }
+        if (useNewsMode && chunks.length === 1) {
+          const extractedCount = countPolicyDetails(data.result);
+          setExtractionBatches(prev => prev.map((b) => b.id === '1' ? { ...b, status: 'done', extractedCount, addedCount: extractedCount, result: data.result } : b));
+        }
+      } else {
+        let merged = null;
+        let lastDebug = null;
+
+        let queue = chunks.map((chunk, idx) => ({
+          id: String(idx + 1),
+          news: chunk,
+          depth: 0
+        }));
+
+        const updateBatch = (id, patch) => {
+          setExtractionBatches(prev => prev.map((b) => b.id === id ? { ...b, ...patch } : b));
+        };
+
+        const insertBatchesAfter = (afterId, children) => {
+          setExtractionBatches(prev => {
+            const idx = prev.findIndex(b => b.id === afterId);
+            if (idx < 0) return [...prev, ...children];
+            const next = [...prev.slice(0, idx + 1), ...children, ...prev.slice(idx + 1)];
+            setExtractionBatchTotal(next.length);
+            return next;
+          });
+        };
+
+        const callExtract = async (batch) => {
+          const maxSummaryChars = batch.depth > 0 ? 350 : 500;
+          const includeLink = batch.depth === 0 ? false : false;
+          const groupDigest = buildNewsDigest(selectedReport.start_date, selectedReport.end_date, batch.news, {
+            totalSelected: selectedNews.length,
+            batchId: batch.id,
+            maxSummaryChars,
+            includeLink
+          });
+          const res = await fetch('/api/policy/extract', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ reportContent: groupDigest })
+          });
+          if (!res.ok) {
+            let details = '';
+            try {
+              const j = await res.json();
+              details = j?.details || j?.error || '';
+            } catch {}
+            throw new Error(details || `HTTP ${res.status}`);
+          }
+          return await res.json();
+        };
+
+        for (let i = 0; i < queue.length; i++) {
+          const batch = queue[i];
+          setExtractionBatchCurrent(i + 1);
+          updateBatch(batch.id, { status: 'running', error: '' });
+
+          try {
+            const data = await callExtract(batch);
+            const before = countPolicyDetails(merged);
+            merged = mergeExtractedPolicy(merged, data.result);
+            const after = countPolicyDetails(merged);
+            const extractedCount = countPolicyDetails(data.result);
+            const addedCount = Math.max(0, after - before);
+            updateBatch(batch.id, { status: 'done', extractedCount, addedCount, result: data.result, depth: batch.depth });
+            if (data.debug) lastDebug = data.debug;
+          } catch (e) {
+            const errMsg = String(e?.message || e || '');
+            updateBatch(batch.id, { status: 'split', error: errMsg, depth: batch.depth });
+            if (batch.news.length <= 1) {
+              throw new Error(`提取失败（批次 ${batch.id}）：${errMsg}`);
+            }
+            const mid = Math.ceil(batch.news.length / 2);
+            const left = { id: `${batch.id}a`, news: batch.news.slice(0, mid), depth: batch.depth + 1 };
+            const right = { id: `${batch.id}b`, news: batch.news.slice(mid), depth: batch.depth + 1 };
+            const childrenMeta = [left, right].map((c) => ({
+              id: c.id,
+              newsCount: c.news.length,
+              status: 'pending',
+              extractedCount: 0,
+              addedCount: 0,
+              result: null,
+              error: '',
+              depth: c.depth
+            }));
+            insertBatchesAfter(batch.id, childrenMeta);
+            queue.splice(i + 1, 0, left, right);
+          }
+        }
+
+        setExtractionBatchTotal(queue.length);
+        setExtractedPolicy(merged);
+        if (lastDebug) setDebugInfo(prev => ({ ...prev, extraction: lastDebug }));
       }
     } catch (err) {
+      setExtractionBatches(prev => prev.map((b) => b.status === 'running' ? { ...b, status: 'error', error: String(err?.message || err) } : b));
       setError('政策提取失败: ' + err.message);
       setCurrentStep('select');
     } finally {
@@ -719,11 +932,33 @@ const WeeklyComparison = () => {
       {currentStep === 'extract' && (
         <div className="step-content">
           {loading ? (
-            <div className="step-content">
-              <div className="loading-container">
+            <>
+              <div className="loading-container compact">
                 <div className="loading-spinner"></div>
-                <p className="loading-text">正在分析周报内容并提取政策要点...</p>
-                <p style={{ fontSize: '0.875rem', color: '#94a3b8', marginTop: '0.5rem' }}>调用 DeepSeek R1 模型中</p>
+                <p className="loading-text">
+                  {sourceMode === 'news' ? '正在提取当周新闻政策要点...' : '正在提取周报政策要点...'}
+                </p>
+                {sourceMode === 'news' && extractionBatchTotal > 1 ? (
+                  <div className="batch-progress">
+                    <div className="batch-progress-row">
+                      <span>分批提取</span>
+                      <span>第 {extractionBatchCurrent}/{extractionBatchTotal} 批</span>
+                    </div>
+                    <div className="batch-progress-bar">
+                      <div
+                        className="batch-progress-bar-fill"
+                        style={{ width: `${Math.round((Math.max(1, extractionBatchCurrent) / extractionBatchTotal) * 100)}%` }}
+                      />
+                    </div>
+                    <div className="batch-progress-list">
+                      {extractionBatches.map((b) => (
+                        <div key={b.id} className={`batch-pill ${b.status}`}>
+                          批次{b.id}·{b.newsCount}条
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
               </div>
               
               {/* Show extraction prompt while loading */}
@@ -746,7 +981,7 @@ const WeeklyComparison = () => {
                    </div>
                 )
               )}
-            </div>
+            </>
           ) : (
             <div className="extraction-container" style={{
               background: 'white',
@@ -770,17 +1005,7 @@ const WeeklyComparison = () => {
                   }}>
                     <span>📊</span>
                     <span>
-                       共提取 {(() => {
-                         const countLeafItems = (data) => {
-                           if (!data) return 0;
-                           if (Array.isArray(data)) return data.length;
-                           if (typeof data === 'object') {
-                             return Object.values(data).reduce((acc, val) => acc + countLeafItems(val), 0);
-                           }
-                           return 0;
-                         };
-                         return `${countLeafItems(extractedPolicy)} 个关键点`;
-                       })()}
+                      共提取 {countPolicyDetails(extractedPolicy)} 条政策明细
                      </span>
                   </div>
                 )}
@@ -811,6 +1036,23 @@ const WeeklyComparison = () => {
               }}>
                 <pre>{JSON.stringify(extractedPolicy, null, 2)}</pre>
               </div>
+
+              {sourceMode === 'news' && extractionBatchTotal > 1 && extractionBatches.length > 0 ? (
+                <details className="raw-llm-output">
+                  <summary>📦 查看分批提取明细（每批结果）</summary>
+                  <div className="batch-results">
+                    {extractionBatches.map((b) => (
+                      <details key={b.id} className="batch-result-item">
+                        <summary>
+                          批次 {b.id} · 新闻 {b.newsCount} 条 · 本批提取 {b.extractedCount} 条 · 合并新增 {b.addedCount} 条
+                        </summary>
+                        {b.error ? <div className="batch-error">{b.error}</div> : null}
+                        {b.result ? <pre>{JSON.stringify(b.result, null, 2)}</pre> : <div className="batch-empty">暂无结果</div>}
+                      </details>
+                    ))}
+                  </div>
+                </details>
+              ) : null}
 
               {sourceMode === 'news' && newsDigest ? (
                 <details className="raw-llm-output">
@@ -843,10 +1085,10 @@ const WeeklyComparison = () => {
       {/* Step 3: Comparing (Loading only, usually) */}
       {currentStep === 'compare' && (
         <div className="step-content">
-          <div className="loading-container">
+          <div className="loading-container compact">
             <div className="loading-spinner"></div>
             <p className="loading-text">正在与现行政策库进行比对...</p>
-            <p style={{ fontSize: '0.875rem', color: '#94a3b8', marginTop: '0.5rem' }}>深度思考中，请稍候</p>
+            <div className="loading-subtext">深度思考中</div>
           </div>
           
           {/* Show the comparison prompt while loading */}
