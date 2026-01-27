@@ -62,14 +62,17 @@ const PolicyMarkdown = ({ content }) => {
         return;
       }
 
-      const block = line.match(/^\[\[BLOCK\|(other|yangzhou|diff)\]\]$/);
+      const block = line.match(/^\[\[BLOCK\|(.+?)\]\]$/);
       if (block) {
         if (!currentCard) currentCard = { type: 'card', category: currentSection, city: '', blocks: [] };
         flushBlock();
-        const key = block[1];
-        const label = key === 'other' ? '其他城市' : (key === 'yangzhou' ? '扬州' : '对比分析');
-        const labelClass = key === 'other' ? 'other' : (key === 'yangzhou' ? 'yangzhou' : 'comparison');
-        currentBlock = { type: 'block', label, labelClass, content: [], list: [] };
+        const key = (block[1] || '').trim();
+        const isYangzhou = key === 'yangzhou';
+        const isDiff = key === 'diff';
+        const label = isYangzhou ? '扬州' : (isDiff ? '对比分析' : key);
+        const labelClass = isYangzhou ? 'yangzhou' : (isDiff ? 'comparison' : 'other');
+        if (labelClass === 'other' && !currentCard.city) currentCard.city = key;
+        currentBlock = { type: 'block', label, labelClass, blockKey: key, content: [], list: [] };
         return;
       }
 
@@ -201,69 +204,94 @@ const PolicyMarkdown = ({ content }) => {
     return { city: m[1].trim(), text: (m[2] || '').trim() };
   };
 
+  const getBlockEntries = (block) => {
+    const list = Array.isArray(block?.list) ? block.list : [];
+    const contentLines = Array.isArray(block?.content) ? block.content : [];
+    return [...list, ...contentLines].filter(Boolean);
+  };
+
   return (
     <div className="markdown-content">
       {(() => {
-        let currentSectionTitle = '';
-        return parsed.map((item, idx) => {
+        const groups = [];
+        let current = null;
+
+        parsed.forEach((item) => {
           if (item.type === 'section') {
-            currentSectionTitle = item.title;
-            return <h3 key={idx} className="policy-section-title">{item.title}</h3>;
+            current = { title: item.title, items: [] };
+            groups.push(current);
+            return;
           }
+          if (!current) {
+            current = { title: '', items: [] };
+            groups.push(current);
+          }
+          current.items.push(item);
+        });
 
-          if (item.type === 'card') {
-            const blocks = Array.isArray(item.blocks) ? item.blocks : [];
-            const sorted = [...blocks].sort((a, b) => (order[a.labelClass] || 99) - (order[b.labelClass] || 99));
-            const otherBlock = sorted.find(b => b.labelClass === 'other');
-            const otherFirst = otherBlock?.list?.[0] || otherBlock?.content?.[0] || '';
-            const cityName = item.city || String(otherFirst).match(/^\*\*(.+?)\*\*/)?.[1] || '';
+        return groups.map((group, gIdx) => {
+          const cards = group.items.filter((it) => it.type === 'card');
+          const separators = group.items.filter((it) => it.type === 'separator');
+          const contents = group.items.filter((it) => it.type === 'content');
 
-            return (
-              <div key={idx} className="policy-card">
-                {sorted.map((block, bIdx) => (
-                  <div key={bIdx} className={`policy-block ${block.labelClass}`}>
-                    {(() => {
-                      const list = Array.isArray(block.list) ? block.list : [];
-                      const contentLines = Array.isArray(block.content) ? block.content : [];
-                      const primary = list[0] ?? contentLines[0] ?? '';
+          return (
+            <div key={gIdx} className="policy-section-card">
+              {group.title ? <div className="policy-section-card-title">{group.title}</div> : null}
 
-                      if (block.labelClass === 'other') {
-                        const parsedCity = parseCityLine(primary);
-                        const shownCity = parsedCity.city || cityName;
-                        return (
-                          <>
-                            <div className="policy-inline-row">
-                              {shownCity ? <span className="city-label other">{shownCity}</span> : null}
-                              <div className="policy-inline-text">{renderInline(parsedCity.text || primary)}</div>
+              {contents.length > 0 ? (
+                <div className="policy-section-card-notes">
+                  {contents.map((c, i) => <p key={i}>{renderInline(c.text)}</p>)}
+                </div>
+              ) : null}
+
+              <div className="policy-section-card-list">
+                {cards.map((card, cIdx) => {
+                  const blocks = Array.isArray(card.blocks) ? card.blocks : [];
+                  const sorted = [...blocks].sort((a, b) => (order[a.labelClass] || 99) - (order[b.labelClass] || 99));
+                  const otherBlock = sorted.find(b => b.labelClass === 'other');
+                  const otherEntries = getBlockEntries(otherBlock);
+                  const otherFirst = otherEntries[0] || '';
+                  const parsedCity = parseCityLine(otherFirst);
+                  const cityName = card.city || parsedCity.city || '';
+                  const cardTitle = parsedCity.text || otherFirst || group.title || card.category || '';
+
+                  return (
+                    <div key={cIdx} className="policy-entry">
+                      <div className="policy-entry-body">
+                        {sorted.map((block, bIdx) => {
+                          const entries = getBlockEntries(block);
+                          const primary = entries[0] || '';
+                          const rest = entries.slice(1);
+
+                          let primaryText = primary;
+                          if (block.labelClass === 'other') {
+                            const parsed = parseCityLine(primary);
+                            primaryText = parsed.text || primary;
+                          }
+
+                          return (
+                            <div key={bIdx} className={`policy-block ${block.labelClass}`}>
+                              <div className="policy-inline-row">
+                                <span className={`city-label ${block.labelClass}`}>{block.label}</span>
+                                <div className="policy-inline-text">{renderInline(primaryText)}</div>
+                              </div>
+                              {rest.length > 0 ? (
+                                <ul className="policy-inline-list">
+                                  {rest.map((t, i) => <li key={i}>{renderInline(t)}</li>)}
+                                </ul>
+                              ) : null}
                             </div>
-                          </>
-                        );
-                      }
-
-                      return (
-                        <div className="policy-inline-row">
-                          <span className={`city-label ${block.labelClass}`}>{block.label}</span>
-                          <div className="policy-inline-text">{renderInline(primary)}</div>
-                        </div>
-                      );
-                    })()}
-                  </div>
-                ))}
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-            );
-          }
 
-          if (item.type === 'separator') return <hr key={idx} className="policy-separator" />;
-
-          if (item.type === 'content') {
-            return (
-              <div key={idx} className="content-block">
-                <p>{renderInline(item.text)}</p>
-              </div>
-            );
-          }
-
-          return null;
+              {separators.length > 0 ? null : null}
+            </div>
+          );
         });
       })()}
     </div>

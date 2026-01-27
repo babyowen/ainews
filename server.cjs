@@ -2223,63 +2223,13 @@ app.post('/api/policy/extract', async (req, res) => {
       return out;
     };
 
-    // 调用 DeepSeek R1
-    const response = await fetch('https://api.deepseek.com/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}`
-      },
-      body: JSON.stringify({
-        model: 'deepseek-chat', // 使用 chat 模型可能对 JSON 格式更友好，或者 reasoner
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: finalUserPrompt }
-        ],
-        temperature: 0.3,
-        response_format: { type: 'json_object' } // 强制 JSON 输出
-      })
-    });
-    
-    if (!response.ok) {
-      let errorText = '';
-      try {
-        errorText = await response.text();
-      } catch (e) {
-        errorText = '';
-      }
-      const snippet = (errorText || '').slice(0, 800);
-      throw new Error(`DeepSeek API error: ${response.status} ${response.statusText}${snippet ? ` | ${snippet}` : ''}`);
-    }
-    
-    const data = await response.json();
-    const result = data.choices?.[0]?.message?.content || '{}';
-    
-    const tryParse = (raw) => {
-      const cleaned = sanitizeJsonLikeOutput(raw);
-      return JSON.parse(cleaned);
-    };
+    const callDeepSeekJsonObject = async (userPrompt, options = {}) => {
+      const {
+        temperature = 0.3,
+        maxTokens = 4096
+      } = options || {};
 
-    let parsed;
-    try {
-      parsed = tryParse(result);
-    } catch (e) {
-      const snippet = String(result || '').slice(0, 1200);
-      const eMsg = String(e?.message || e || '');
-
-      const repairSystem = '你是一个严格的JSON修复器。你只输出可被JSON.parse解析的单一JSON对象，不要任何解释或markdown。';
-      const repairUser = [
-        '请将下面文本修复为合法JSON对象：',
-        '要求：',
-        '1) 只输出一个JSON对象',
-        '2) 不要多余文字',
-        '3) 需要时将字符串中的换行转义为\\\\n，双引号转义为\\\"',
-        '',
-        '待修复文本：',
-        result
-      ].join('\n');
-
-      const repairResp = await fetch('https://api.deepseek.com/chat/completions', {
+      const response = await fetch('https://api.deepseek.com/chat/completions', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -2288,29 +2238,105 @@ app.post('/api/policy/extract', async (req, res) => {
         body: JSON.stringify({
           model: 'deepseek-chat',
           messages: [
-            { role: 'system', content: repairSystem },
-            { role: 'user', content: repairUser }
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt }
           ],
-          temperature: 0,
+          temperature,
+          max_tokens: maxTokens,
           response_format: { type: 'json_object' }
         })
       });
 
-      if (repairResp.ok) {
+      if (!response.ok) {
+        let errorText = '';
         try {
-          const repairData = await repairResp.json();
-          const repaired = repairData.choices?.[0]?.message?.content || '{}';
-          parsed = tryParse(repaired);
-        } catch (repairErr) {
-          const repairMsg = String(repairErr?.message || repairErr || '');
-          throw new Error(`DeepSeek returned non-JSON content | ${eMsg} | repair_failed: ${repairMsg} | ${snippet}`);
+          errorText = await response.text();
+        } catch (e) {
+          errorText = '';
         }
-      } else {
-        let repairText = '';
-        try {
-          repairText = await repairResp.text();
-        } catch {}
-        throw new Error(`DeepSeek returned non-JSON content | ${eMsg} | repair_http_${repairResp.status}: ${(repairText || '').slice(0, 800)} | ${snippet}`);
+        const snippet = (errorText || '').slice(0, 800);
+        throw new Error(`DeepSeek API error: ${response.status} ${response.statusText}${snippet ? ` | ${snippet}` : ''}`);
+      }
+
+      const data = await response.json();
+      return data.choices?.[0]?.message?.content || '{}';
+    };
+
+    const tryParse = (raw) => {
+      const cleaned = sanitizeJsonLikeOutput(raw);
+      return JSON.parse(cleaned);
+    };
+
+    let parsed;
+    let firstResult = '';
+    try {
+      firstResult = await callDeepSeekJsonObject(finalUserPrompt, { temperature: 0.3, maxTokens: 4096 });
+      parsed = tryParse(firstResult);
+    } catch (e) {
+      const eMsg = String(e?.message || e || '');
+      const strictPrefix = [
+        '【强制约束：为避免超长/截断导致JSON不完整，请严格执行】',
+        '1) 仅输出一个JSON对象，且必须能被JSON.parse解析。',
+        '2) 每条“政策明细”的“内容”请控制在120字以内；禁止换行、禁止使用\\n；用分号/逗号表达要点。',
+        '3) 只保留关键数字与要素（对象/门槛/额度比例/期限/范围/流程关键点），不要写办理渠道/网址/过长材料清单。',
+        '4) 若同城同类信息重复，请合并为1条更精炼的政策明细；优先保留数字最明确的条目。',
+        '5) “依据文件”请尽量短（<=60字）。'
+      ].join('\n');
+      const strictPrompt = `${strictPrefix}\n\n${finalUserPrompt}`;
+
+      const repairSystem = '你是一个严格的JSON修复器。你只输出可被JSON.parse解析的单一JSON对象，不要任何解释或markdown。';
+      let strictResult = '';
+      try {
+        strictResult = await callDeepSeekJsonObject(strictPrompt, { temperature: 0.1, maxTokens: 4096 });
+        parsed = tryParse(strictResult);
+      } catch (strictErr) {
+        const strictMsg = String(strictErr?.message || strictErr || '');
+        const repairSource = strictResult || firstResult;
+        const repairUser = [
+          '请将下面文本修复为合法JSON对象：',
+          '要求：',
+          '1) 只输出一个JSON对象',
+          '2) 不要多余文字',
+          '3) 需要时将字符串中的换行转义为\\\\n，双引号转义为\\\"',
+          '',
+          '待修复文本：',
+          String(repairSource || '').slice(0, 12000)
+        ].join('\n');
+
+        const repairResp = await fetch('https://api.deepseek.com/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}`
+          },
+          body: JSON.stringify({
+            model: 'deepseek-chat',
+            messages: [
+              { role: 'system', content: repairSystem },
+              { role: 'user', content: repairUser }
+            ],
+            temperature: 0,
+            max_tokens: 2048,
+            response_format: { type: 'json_object' }
+          })
+        });
+
+        if (repairResp.ok) {
+          try {
+            const repairData = await repairResp.json();
+            const repaired = repairData.choices?.[0]?.message?.content || '{}';
+            parsed = tryParse(repaired);
+          } catch (repairErr) {
+            const repairMsg = String(repairErr?.message || repairErr || '');
+            throw new Error(`DeepSeek returned non-JSON content | ${eMsg} | strict_failed: ${strictMsg} | repair_failed: ${repairMsg}`);
+          }
+        } else {
+          let repairText = '';
+          try {
+            repairText = await repairResp.text();
+          } catch {}
+          throw new Error(`DeepSeek returned non-JSON content | ${eMsg} | strict_failed: ${strictMsg} | repair_http_${repairResp.status}: ${(repairText || '').slice(0, 800)}`);
+        }
       }
     }
     
