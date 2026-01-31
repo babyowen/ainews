@@ -157,3 +157,77 @@
   background: #fff;
   color: #222;
 }
+
+/* Nested Menu Styles */
+.menu-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.menu-trigger {
+  cursor: pointer;
+  color: #e2e8f0;
+  font-size: 1rem;
+  padding: 14px 20px;
+  border-radius: 10px;
+  transition: all 0.3s ease;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  white-space: nowrap; /* 强制不换行 */
+}
+
+.menu-trigger::before {
+  content: '🏛️';
+  font-size: 1.2rem;
+}
+
+.menu-trigger:hover, .menu-trigger.active-group {
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.arrow {
+  font-size: 0.8rem;
+  transition: transform 0.3s ease;
+}
+
+.arrow.open {
+  transform: rotate(180deg);
+}
+
+.submenu {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding-left: 20px;
+  overflow: hidden;
+  max-height: 0;
+  transition: max-height 0.3s ease-out;
+}
+
+.submenu.open {
+  max-height: 200px;
+}
+
+.submenu a {
+  font-size: 0.9rem;
+  padding: 10px 15px;
+}
+
+/* Icons for submenu items */
+.sidebar a[href="/policy/current"]::before {
+  content: '📜';
+  font-size: 1rem;
+}
+
+.sidebar a[href="/policy/comparison"]::before {
+  content: '⚖️';
+  font-size: 1rem;
+}

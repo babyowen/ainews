@@ -7,6 +7,8 @@ import QualityAnalysisPage from './pages/QualityAnalysis';
 import ScoreEditPage from './pages/ScoreEdit';
 import WordCountStatsPage from './pages/WordCountStats';
 import HistoryReports from './pages/HistoryReports';
+import CurrentPolicyPage from './pages/PolicyComparison/CurrentPolicy';
+import WeeklyComparisonPage from './pages/PolicyComparison/WeeklyComparison';
 import Layout from './components/Layout';
 import './App.css'
 
@@ -24,6 +26,8 @@ function App() {
             <Route path="/score-edit" element={<ScoreEditPage />} />
             <Route path="/word-count" element={<WordCountStatsPage />} />
             <Route path="/history" element={<HistoryReports />} />
+            <Route path="/policy/current" element={<CurrentPolicyPage />} />
+            <Route path="/policy/comparison" element={<WeeklyComparisonPage />} />
             <Route path="*" element={<Navigate to="/summary" />} />
           </Routes>
         </Layout>

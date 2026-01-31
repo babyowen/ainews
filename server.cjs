@@ -1705,21 +1705,37 @@ app.get('/api/config/prompts', async (req, res) => {
     const fs = require('fs');
     const path = require('path');
     
-    // 读取提示词配置
+    // 读取周报生成提示词配置
     const promptsPath = path.join(__dirname, 'config/prompts.md');
     const promptsContent = fs.readFileSync(promptsPath, 'utf-8');
     
-    // 解析各种提示词
-    const systemPromptMatch = promptsContent.match(/## System Prompt\s*\n\s*```\s*\n([\s\S]*?)\n\s*```/);
-    const userPromptMatch = promptsContent.match(/## User Prompt\s*\n\s*```\s*\n([\s\S]*?)\n\s*```/);
-    const modifySystemPromptMatch = promptsContent.match(/## Modify System Prompt\s*\n\s*```\s*\n([\s\S]*?)\n\s*```/);
-    const modifyUserPromptMatch = promptsContent.match(/## Modify User Prompt\s*\n\s*```\s*\n([\s\S]*?)\n\s*```/);
+    // 读取政策分析提示词配置
+    const policyPromptsPath = path.join(__dirname, 'config/policy_prompts.md');
+    let policyPromptsContent = '';
+    if (fs.existsSync(policyPromptsPath)) {
+        policyPromptsContent = fs.readFileSync(policyPromptsPath, 'utf-8');
+    }
     
+    // 解析周报生成提示词
+    const systemPromptMatch = promptsContent.match(/## System Prompt[\s\S]*?```\w*\s*([\s\S]*?)\s*```/);
+    const userPromptMatch = promptsContent.match(/## User Prompt[\s\S]*?```\w*\s*([\s\S]*?)\s*```/);
+    const modifySystemPromptMatch = promptsContent.match(/## Modify System Prompt[\s\S]*?```\w*\s*([\s\S]*?)\s*```/);
+    const modifyUserPromptMatch = promptsContent.match(/## Modify User Prompt[\s\S]*?```\w*\s*([\s\S]*?)\s*```/);
+    
+    // 解析政策分析提示词
+    const policyComparisonPromptMatch = policyPromptsContent.match(/## Policy Comparison Prompt[\s\S]*?```\w*\s*([\s\S]*?)\s*```/);
+    const policyExtractionPromptMatch = policyPromptsContent.match(/## Policy Extraction Prompt[\s\S]*?```\w*\s*([\s\S]*?)\s*```/);
+    
+    // 默认优化后的提示词 (从文件读取失败时的后备)
+    const defaultExtractionPrompt = '';
+
     res.json({
       systemPrompt: systemPromptMatch ? systemPromptMatch[1].trim() : '',
       userPrompt: userPromptMatch ? userPromptMatch[1].trim() : '',
       modifySystemPrompt: modifySystemPromptMatch ? modifySystemPromptMatch[1].trim() : '',
       modifyUserPrompt: modifyUserPromptMatch ? modifyUserPromptMatch[1].trim() : '',
+      policyComparisonPrompt: policyComparisonPromptMatch ? policyComparisonPromptMatch[1].trim() : '',
+      policyExtractionPrompt: policyExtractionPromptMatch ? policyExtractionPromptMatch[1].trim() : defaultExtractionPrompt,
       model: 'DeepSeek R1',
       modelConfig: {
         type: 'deepseek-reasoner',
@@ -1731,6 +1747,43 @@ app.get('/api/config/prompts', async (req, res) => {
   } catch (error) {
     console.error('获取配置失败:', error);
     res.status(500).json({ error: '获取配置失败' });
+  }
+});
+
+// 保存政策相关Prompt
+app.post('/api/config/policy-prompt', async (req, res) => {
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const { prompt, type } = req.body; // type: 'comparison' or 'extraction'
+    
+    // 使用新的配置文件
+    const promptsPath = path.join(__dirname, 'config/policy_prompts.md');
+    let content = '';
+    
+    if (fs.existsSync(promptsPath)) {
+        content = fs.readFileSync(promptsPath, 'utf-8');
+    }
+    
+    const sectionTitle = type === 'extraction' ? 'Policy Extraction Prompt' : 'Policy Comparison Prompt';
+    
+    // 检查是否存在对应部分 (使用更宽松的正则)
+    const regex = new RegExp(`## ${sectionTitle}[\\s\\S]*?\`\`\`\\w*\\s*[\\s\\S]*?\`\`\``);
+    
+    if (regex.test(content)) {
+      content = content.replace(
+        regex,
+        `## ${sectionTitle}\n\n\`\`\`\n${prompt}\n\`\`\``
+      );
+    } else {
+      content += `\n\n## ${sectionTitle}\n\n\`\`\`\n${prompt}\n\`\`\``;
+    }
+    
+    fs.writeFileSync(promptsPath, content, 'utf-8');
+    res.json({ success: true });
+  } catch (error) {
+    console.error(`保存${req.body.type}Prompt失败:`, error);
+    res.status(500).json({ error: '保存失败' });
   }
 });
 
@@ -1936,6 +1989,549 @@ app.delete('/api/config/keyword-prompts/:keyword/:promptId', async (req, res) =>
   } catch (error) {
     console.error('删除关键词prompt配置失败:', error);
     res.status(500).json({ error: '删除关键词prompt配置失败' });
+  }
+});
+
+// ============ 扬州公积金政策管理 API ============
+
+// 获取所有政策版本列表
+app.get('/api/policy/versions', async (req, res) => {
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    
+    const policiesDir = path.join(__dirname, 'config/policies');
+    
+    // 确保目录存在
+    if (!fs.existsSync(policiesDir)) {
+      fs.mkdirSync(policiesDir, { recursive: true });
+      return res.json([]);
+    }
+    
+    const files = fs.readdirSync(policiesDir);
+    
+    // 过滤JSON文件并获取详细信息
+    const versions = files
+      .filter(file => file.endsWith('.json'))
+      .map(file => {
+        const filePath = path.join(policiesDir, file);
+        const stats = fs.statSync(filePath);
+        return {
+          filename: file,
+          createdAt: stats.birthtime,
+          updatedAt: stats.mtime,
+          size: stats.size
+        };
+      })
+      // 按修改时间倒序排序（最新的在前）
+      .sort((a, b) => b.updatedAt - a.updatedAt);
+      
+    res.json(versions);
+  } catch (error) {
+    console.error('获取政策版本列表失败:', error);
+    res.status(500).json({ error: '获取政策版本列表失败', details: error.message });
+  }
+});
+
+// 获取最新政策内容
+app.get('/api/policy/latest', async (req, res) => {
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    
+    const policiesDir = path.join(__dirname, 'config/policies');
+    
+    if (!fs.existsSync(policiesDir)) {
+      return res.json({ content: null, filename: null });
+    }
+    
+    const files = fs.readdirSync(policiesDir)
+      .filter(file => file.endsWith('.json'))
+      .map(file => {
+        const filePath = path.join(policiesDir, file);
+        return {
+          filename: file,
+          mtime: fs.statSync(filePath).mtime
+        };
+      })
+      .sort((a, b) => b.mtime - a.mtime);
+      
+    if (files.length === 0) {
+      return res.json({ content: null, filename: null });
+    }
+    
+    const latestFile = files[0];
+    const filePath = path.join(policiesDir, latestFile.filename);
+    const content = fs.readFileSync(filePath, 'utf-8');
+    
+    res.json({
+      filename: latestFile.filename,
+      content: JSON.parse(content),
+      lastUpdated: latestFile.mtime
+    });
+  } catch (error) {
+    console.error('获取最新政策失败:', error);
+    res.status(500).json({ error: '获取最新政策失败', details: error.message });
+  }
+});
+
+// 保存新版政策（自动创建新版本）
+app.post('/api/policy/save', async (req, res) => {
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const { content } = req.body;
+    
+    if (!content) {
+      return res.status(400).json({ error: '缺少政策内容' });
+    }
+    
+    const policiesDir = path.join(__dirname, 'config/policies');
+    if (!fs.existsSync(policiesDir)) {
+      fs.mkdirSync(policiesDir, { recursive: true });
+    }
+    
+    // 生成带时间戳的文件名
+    const now = new Date();
+    const timestamp = now.toISOString().replace(/[-:T]/g, '').split('.')[0]; // YYYYMMDDHHmmss
+    const filename = `policy_${timestamp}.json`;
+    const filePath = path.join(policiesDir, filename);
+    
+    // 写入文件
+    fs.writeFileSync(filePath, JSON.stringify(content, null, 2), 'utf-8');
+    
+    res.json({
+      success: true,
+      message: '新版本政策已保存',
+      filename: filename,
+      timestamp: now
+    });
+  } catch (error) {
+    console.error('保存政策失败:', error);
+    res.status(500).json({ error: '保存政策失败', details: error.message });
+  }
+});
+
+// 政策抽取 (Step 1)
+app.post('/api/policy/extract', async (req, res) => {
+  const { reportContent, reportId } = req.body;
+  
+  if (!reportContent && !reportId) {
+    return res.status(400).json({ error: 'Missing report content or ID' });
+  }
+  
+  try {
+    let contentToProcess = reportContent;
+    
+    // 如果提供了ID但没有内容，从数据库获取
+    if (!contentToProcess && reportId) {
+      const [rows] = await pool.query('SELECT report_content FROM weekly_reports WHERE id = ?', [reportId]);
+      if (rows.length === 0) {
+        return res.status(404).json({ error: 'Report not found' });
+      }
+      contentToProcess = rows[0].report_content;
+    }
+    
+    const fs = require('fs');
+    const path = require('path');
+    
+    // 获取最新政策内容作为模板
+    let currentPolicyContent = '{}';
+    const policiesDir = path.join(__dirname, 'config/policies');
+    if (fs.existsSync(policiesDir)) {
+      const files = fs.readdirSync(policiesDir)
+        .filter(file => file.endsWith('.json'))
+        .map(file => ({
+          filename: file,
+          mtime: fs.statSync(path.join(policiesDir, file)).mtime
+        }))
+        .sort((a, b) => b.mtime - a.mtime);
+        
+      if (files.length > 0) {
+        const latestFile = path.join(policiesDir, files[0].filename);
+        currentPolicyContent = fs.readFileSync(latestFile, 'utf-8');
+      }
+    }
+    
+    // 读取提示词
+    const promptsPath = path.join(__dirname, 'config/policy_prompts.md');
+    let promptsContent = '';
+    if (fs.existsSync(promptsPath)) {
+        promptsContent = fs.readFileSync(promptsPath, 'utf-8');
+    }
+    
+    // 获取抽取提示词 (使用更宽松的正则)
+    const extractionPromptMatch = promptsContent.match(/## Policy Extraction Prompt[\s\S]*?```\w*\s*([\s\S]*?)\s*```/);
+    const systemPrompt = "你是一个专业的政策分析助手，请严格按照用户的要求提取政策信息并输出为JSON格式。";
+    
+    // 默认优化后的提示词 (从文件读取失败时的后备)
+    const defaultExtractionPrompt = '';
+
+    const userPromptTemplate = extractionPromptMatch ? extractionPromptMatch[1].trim() : defaultExtractionPrompt;
+    
+    if (!userPromptTemplate) {
+        throw new Error('Policy Extraction Prompt not found in config/policy_prompts.md');
+    }
+    
+    // 替换变量
+    const finalUserPrompt = userPromptTemplate
+      .replace('{report}', contentToProcess)
+      .replace('{template}', currentPolicyContent);
+    
+    const sanitizeJsonLikeOutput = (s) => {
+      const input = String(s ?? '');
+      let out = '';
+      let inString = false;
+      let escaped = false;
+      for (let i = 0; i < input.length; i++) {
+        const ch = input[i];
+        if (inString) {
+          if (escaped) {
+            out += ch;
+            escaped = false;
+            continue;
+          }
+          if (ch === '\\') {
+            out += ch;
+            escaped = true;
+            continue;
+          }
+          if (ch === '"') {
+            out += ch;
+            inString = false;
+            continue;
+          }
+          if (ch === '\n') {
+            out += '\\n';
+            continue;
+          }
+          if (ch === '\r') {
+            continue;
+          }
+          out += ch;
+          continue;
+        }
+
+        if (ch === '"') {
+          out += ch;
+          inString = true;
+          escaped = false;
+          continue;
+        }
+        out += ch;
+      }
+      return out;
+    };
+
+    const callDeepSeekJsonObject = async (userPrompt, options = {}) => {
+      const {
+        temperature = 0.3,
+        maxTokens = 4096
+      } = options || {};
+
+      const response = await fetch('https://api.deepseek.com/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}`
+        },
+        body: JSON.stringify({
+          model: 'deepseek-chat',
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt }
+          ],
+          temperature,
+          max_tokens: maxTokens,
+          response_format: { type: 'json_object' }
+        })
+      });
+
+      if (!response.ok) {
+        let errorText = '';
+        try {
+          errorText = await response.text();
+        } catch (e) {
+          errorText = '';
+        }
+        const snippet = (errorText || '').slice(0, 800);
+        throw new Error(`DeepSeek API error: ${response.status} ${response.statusText}${snippet ? ` | ${snippet}` : ''}`);
+      }
+
+      const data = await response.json();
+      return data.choices?.[0]?.message?.content || '{}';
+    };
+
+    const tryParse = (raw) => {
+      const cleaned = sanitizeJsonLikeOutput(raw);
+      return JSON.parse(cleaned);
+    };
+
+    let parsed;
+    let firstResult = '';
+    try {
+      firstResult = await callDeepSeekJsonObject(finalUserPrompt, { temperature: 0.3, maxTokens: 4096 });
+      parsed = tryParse(firstResult);
+    } catch (e) {
+      const eMsg = String(e?.message || e || '');
+      const strictPrefix = [
+        '【强制约束：为避免超长/截断导致JSON不完整，请严格执行】',
+        '1) 仅输出一个JSON对象，且必须能被JSON.parse解析。',
+        '2) 每条“政策明细”的“内容”请控制在120字以内；禁止换行、禁止使用\\n；用分号/逗号表达要点。',
+        '3) 只保留关键数字与要素（对象/门槛/额度比例/期限/范围/流程关键点），不要写办理渠道/网址/过长材料清单。',
+        '4) 若同城同类信息重复，请合并为1条更精炼的政策明细；优先保留数字最明确的条目。',
+        '5) “依据文件”请尽量短（<=60字）。'
+      ].join('\n');
+      const strictPrompt = `${strictPrefix}\n\n${finalUserPrompt}`;
+
+      const repairSystem = '你是一个严格的JSON修复器。你只输出可被JSON.parse解析的单一JSON对象，不要任何解释或markdown。';
+      let strictResult = '';
+      try {
+        strictResult = await callDeepSeekJsonObject(strictPrompt, { temperature: 0.1, maxTokens: 4096 });
+        parsed = tryParse(strictResult);
+      } catch (strictErr) {
+        const strictMsg = String(strictErr?.message || strictErr || '');
+        const repairSource = strictResult || firstResult;
+        const repairUser = [
+          '请将下面文本修复为合法JSON对象：',
+          '要求：',
+          '1) 只输出一个JSON对象',
+          '2) 不要多余文字',
+          '3) 需要时将字符串中的换行转义为\\\\n，双引号转义为\\\"',
+          '',
+          '待修复文本：',
+          String(repairSource || '').slice(0, 12000)
+        ].join('\n');
+
+        const repairResp = await fetch('https://api.deepseek.com/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}`
+          },
+          body: JSON.stringify({
+            model: 'deepseek-chat',
+            messages: [
+              { role: 'system', content: repairSystem },
+              { role: 'user', content: repairUser }
+            ],
+            temperature: 0,
+            max_tokens: 2048,
+            response_format: { type: 'json_object' }
+          })
+        });
+
+        if (repairResp.ok) {
+          try {
+            const repairData = await repairResp.json();
+            const repaired = repairData.choices?.[0]?.message?.content || '{}';
+            parsed = tryParse(repaired);
+          } catch (repairErr) {
+            const repairMsg = String(repairErr?.message || repairErr || '');
+            throw new Error(`DeepSeek returned non-JSON content | ${eMsg} | strict_failed: ${strictMsg} | repair_failed: ${repairMsg}`);
+          }
+        } else {
+          let repairText = '';
+          try {
+            repairText = await repairResp.text();
+          } catch {}
+          throw new Error(`DeepSeek returned non-JSON content | ${eMsg} | strict_failed: ${strictMsg} | repair_http_${repairResp.status}: ${(repairText || '').slice(0, 800)}`);
+        }
+      }
+    }
+    
+    res.json({ 
+      result: parsed,
+      debug: {
+        systemPrompt,
+        userPrompt: finalUserPrompt
+      }
+    });
+    
+  } catch (error) {
+    console.error('Policy extraction failed:', error);
+    const msg = String(error?.message || error || '');
+    res.status(500).json({ error: 'Extraction failed', details: msg.slice(0, 2000) });
+  }
+});
+
+// 预览政策相关Prompt (Step 1 & 2)
+app.post('/api/policy/preview-prompt', async (req, res) => {
+  const { type, reportContent, reportId, extractedPolicy, currentPolicy } = req.body;
+  // type: 'extraction' or 'comparison'
+  
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const policiesDir = path.join(__dirname, 'config/policies');
+    const promptsPath = path.join(__dirname, 'config/policy_prompts.md');
+    
+    let promptsContent = '';
+    if (fs.existsSync(promptsPath)) {
+        promptsContent = fs.readFileSync(promptsPath, 'utf-8');
+    }
+    
+    let systemPrompt = '';
+    let userPrompt = '';
+    
+    if (type === 'extraction') {
+        let contentToProcess = reportContent;
+        // 如果提供了ID但没有内容，从数据库获取
+        if (!contentToProcess && reportId) {
+            const [rows] = await pool.query('SELECT report_content FROM weekly_reports WHERE id = ?', [reportId]);
+            if (rows.length > 0) {
+                contentToProcess = rows[0].report_content;
+            }
+        }
+        
+        // 获取最新政策内容作为模板
+        let currentPolicyContent = '{}';
+        if (fs.existsSync(policiesDir)) {
+          const files = fs.readdirSync(policiesDir)
+            .filter(file => file.endsWith('.json'))
+            .map(file => ({
+              filename: file,
+              mtime: fs.statSync(path.join(policiesDir, file)).mtime
+            }))
+            .sort((a, b) => b.mtime - a.mtime);
+            
+          if (files.length > 0) {
+            const latestFile = path.join(policiesDir, files[0].filename);
+            currentPolicyContent = fs.readFileSync(latestFile, 'utf-8');
+          }
+        }
+        
+        const extractionPromptMatch = promptsContent.match(/## Policy Extraction Prompt[\s\S]*?```\w*\s*([\s\S]*?)\s*```/);
+        systemPrompt = "你是一个专业的政策分析助手，请严格按照用户的要求提取政策信息并输出为JSON格式。";
+        const userPromptTemplate = extractionPromptMatch ? extractionPromptMatch[1].trim() : '';
+        
+        userPrompt = userPromptTemplate
+          .replace('{report}', contentToProcess || '')
+          .replace('{template}', currentPolicyContent);
+          
+    } else if (type === 'comparison') {
+        // 如果未提供当前政策，读取最新的
+        let currentPolicyContent = currentPolicy;
+        if (!currentPolicyContent) {
+           if (fs.existsSync(policiesDir)) {
+             const files = fs.readdirSync(policiesDir)
+               .filter(file => file.endsWith('.json'))
+               .map(file => ({
+                 filename: file,
+                 mtime: fs.statSync(path.join(policiesDir, file)).mtime
+               }))
+               .sort((a, b) => b.mtime - a.mtime);
+               
+             if (files.length > 0) {
+               const latestFile = path.join(policiesDir, files[0].filename);
+               currentPolicyContent = JSON.parse(fs.readFileSync(latestFile, 'utf-8'));
+             }
+           }
+        }
+        
+        const comparisonPromptMatch = promptsContent.match(/## Policy Comparison Prompt[\s\S]*?```\w*\s*([\s\S]*?)\s*```/);
+        systemPrompt = "你是一个专业的政策对比分析专家。";
+        const userPromptTemplate = comparisonPromptMatch ? comparisonPromptMatch[1].trim() : '请对比以下两份政策内容：\n\n现行政策：\n{current}\n\n新提取政策：\n{extracted}';
+        
+        userPrompt = userPromptTemplate
+          .replace('{current}', JSON.stringify(currentPolicyContent || {}, null, 2))
+          .replace('{extracted}', JSON.stringify(extractedPolicy || {}, null, 2));
+    }
+    
+    res.json({
+        systemPrompt,
+        userPrompt
+    });
+    
+  } catch (error) {
+    console.error('Preview policy prompt failed:', error);
+    res.status(500).json({ error: 'Preview failed', details: error.message });
+  }
+});
+
+// 政策对比 (Step 2)
+app.post('/api/policy/compare', async (req, res) => {
+  const { extractedPolicy, currentPolicy } = req.body;
+  
+  if (!extractedPolicy) {
+    return res.status(400).json({ error: 'Missing extracted policy' });
+  }
+  
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    
+    // 如果未提供当前政策，读取最新的
+    let currentPolicyContent = currentPolicy;
+    if (!currentPolicyContent) {
+       const policiesDir = path.join(__dirname, 'config/policies');
+       if (fs.existsSync(policiesDir)) {
+         const files = fs.readdirSync(policiesDir)
+           .filter(file => file.endsWith('.json'))
+           .map(file => ({
+             filename: file,
+             mtime: fs.statSync(path.join(policiesDir, file)).mtime
+           }))
+           .sort((a, b) => b.mtime - a.mtime);
+           
+         if (files.length > 0) {
+           const latestFile = path.join(policiesDir, files[0].filename);
+           currentPolicyContent = JSON.parse(fs.readFileSync(latestFile, 'utf-8'));
+         }
+       }
+    }
+    
+    // 读取提示词
+    const promptsPath = path.join(__dirname, 'config/policy_prompts.md');
+    let promptsContent = '';
+    if (fs.existsSync(promptsPath)) {
+        promptsContent = fs.readFileSync(promptsPath, 'utf-8');
+    }
+    
+    // 获取对比提示词 (使用更宽松的正则)
+    const comparisonPromptMatch = promptsContent.match(/## Policy Comparison Prompt[\s\S]*?```\w*\s*([\s\S]*?)\s*```/);
+    const systemPrompt = "你是一个专业的政策对比分析专家。";
+    const userPromptTemplate = comparisonPromptMatch ? comparisonPromptMatch[1].trim() : '请对比以下两份政策内容：\n\n现行政策：\n{current}\n\n新提取政策：\n{extracted}';
+    
+    const finalUserPrompt = userPromptTemplate
+      .replace('{current}', JSON.stringify(currentPolicyContent, null, 2))
+      .replace('{extracted}', JSON.stringify(extractedPolicy, null, 2));
+      
+    // 调用 DeepSeek R1 (Reasoner for complex comparison)
+    const response = await fetch('https://api.deepseek.com/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}`
+      },
+      body: JSON.stringify({
+        model: 'deepseek-reasoner',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: finalUserPrompt }
+        ],
+        temperature: 0.7
+      })
+    });
+    
+    if (!response.ok) {
+      throw new Error(`DeepSeek API error: ${response.status} ${response.statusText}`);
+    }
+    
+    const data = await response.json();
+    const markdown = data.choices?.[0]?.message?.content || '对比生成失败';
+    
+    res.json({ 
+      markdown,
+      debug: {
+        systemPrompt,
+        userPrompt: finalUserPrompt
+      }
+    });
+    
+  } catch (error) {
+    console.error('Policy comparison failed:', error);
+    res.status(500).json({ error: 'Comparison failed', details: error.message });
   }
 });
 
