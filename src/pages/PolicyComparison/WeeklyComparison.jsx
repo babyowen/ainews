@@ -746,16 +746,79 @@ const WeeklyComparison = () => {
     }
   };
 
+  const handleExportPdf = async () => {
+    if (!reportRef.current) return;
+
+    const reportElement = reportRef.current;
+    const originalWidth = reportElement.style.width;
+    const originalMaxWidth = reportElement.style.maxWidth;
+
+    try {
+      reportElement.style.width = '430px';
+      reportElement.style.maxWidth = '430px';
+
+      ['div', 'p', 'h1', 'h2', 'h3', 'h4', 'ul', 'ol', 'li'].forEach((tag) => {
+        reportElement.querySelectorAll(tag).forEach((el) => {
+          el.dataset.prevPageBreakInside = el.style.pageBreakInside || '';
+          el.dataset.prevBreakInside = el.style.breakInside || '';
+          el.style.pageBreakInside = 'avoid';
+          el.style.breakInside = 'avoid';
+        });
+      });
+
+      const html2pdf = (await import('html2pdf.js')).default;
+      await html2pdf()
+        .from(reportElement)
+        .set({
+          margin: 0.3,
+          filename: `政策对比周报-${selectedReport.start_date}.pdf`,
+          pagebreak: { mode: ['css', 'legacy'] },
+          html2canvas: {
+            scale: 2,
+            useCORS: true,
+            backgroundColor: '#ffffff',
+            windowWidth: 430,
+            width: 430
+          },
+          jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' }
+        })
+        .save();
+    } finally {
+      reportElement.style.width = originalWidth;
+      reportElement.style.maxWidth = originalMaxWidth;
+
+      ['div', 'p', 'h1', 'h2', 'h3', 'h4', 'ul', 'ol', 'li'].forEach((tag) => {
+        reportElement.querySelectorAll(tag).forEach((el) => {
+          el.style.pageBreakInside = el.dataset.prevPageBreakInside || '';
+          el.style.breakInside = el.dataset.prevBreakInside || '';
+          delete el.dataset.prevPageBreakInside;
+          delete el.dataset.prevBreakInside;
+        });
+      });
+    }
+  };
+
   const handleExportImage = async () => {
     if (!reportRef.current) return;
 
+    const reportElement = reportRef.current;
+    const originalWidth = reportElement.style.width;
+
     try {
       // 临时设置宽度以获得最佳移动端显示效果
-      const originalWidth = reportRef.current.style.width;
-      reportRef.current.style.width = '430px'; // iPhone Pro Max width
+      reportElement.style.width = '430px'; // iPhone Pro Max width
 
-      const canvas = await html2canvas(reportRef.current, {
-        scale: 3, // 超高清分辨率，适合手机分享
+      // 长内容在生产环境更容易触发 dataURL / 大画布限制，按高度降级缩放更稳
+      const contentHeight = Math.max(reportElement.scrollHeight, reportElement.offsetHeight, 1);
+      if (contentHeight > 12000) {
+        reportElement.style.width = originalWidth;
+        await handleExportPdf();
+        return;
+      }
+      const scale = contentHeight > 7000 ? 1.5 : 2;
+
+      const canvas = await html2canvas(reportElement, {
+        scale,
         backgroundColor: '#ffffff',
         useCORS: true,
         logging: false,
@@ -764,14 +827,28 @@ const WeeklyComparison = () => {
       });
 
       // 恢复原始宽度
-      reportRef.current.style.width = originalWidth;
+      reportElement.style.width = originalWidth;
 
-      const image = canvas.toDataURL('image/png', 1.0);
+      const blob = await new Promise((resolve, reject) => {
+        canvas.toBlob((result) => {
+          if (result) {
+            resolve(result);
+            return;
+          }
+          reject(new Error('图片生成失败'));
+        }, 'image/png');
+      });
+
+      const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
-      link.href = image;
+      link.href = url;
       link.download = `政策对比周报-${selectedReport.start_date}.png`;
+      document.body.appendChild(link);
       link.click();
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (err) {
+      reportElement.style.width = originalWidth;
       console.error('导出失败:', err);
       alert('导出图片失败，请重试');
     }
@@ -1157,7 +1234,7 @@ const WeeklyComparison = () => {
               className="action-btn btn-primary"
               onClick={handleExportImage}
             >
-              <Download size={18} /> 导出高清图片
+              <Download size={18} /> 导出高清图片（超长自动PDF）
             </button>
           </div>
 
