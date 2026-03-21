@@ -5,9 +5,10 @@
 
 # OS files
 .DS_Store
-.DS_Store
-node_modules/*
 /node_modules
 
+# Local working directories
+/disc/
+
 # Build output
-dist/
+/dist/
