@@ -3,6 +3,11 @@ const express = require('express');
 const mysql = require('mysql2/promise');
 const cors = require('cors');
 const path = require('path');
+const {
+  buildReportPdfFilename,
+  PdfRendererUnavailableError,
+  renderReportPdf,
+} = require('./server/pdf/renderReportPdf.cjs');
 
 const app = express();
 app.use(cors());
@@ -19,6 +24,11 @@ const pool = mysql.createPool({
   connectionLimit: 10,
   queueLimit: 0
 });
+
+function buildAttachmentDisposition(filename) {
+  const safeAscii = filename.replace(/[^\x20-\x7E]+/g, '_');
+  return `attachment; filename="${safeAscii}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
+}
 
 // 关键词列表
 app.get('/api/keywords', async (req, res) => {
@@ -3000,6 +3010,56 @@ app.get('/api/word-count-stats', async (req, res) => {
 });
 
 // ============ 历史周报相关 API ============
+
+app.post('/api/reports/export-pdf', async (req, res) => {
+  const {
+    keyword,
+    startDate,
+    endDate,
+    newsCount,
+    modelName,
+    reportContent,
+  } = req.body || {};
+
+  if (!keyword || !startDate || !endDate || !reportContent) {
+    return res.status(400).json({ error: '缺少导出 PDF 所需参数' });
+  }
+
+  try {
+    const pdfBuffer = await renderReportPdf({
+      keyword,
+      startDate,
+      endDate,
+      newsCount: Number(newsCount) || 0,
+      modelName,
+      reportContent,
+    });
+
+    const filename = buildReportPdfFilename({
+      keyword,
+      modelName,
+    });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Length', pdfBuffer.length);
+    res.setHeader('Content-Disposition', buildAttachmentDisposition(filename));
+    res.send(pdfBuffer);
+  } catch (error) {
+    console.error('周报 PDF 导出失败:', error);
+
+    if (error instanceof PdfRendererUnavailableError || error?.code === 'PDF_RENDERER_UNAVAILABLE') {
+      return res.status(503).json({
+        error: 'PDF 引擎不可用',
+        details: error.message,
+      });
+    }
+
+    return res.status(500).json({
+      error: 'PDF 生成失败',
+      details: error.message,
+    });
+  }
+});
 
 // 获取历史周报列表（支持分页和筛选）
 app.get('/api/reports/history', async (req, res) => {

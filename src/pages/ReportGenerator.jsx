@@ -2,11 +2,9 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import ErrorBoundary from '../components/ErrorBoundary';
 import html2canvas from 'html2canvas';
-import ReportImageTemplate from '../components/ReportImageTemplate';
 import { KEYWORDS } from '../config/keywords';
 // import PromptModal from '../components/PromptModal';
 import './ReportGenerator.css';
-import jsPDF from 'jspdf';
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, BorderStyle, WidthType, Table, TableRow, TableCell, ImageRun, ExternalHyperlink, PageBreak } from 'docx';
 
 const ReportGenerator = () => {
@@ -56,7 +54,7 @@ const ReportGenerator = () => {
   
   // 图片生成相关状态
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
-  const [generatedImageUrl, setGeneratedImageUrl] = useState(null);
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   
   // 流式输出相关状态
   const [streamingContent, setStreamingContent] = useState('');
@@ -348,6 +346,55 @@ const ReportGenerator = () => {
       return '省属国企新闻周报';
     }
     return `${keyword}新闻周报`;
+  };
+
+  const getDownloadFilenameFromDisposition = (headerValue, fallbackName) => {
+    if (!headerValue) return fallbackName;
+
+    const utf8Match = headerValue.match(/filename\*=UTF-8''([^;]+)/i);
+    if (utf8Match?.[1]) {
+      try {
+        return decodeURIComponent(utf8Match[1]);
+      } catch {
+        return fallbackName;
+      }
+    }
+
+    const quotedMatch = headerValue.match(/filename="([^"]+)"/i);
+    if (quotedMatch?.[1]) {
+      return quotedMatch[1];
+    }
+
+    const plainMatch = headerValue.match(/filename=([^;]+)/i);
+    if (plainMatch?.[1]) {
+      return plainMatch[1].trim();
+    }
+
+    return fallbackName;
+  };
+
+  const getApiErrorMessage = (rawText, fallbackMessage) => {
+    if (!rawText) return fallbackMessage;
+
+    const trimmedText = rawText.trim();
+
+    try {
+      const errorData = JSON.parse(trimmedText);
+      return errorData.details || errorData.error || fallbackMessage;
+    } catch {
+      const preMatch = trimmedText.match(/<pre>([\s\S]*?)<\/pre>/i);
+      const normalizedText = (preMatch?.[1] || trimmedText)
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&amp;/g, '&')
+        .trim();
+
+      if (normalizedText.includes('Cannot POST /api/reports/export-pdf')) {
+        return 'PDF 导出接口不可用。当前后端开发服务还没加载新接口，请重启 `npm run dev` 后再试。';
+      }
+
+      return normalizedText || fallbackMessage;
+    }
   };
 
   // 创建与PDF一致的HTML结构
@@ -690,7 +737,6 @@ const ReportGenerator = () => {
       // 转换为下载链接
       canvas.toBlob((blob) => {
         const url = URL.createObjectURL(blob);
-        setGeneratedImageUrl(url);
         
         // 自动下载
         const link = document.createElement('a');
@@ -764,7 +810,6 @@ const ReportGenerator = () => {
       });
       canvas.toBlob((blob) => {
         const url = URL.createObjectURL(blob);
-        setGeneratedImageUrl(url);
         const link = document.createElement('a');
         link.href = url;
         const modelShortName = getModelShortName(debugInfo?.model);
@@ -1498,179 +1543,57 @@ const ReportGenerator = () => {
       alert('请先生成周报');
       return;
     }
-    // 获取渲染后的Markdown内容
-    const reportContentElement = document.querySelector('.report-content');
-    if (!reportContentElement) {
-      alert('未找到周报内容区域');
-      return;
-    }
-    // 构造带AI科技感的PDF结构
-    const tempDiv = document.createElement('div');
-    tempDiv.style.padding = '0 0 24px 0';
-    tempDiv.style.fontFamily = 'Inter, Roboto, Helvetica, Arial, sans-serif';
-    tempDiv.style.background = '#f6f8fa';
-    tempDiv.style.borderRadius = '18px';
-    tempDiv.style.overflow = 'hidden';
-    tempDiv.style.position = 'relative';
-    // 顶部科技感线条
-    const topLine = document.createElement('div');
-    topLine.style.height = '6px';
-    topLine.style.background = 'linear-gradient(90deg, #3d8bfd 0%, #a259ff 100%)';
-    topLine.style.borderRadius = '6px 6px 0 0';
-    topLine.style.boxShadow = '0 0 16px 2px #3d8bfd55';
-    topLine.style.marginBottom = '0';
-    tempDiv.appendChild(topLine);
-    // head区块
-    const headBlock = document.createElement('div');
-    headBlock.style.background = 'linear-gradient(90deg, #232526 0%, #3d8bfd 100%)';
-    headBlock.style.borderRadius = '0 0 18px 18px';
-    headBlock.style.boxShadow = '0 4px 24px 0 rgba(61,139,253,0.10)';
-    headBlock.style.padding = '32px 0 18px 0';
-    headBlock.style.textAlign = 'center';
-    headBlock.style.position = 'relative';
-    headBlock.style.pageBreakInside = 'avoid';
-    headBlock.style.breakInside = 'avoid';
-    // 主标题
-    const title = document.createElement('h1');
-    title.textContent = getReportTitle(selectedKeyword);
-    title.style.fontSize = '34px';
-    title.style.fontWeight = '900';
-    title.style.letterSpacing = '2px';
-    title.style.color = '#fff';
-    title.style.margin = '0 0 8px 0';
-    title.style.textShadow = '0 2px 8px #3d8bfd88';
-    title.style.fontFamily = 'Inter, Roboto, Helvetica, Arial, sans-serif';
-    title.style.display = 'inline-block';
-    title.style.verticalAlign = 'middle';
-    title.style.pageBreakInside = 'avoid';
-    title.style.breakInside = 'avoid';
-    headBlock.appendChild(title);
-    // 副标题+机器人icon
-    const subtitleRow = document.createElement('div');
-    subtitleRow.style.display = 'flex';
-    subtitleRow.style.justifyContent = 'center';
-    subtitleRow.style.alignItems = 'center';
-    subtitleRow.style.gap = '6px';
-    subtitleRow.style.margin = '4px 0 0 0';
-    subtitleRow.style.pageBreakInside = 'avoid';
-    subtitleRow.style.breakInside = 'avoid';
-    // 机器人icon
-    const aiIcon = document.createElement('span');
-    aiIcon.textContent = '🤖';
-    aiIcon.style.fontSize = '18px';
-    aiIcon.style.display = 'inline-block';
-    subtitleRow.appendChild(aiIcon);
-    // 副标题
-    const subtitle = document.createElement('span');
-    subtitle.textContent = 'AI智能新闻周报';
-    subtitle.style.fontSize = '15px';
-    subtitle.style.color = '#e0e7ff';
-    subtitle.style.letterSpacing = '1px';
-    subtitle.style.fontWeight = '500';
-    subtitleRow.appendChild(subtitle);
-    headBlock.appendChild(subtitleRow);
-    // 时间+统计信息一行
-    const infoRow = document.createElement('div');
-    infoRow.style.display = 'flex';
-    infoRow.style.justifyContent = 'center';
-    infoRow.style.alignItems = 'center';
-    infoRow.style.gap = '18px';
-    infoRow.style.background = 'rgba(255,255,255,0.95)';
-    infoRow.style.margin = '18px auto 0 auto';
-    infoRow.style.maxWidth = '600px';
-    infoRow.style.borderRadius = '12px';
-    infoRow.style.boxShadow = '0 2px 8px 0 #3d8bfd11';
-    infoRow.style.padding = '6px 24px 4px 24px';
-    infoRow.style.fontSize = '12px';
-    infoRow.style.color = '#3d8bfd';
-    infoRow.style.fontWeight = '500';
-    infoRow.style.letterSpacing = '0.5px';
-    infoRow.style.pageBreakInside = 'avoid';
-    infoRow.style.breakInside = 'avoid';
-    // 时间 - 只保留mm/dd格式
-    const formatDate = (dateString) => {
-      const date = new Date(dateString);
-      const month = String(date.getMonth() + 1).padStart(2, '0');
-      const day = String(date.getDate()).padStart(2, '0');
-      return `${month}/${day}`;
-    };
-    const timeSpan = document.createElement('span');
-    timeSpan.textContent = `时间：${formatDate(startDate)} - ${formatDate(endDate)}`;
-    infoRow.appendChild(timeSpan);
-    // 分隔符
-    const sep1 = document.createElement('span');
-    sep1.textContent = '|';
-    sep1.style.color = '#b3c6ff';
-    sep1.style.margin = '0 8px';
-    infoRow.appendChild(sep1);
-    // 新闻数 - 改为"AI评分价值新闻"
-    const newsCount = document.createElement('span');
-    newsCount.textContent = `AI评分价值新闻：${selectedNews.length} 条`;
-    infoRow.appendChild(newsCount);
-    // 分隔符
-    const sep2 = document.createElement('span');
-    sep2.textContent = '|';
-    sep2.style.color = '#b3c6ff';
-    sep2.style.margin = '0 8px';
-    infoRow.appendChild(sep2);
-    // AI模型 - 改为"大模型"并使用简称
-    const getModelShortName = (modelName) => {
-      if (!modelName) return 'DeepSeek R1';
-      if (modelName.includes('deepseek')) return 'DeepSeek R1';
-      if (modelName.includes('KIMI') || modelName.includes('kimi')) return 'KIMI K2';
-      if (modelName.includes('gpt')) return 'GPT-4';
-      if (modelName.includes('claude')) return 'Claude 3';
-      return modelName;
-    };
-    const modelName = document.createElement('span');
-    modelName.textContent = `大模型：${getModelShortName(debugInfo?.model)}`;
-    infoRow.appendChild(modelName);
-    headBlock.appendChild(infoRow);
-    tempDiv.appendChild(headBlock);
-    // 正文区块
-    const reportBlock = document.createElement('div');
-    reportBlock.style.background = '#fff';
-    reportBlock.style.borderRadius = '16px';
-    reportBlock.style.padding = '18px 28px 18px 28px';
-    reportBlock.style.margin = '0 auto 0 auto';
-    reportBlock.style.maxWidth = '820px';
-    reportBlock.style.boxShadow = '0 2px 16px 0 #3d8bfd11';
-    reportBlock.style.pageBreakInside = 'avoid';
-    reportBlock.style.breakInside = 'avoid';
-    // 删除“AI生成周报”标题和图标
-    // 只保留正文内容
-    const contentClone = reportContentElement.cloneNode(true);
-    contentClone.style.background = '#fff';
-    contentClone.style.borderRadius = '12px';
-    contentClone.style.padding = '0';
-    contentClone.style.margin = '0';
-    contentClone.style.maxWidth = '100%';
-    contentClone.style.pageBreakInside = 'avoid';
-    contentClone.style.breakInside = 'avoid';
-    // 针对正文内所有段落、标题等加分页控制
-    const blockTags = ['P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'UL', 'OL', 'LI', 'BLOCKQUOTE', 'PRE'];
-    blockTags.forEach(tag => {
-      contentClone.querySelectorAll(tag).forEach(el => {
-        el.style.pageBreakInside = 'avoid';
-        el.style.breakInside = 'avoid';
+    setIsGeneratingPdf(true);
+
+    try {
+      const modelShortName = getModelShortName(debugInfo?.model);
+      const fallbackFilename = `AI新闻周报_${selectedKeyword}_${modelShortName}_${new Date().toISOString().split('T')[0]}.pdf`;
+      const response = await fetch('/api/reports/export-pdf', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          keyword: selectedKeyword,
+          startDate,
+          endDate,
+          newsCount: selectedNews.length,
+          modelName: modelShortName,
+          reportContent: generatedReport,
+        }),
       });
-    });
-    reportBlock.appendChild(contentClone);
-    tempDiv.appendChild(reportBlock);
-    document.body.appendChild(tempDiv);
-    // 动态引入 html2pdf.js
-    const html2pdf = (await import('html2pdf.js')).default;
-    await html2pdf()
-      .from(tempDiv)
-      .set({
-        margin: 0.5,
-        filename: `AI新闻周报_${selectedKeyword}_${getModelShortName(debugInfo?.model)}_${new Date().toISOString().split('T')[0]}.pdf`,
-        html2canvas: { scale: 2 },
-        jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' }
-      })
-      .save();
-    // 清理临时div
-    document.body.removeChild(tempDiv);
+
+      if (!response.ok) {
+        let errorMessage = `HTTP ${response.status}`;
+        const errorText = await response.text();
+
+        if (errorText) {
+          errorMessage = getApiErrorMessage(errorText, errorMessage);
+        }
+
+        throw new Error(errorMessage);
+      }
+
+      const pdfBlob = await response.blob();
+      const downloadUrl = URL.createObjectURL(pdfBlob);
+      const filename = getDownloadFilenameFromDisposition(
+        response.headers.get('content-disposition'),
+        fallbackFilename
+      );
+
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(downloadUrl);
+    } catch (error) {
+      console.error('生成PDF失败:', error);
+      alert(`生成PDF失败: ${error.message}`);
+    } finally {
+      setIsGeneratingPdf(false);
+    }
   };
 
   return (
@@ -2004,16 +1927,23 @@ const ReportGenerator = () => {
                   <button 
                     className="generate-image-btn"
                     onClick={handleGenerateImage}
-                    disabled={isGeneratingImage || !generatedReport}
+                    disabled={isGeneratingImage || isGeneratingPdf || !generatedReport}
                   >
                     {isGeneratingImage ? '🔄 生成中...' : '🎨 制作图片'}
                   </button>
                   <button 
                     className="generate-image-btn"
                     onClick={handleGenerateImageWithContact}
-                    disabled={isGeneratingImage || !generatedReport}
+                    disabled={isGeneratingImage || isGeneratingPdf || !generatedReport}
                   >
                     {isGeneratingImage ? '🔄 生成中...' : '🎨 制作图片(带联系方式)'}
+                  </button>
+                  <button
+                    className="generate-pdf-btn"
+                    onClick={handleGeneratePDF}
+                    disabled={isGeneratingPdf || isGeneratingImage || !generatedReport}
+                  >
+                    {isGeneratingPdf ? '📄 生成PDF中...' : '📄 生成PDF'}
                   </button>
                 </div>
               )}
