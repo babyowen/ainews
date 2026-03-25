@@ -55,6 +55,7 @@ const ReportGenerator = () => {
   // 图片生成相关状态
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+  const [pdfExportVariant, setPdfExportVariant] = useState('standard');
   
   // 流式输出相关状态
   const [streamingContent, setStreamingContent] = useState('');
@@ -1538,16 +1539,18 @@ const ReportGenerator = () => {
     }
   };
 
-  const handleGeneratePDF = async () => {
+  const handleGeneratePDF = async (includeContact = false) => {
     if (!generatedReport) {
       alert('请先生成周报');
       return;
     }
+    setPdfExportVariant(includeContact ? 'contact' : 'standard');
     setIsGeneratingPdf(true);
 
     try {
       const modelShortName = getModelShortName(debugInfo?.model);
-      const fallbackFilename = `AI新闻周报_${selectedKeyword}_${modelShortName}_${new Date().toISOString().split('T')[0]}.pdf`;
+      const contactSuffix = includeContact ? '_带联系方式' : '';
+      const fallbackFilename = `AI新闻周报_${selectedKeyword}_${modelShortName}${contactSuffix}_${new Date().toISOString().split('T')[0]}.pdf`;
       const response = await fetch('/api/reports/export-pdf', {
         method: 'POST',
         headers: {
@@ -1560,6 +1563,7 @@ const ReportGenerator = () => {
           newsCount: selectedNews.length,
           modelName: modelShortName,
           reportContent: generatedReport,
+          includeContact,
         }),
       });
 
@@ -1593,6 +1597,7 @@ const ReportGenerator = () => {
       alert(`生成PDF失败: ${error.message}`);
     } finally {
       setIsGeneratingPdf(false);
+      setPdfExportVariant('standard');
     }
   };
 
@@ -1940,10 +1945,17 @@ const ReportGenerator = () => {
                   </button>
                   <button
                     className="generate-pdf-btn"
-                    onClick={handleGeneratePDF}
+                    onClick={() => handleGeneratePDF(false)}
                     disabled={isGeneratingPdf || isGeneratingImage || !generatedReport}
                   >
-                    {isGeneratingPdf ? '📄 生成PDF中...' : '📄 生成PDF'}
+                    {isGeneratingPdf && pdfExportVariant === 'standard' ? '📄 生成PDF中...' : '📄 生成PDF'}
+                  </button>
+                  <button
+                    className="generate-pdf-btn"
+                    onClick={() => handleGeneratePDF(true)}
+                    disabled={isGeneratingPdf || isGeneratingImage || !generatedReport}
+                  >
+                    {isGeneratingPdf && pdfExportVariant === 'contact' ? '📄 生成PDF中...' : '📄 生成PDF(带联系方式)'}
                   </button>
                 </div>
               )}

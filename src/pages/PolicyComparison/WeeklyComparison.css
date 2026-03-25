@@ -473,8 +473,11 @@
 
 .export-actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
+  align-items: center;
   gap: 1rem;
+  row-gap: 0.75rem;
   margin-bottom: 2rem;
 }
 
@@ -488,6 +491,7 @@
   transition: all 0.2s ease;
   border: none;
   cursor: pointer;
+  white-space: nowrap;
 }
 
 .btn-primary {

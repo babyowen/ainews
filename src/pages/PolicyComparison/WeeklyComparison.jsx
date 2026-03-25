@@ -1,7 +1,12 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { FileText, ArrowRight, Check, Loader2, Download, FileJson, Scale } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import './WeeklyComparison.css';
+import {
+  buildStructuredPolicyComparisonReport,
+  DEFAULT_POLICY_COMPARISON_TITLE,
+  getPolicyComparisonReportStats
+} from './policyComparisonReport';
 
 const createStructuredReport = () => ({
   intro: [],
@@ -513,25 +518,13 @@ const parseModernMarkerMarkdown = (markdown) => {
   return report;
 };
 
-const PolicyMarkdown = ({ content }) => {
-  const parsedReport = (() => {
-    const raw = String(content ?? '');
-    if (raw.includes('[[CITY|') || raw.includes('[[MISSING]]')) {
-      return parseModernMarkerMarkdown(raw);
-    }
-    if (raw.includes('[[SECTION|') || raw.includes('[[CARD|')) {
-      return buildStructuredReportFromLegacy(parseLegacyMarkerMarkdown(raw));
-    }
-    return buildStructuredReportFromLegacy(parseLegacyMarkdown(raw));
-  })();
-
-  const totalMatched = parsedReport.cities.reduce(
-    (sum, city) => sum + city.categories.reduce((acc, category) => acc + category.items.length, 0),
-    0
-  );
-  const totalCategories = new Set(
-    parsedReport.cities.flatMap((city) => city.categories.map((category) => category.title))
-  ).size;
+const PolicyMarkdown = ({ report }) => {
+  const parsedReport = report || buildStructuredPolicyComparisonReport('');
+  const {
+    cityCount,
+    totalMatched,
+    totalCategories,
+  } = getPolicyComparisonReportStats(parsedReport);
   const missingByCity = parsedReport.missing.reduce((acc, item) => {
     if (!acc[item.city]) acc[item.city] = [];
     acc[item.city].push(item);
@@ -545,7 +538,7 @@ const PolicyMarkdown = ({ content }) => {
           <div className="report-overview-grid">
             <div className="report-overview-metric">
               <span className="metric-label">覆盖城市</span>
-              <strong>{parsedReport.cities.length}</strong>
+              <strong>{cityCount}</strong>
             </div>
             <div className="report-overview-metric">
               <span className="metric-label">对比事项</span>
@@ -707,7 +700,12 @@ const WeeklyComparison = () => {
   const [comparisonResult, setComparisonResult] = useState('');
   const [debugInfo, setDebugInfo] = useState({ extraction: null, comparison: null });
   const [error, setError] = useState('');
+  const [isExportingPdf, setIsExportingPdf] = useState(false);
   const reportRef = useRef(null);
+  const structuredReport = useMemo(
+    () => buildStructuredPolicyComparisonReport(comparisonResult),
+    [comparisonResult]
+  );
 
   // Load reports on mount
   useEffect(() => {
@@ -1132,54 +1130,98 @@ const WeeklyComparison = () => {
   };
 
   const handleExportPdf = async () => {
-    if (!reportRef.current) return;
+    if (!comparisonResult || !selectedReport) return;
 
-    const reportElement = reportRef.current;
-    const originalWidth = reportElement.style.width;
-    const originalMaxWidth = reportElement.style.maxWidth;
+    const getDownloadFilenameFromDisposition = (headerValue, fallbackName) => {
+      if (!headerValue) return fallbackName;
+
+      const utf8Match = headerValue.match(/filename\*=UTF-8''([^;]+)/i);
+      if (utf8Match?.[1]) {
+        try {
+          return decodeURIComponent(utf8Match[1]);
+        } catch {
+          return fallbackName;
+        }
+      }
+
+      const quotedMatch = headerValue.match(/filename="([^"]+)"/i);
+      if (quotedMatch?.[1]) return quotedMatch[1];
+
+      const plainMatch = headerValue.match(/filename=([^;]+)/i);
+      if (plainMatch?.[1]) return plainMatch[1].trim();
+
+      return fallbackName;
+    };
+
+    const getApiErrorMessage = (rawText, fallbackMessage) => {
+      if (!rawText) return fallbackMessage;
+
+      const trimmedText = rawText.trim();
+      try {
+        const errorData = JSON.parse(trimmedText);
+        return errorData.details || errorData.error || fallbackMessage;
+      } catch {
+        const preMatch = trimmedText.match(/<pre>([\s\S]*?)<\/pre>/i);
+        const normalizedText = (preMatch?.[1] || trimmedText)
+          .replace(/&lt;/g, '<')
+          .replace(/&gt;/g, '>')
+          .replace(/&amp;/g, '&')
+          .trim();
+
+        if (normalizedText.includes('Cannot POST /api/policy/comparison/export-pdf')) {
+          return '政策对比 PDF 导出接口不可用。当前后端开发服务还没加载新接口，请重启 `npm run dev` 后再试。';
+        }
+
+        return normalizedText || fallbackMessage;
+      }
+    };
+
+    setIsExportingPdf(true);
 
     try {
-      reportElement.style.width = '430px';
-      reportElement.style.maxWidth = '430px';
-
-      ['div', 'p', 'h1', 'h2', 'h3', 'h4', 'ul', 'ol', 'li'].forEach((tag) => {
-        reportElement.querySelectorAll(tag).forEach((el) => {
-          el.dataset.prevPageBreakInside = el.style.pageBreakInside || '';
-          el.dataset.prevBreakInside = el.style.breakInside || '';
-          el.style.pageBreakInside = 'avoid';
-          el.style.breakInside = 'avoid';
-        });
+      const fallbackFilename = `${DEFAULT_POLICY_COMPARISON_TITLE}_${toLocalYMD(selectedReport.start_date || new Date())}.pdf`;
+      const response = await fetch('/api/policy/comparison/export-pdf', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          title: DEFAULT_POLICY_COMPARISON_TITLE,
+          startDate: selectedReport.start_date,
+          endDate: selectedReport.end_date,
+          sourceMode,
+          structuredReport,
+        }),
       });
 
-      const html2pdf = (await import('html2pdf.js')).default;
-      await html2pdf()
-        .from(reportElement)
-        .set({
-          margin: 0.3,
-          filename: `政策对比周报-${selectedReport.start_date}.pdf`,
-          pagebreak: { mode: ['css', 'legacy'] },
-          html2canvas: {
-            scale: 2,
-            useCORS: true,
-            backgroundColor: '#ffffff',
-            windowWidth: 430,
-            width: 430
-          },
-          jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' }
-        })
-        .save();
+      if (!response.ok) {
+        let errorMessage = `HTTP ${response.status}`;
+        const errorText = await response.text();
+        if (errorText) {
+          errorMessage = getApiErrorMessage(errorText, errorMessage);
+        }
+        throw new Error(errorMessage);
+      }
+
+      const pdfBlob = await response.blob();
+      const downloadUrl = URL.createObjectURL(pdfBlob);
+      const filename = getDownloadFilenameFromDisposition(
+        response.headers.get('content-disposition'),
+        fallbackFilename
+      );
+
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(downloadUrl);
+    } catch (err) {
+      console.error('导出PDF失败:', err);
+      alert(`导出PDF失败: ${err.message}`);
     } finally {
-      reportElement.style.width = originalWidth;
-      reportElement.style.maxWidth = originalMaxWidth;
-
-      ['div', 'p', 'h1', 'h2', 'h3', 'h4', 'ul', 'ol', 'li'].forEach((tag) => {
-        reportElement.querySelectorAll(tag).forEach((el) => {
-          el.style.pageBreakInside = el.dataset.prevPageBreakInside || '';
-          el.style.breakInside = el.dataset.prevBreakInside || '';
-          delete el.dataset.prevPageBreakInside;
-          delete el.dataset.prevBreakInside;
-        });
-      });
+      setIsExportingPdf(false);
     }
   };
 
@@ -1664,14 +1706,23 @@ const WeeklyComparison = () => {
             <button
               className="action-btn btn-secondary"
               onClick={() => setCurrentStep('select')}
+              disabled={isExportingPdf}
             >
               重新开始
             </button>
             <button
               className="action-btn btn-primary"
-              onClick={handleExportImage}
+              onClick={handleExportPdf}
+              disabled={isExportingPdf}
             >
-              <Download size={18} /> 导出高清图片（超长自动PDF）
+              <Download size={18} /> {isExportingPdf ? '生成PDF中...' : '生成PDF'}
+            </button>
+            <button
+              className="action-btn btn-primary"
+              onClick={handleExportImage}
+              disabled={isExportingPdf}
+            >
+              <Download size={18} /> 导出高清图片
             </button>
           </div>
 
@@ -1692,7 +1743,7 @@ const WeeklyComparison = () => {
                   ) : null}
                 </div>
               </div>
-              <PolicyMarkdown content={comparisonResult} />
+              <PolicyMarkdown report={structuredReport} />
 
               <div className="report-footer">
                 <p>功能定制联系人:顾芷西 13305150560</p>

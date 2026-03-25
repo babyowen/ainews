@@ -8,6 +8,10 @@ const {
   PdfRendererUnavailableError,
   renderReportPdf,
 } = require('./server/pdf/renderReportPdf.cjs');
+const {
+  buildPolicyComparisonPdfFilename,
+  renderPolicyComparisonPdf,
+} = require('./server/pdf/renderPolicyComparisonPdf.cjs');
 
 const app = express();
 app.use(cors());
@@ -3019,6 +3023,7 @@ app.post('/api/reports/export-pdf', async (req, res) => {
     newsCount,
     modelName,
     reportContent,
+    includeContact,
   } = req.body || {};
 
   if (!keyword || !startDate || !endDate || !reportContent) {
@@ -3033,11 +3038,13 @@ app.post('/api/reports/export-pdf', async (req, res) => {
       newsCount: Number(newsCount) || 0,
       modelName,
       reportContent,
+      includeContact: Boolean(includeContact),
     });
 
     const filename = buildReportPdfFilename({
       keyword,
       modelName,
+      includeContact: Boolean(includeContact),
     });
 
     res.setHeader('Content-Type', 'application/pdf');
@@ -3056,6 +3063,60 @@ app.post('/api/reports/export-pdf', async (req, res) => {
 
     return res.status(500).json({
       error: 'PDF 生成失败',
+      details: error.message,
+    });
+  }
+});
+
+app.post('/api/policy/comparison/export-pdf', async (req, res) => {
+  const {
+    title,
+    startDate,
+    endDate,
+    sourceMode,
+    structuredReport,
+  } = req.body || {};
+
+  const isStructuredReportValid =
+    structuredReport &&
+    Array.isArray(structuredReport.intro) &&
+    Array.isArray(structuredReport.cities) &&
+    Array.isArray(structuredReport.missing);
+
+  if (!title || !startDate || !endDate || !isStructuredReportValid) {
+    return res.status(400).json({ error: '缺少政策对比导出 PDF 所需参数' });
+  }
+
+  try {
+    const pdfBuffer = await renderPolicyComparisonPdf({
+      title,
+      startDate,
+      endDate,
+      sourceMode,
+      structuredReport,
+    });
+
+    const filename = buildPolicyComparisonPdfFilename({
+      title,
+      startDate,
+    });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Length', pdfBuffer.length);
+    res.setHeader('Content-Disposition', buildAttachmentDisposition(filename));
+    res.send(pdfBuffer);
+  } catch (error) {
+    console.error('政策对比 PDF 导出失败:', error);
+
+    if (error instanceof PdfRendererUnavailableError || error?.code === 'PDF_RENDERER_UNAVAILABLE') {
+      return res.status(503).json({
+        error: 'PDF 引擎不可用',
+        details: error.message,
+      });
+    }
+
+    return res.status(500).json({
+      error: '政策对比 PDF 生成失败',
       details: error.message,
     });
   }

@@ -29,7 +29,7 @@ function formatGeneratedAt(date = new Date()) {
   });
 }
 
-function buildReportPdfHtml({ keyword, startDate, endDate, newsCount, modelName, reportContentHtml }) {
+function buildReportPdfHtml({ keyword, startDate, endDate, newsCount, modelName, reportContentHtml, includeContact = false }) {
   const reportTitle = keyword === '江苏省国资委' ? '省属国企新闻周报' : `${keyword}新闻周报`;
   const dateRange = `${formatDate(startDate)} - ${formatDate(endDate)}`;
 
@@ -82,7 +82,7 @@ function buildReportPdfHtml({ keyword, startDate, endDate, newsCount, modelName,
       .report-cover {
         position: relative;
         margin: 0 0 12mm;
-        padding: 13mm 14mm 11mm;
+        padding: 11mm 13mm 8.5mm;
         border-radius: 7mm;
         overflow: hidden;
         color: #ffffff;
@@ -110,7 +110,7 @@ function buildReportPdfHtml({ keyword, startDate, endDate, newsCount, modelName,
         display: inline-flex;
         align-items: center;
         padding: 2.5mm 4.5mm;
-        margin-bottom: 4mm;
+        margin-bottom: 3.4mm;
         border-radius: 999px;
         border: 0.35mm solid rgba(255, 255, 255, 0.18);
         background: rgba(255, 255, 255, 0.10);
@@ -120,9 +120,9 @@ function buildReportPdfHtml({ keyword, startDate, endDate, newsCount, modelName,
       }
 
       .report-title {
-        margin: 0 0 2.6mm;
+        margin: 0 0 2.1mm;
         max-width: 125mm;
-        font-size: 29pt;
+        font-size: 27pt;
         line-height: 1.12;
         font-weight: 800;
         letter-spacing: 0.02em;
@@ -132,20 +132,20 @@ function buildReportPdfHtml({ keyword, startDate, endDate, newsCount, modelName,
         margin: 0;
         max-width: 110mm;
         color: rgba(255, 255, 255, 0.84);
-        font-size: 11pt;
-        line-height: 1.75;
+        font-size: 10.5pt;
+        line-height: 1.62;
       }
 
       .report-meta {
         display: grid;
         grid-template-columns: minmax(56mm, 1.5fr) minmax(32mm, 0.75fr) minmax(38mm, 1fr);
         gap: 3mm;
-        margin-top: 7mm;
+        margin-top: 5.5mm;
         max-width: 100%;
       }
 
       .report-meta-card {
-        padding: 3.8mm 4.2mm;
+        padding: 3.2mm 4mm;
         border-radius: 4.5mm;
         background: rgba(255, 255, 255, 0.94);
         color: var(--ink);
@@ -164,6 +164,15 @@ function buildReportPdfHtml({ keyword, startDate, endDate, newsCount, modelName,
         font-size: 10.8pt;
         line-height: 1.4;
         font-weight: 700;
+      }
+
+      .report-contact {
+        margin-top: 3.2mm;
+        text-align: right;
+        color: rgba(255, 255, 255, 0.66);
+        font-size: 7.5pt;
+        line-height: 1.45;
+        letter-spacing: 0.01em;
       }
 
       .report-body {
@@ -339,6 +348,7 @@ function buildReportPdfHtml({ keyword, startDate, endDate, newsCount, modelName,
               <strong class="report-meta-value">${escapeHtml(modelName || 'DeepSeek R1')}</strong>
             </div>
           </div>
+          ${includeContact ? '<div class="report-contact">定制关键词联系人：顾芷西-13305150560</div>' : ''}
         </div>
       </section>
 
