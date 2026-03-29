@@ -1384,6 +1384,40 @@ const WeeklyComparison = () => {
     </div>
   );
 
+  const isResultReady = currentStep === 'result' && Boolean(comparisonResult) && Boolean(selectedReport);
+
+  const renderExportCapabilityBar = () => (
+    <div className={`export-capability-bar ${isResultReady ? 'ready' : 'pending'}`}>
+      <div className="export-actions export-actions-preview">
+        {isResultReady && (
+          <button
+            className="action-btn btn-secondary"
+            onClick={() => setCurrentStep('select')}
+            disabled={isExportingPdf}
+          >
+            重新开始
+          </button>
+        )}
+        <button
+          className="action-btn btn-primary"
+          onClick={handleExportPdf}
+          disabled={!isResultReady || isExportingPdf}
+          title={!isResultReady ? '完成对比后可生成 PDF' : '生成当前对比结果 PDF'}
+        >
+          <Download size={18} /> {isExportingPdf ? '生成PDF中...' : '生成PDF'}
+        </button>
+        <button
+          className="action-btn btn-primary"
+          onClick={handleExportImage}
+          disabled={!isResultReady || isExportingPdf}
+          title={!isResultReady ? '完成对比后可导出图片' : '导出当前对比结果图片'}
+        >
+          <Download size={18} /> 导出高清图片
+        </button>
+      </div>
+    </div>
+  );
+
   return (
     <div className="weekly-comparison-container">
       <div className="header-section" style={{ marginBottom: '2rem' }}>
@@ -1392,6 +1426,7 @@ const WeeklyComparison = () => {
       </div>
 
       {renderStepIndicator()}
+      {renderExportCapabilityBar()}
 
       {error && (
         <div className="error-banner" style={{
@@ -1702,30 +1737,6 @@ const WeeklyComparison = () => {
       {/* Step 4: Result */}
       {currentStep === 'result' && (
         <div className="step-content">
-          <div className="export-actions">
-            <button
-              className="action-btn btn-secondary"
-              onClick={() => setCurrentStep('select')}
-              disabled={isExportingPdf}
-            >
-              重新开始
-            </button>
-            <button
-              className="action-btn btn-primary"
-              onClick={handleExportPdf}
-              disabled={isExportingPdf}
-            >
-              <Download size={18} /> {isExportingPdf ? '生成PDF中...' : '生成PDF'}
-            </button>
-            <button
-              className="action-btn btn-primary"
-              onClick={handleExportImage}
-              disabled={isExportingPdf}
-            >
-              <Download size={18} /> 导出高清图片
-            </button>
-          </div>
-
           <div className="report-preview-shell">
             <div className="report-preview-scroll">
               <div className="comparison-report report-landscape" ref={reportRef}>
