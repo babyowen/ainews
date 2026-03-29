@@ -1,299 +1,677 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { FileText, ArrowRight, Check, Loader2, Download, ChevronRight, FileJson, Scale } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { FileText, ArrowRight, Check, Loader2, Download, FileJson, Scale } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import './WeeklyComparison.css';
+import {
+  buildStructuredPolicyComparisonReport,
+  DEFAULT_POLICY_COMPARISON_TITLE,
+  getPolicyComparisonReportStats
+} from './policyComparisonReport';
 
-const PolicyMarkdown = ({ content }) => {
-  const parseMarkerMarkdown = (markdown) => {
-    const lines = (markdown || '').split('\n');
-    const result = [];
-    let currentSection = '';
-    let currentCard = null;
-    let currentBlock = null;
+const createStructuredReport = () => ({
+  intro: [],
+  cities: [],
+  missing: []
+});
 
-    const flushBlock = () => {
-      if (currentCard && currentBlock) {
-        currentCard.blocks.push(currentBlock);
-        currentBlock = null;
-      }
-    };
+const parseMarkerMeta = (metaStr) => {
+  const meta = {};
+  (metaStr || '').split('|').forEach((seg) => {
+    const [k, ...rest] = seg.split('=');
+    if (!k || rest.length === 0) return;
+    meta[k.trim()] = rest.join('=').trim().replace(/\]\]+$/, '');
+  });
+  return meta;
+};
 
-    const flushCard = () => {
-      flushBlock();
-      if (currentCard) {
-        result.push(currentCard);
-        currentCard = null;
-      }
-    };
+const renderInlineText = (text) => {
+  const s = String(text ?? '').replace(/__(.+?)__/g, '**$1**');
+  const parts = [];
+  const re = /\*\*(.+?)\*\*/g;
+  let lastIndex = 0;
+  let match;
+  while ((match = re.exec(s)) !== null) {
+    const start = match.index;
+    if (start > lastIndex) parts.push(s.slice(lastIndex, start));
+    parts.push(<strong key={`${start}-${re.lastIndex}`}>{match[1]}</strong>);
+    lastIndex = re.lastIndex;
+  }
+  if (lastIndex < s.length) parts.push(s.slice(lastIndex));
+  return parts.length > 0 ? parts : s;
+};
 
-    const parseCardMeta = (metaStr) => {
-      const meta = {};
-      (metaStr || '').split('|').forEach((seg) => {
-        const [k, ...rest] = seg.split('=');
-        if (!k || rest.length === 0) return;
-        meta[k.trim()] = rest.join('=').trim().replace(/\]\]+$/, '');
-      });
-      return meta;
-    };
+const parseCityLead = (text) => {
+  const s = String(text ?? '').trim();
+  const m = s.match(/^\*\*(.+?)\*\*\s*[:：]\s*(.*)$/);
+  if (!m) return { city: '', text: s };
+  return { city: m[1].trim(), text: (m[2] || '').trim() };
+};
 
-    lines.forEach((rawLine) => {
-      const line = (rawLine || '').trim();
-      if (!line) return;
+const getBlockEntries = (block) => {
+  const list = Array.isArray(block?.list) ? block.list : [];
+  const contentLines = Array.isArray(block?.content) ? block.content : [];
+  return [...list, ...contentLines]
+    .map((item) => String(item ?? '').trim())
+    .filter(Boolean);
+};
 
-      const sec = line.match(/^\[\[SECTION\|(.*)\]\]$/);
-      if (sec) {
-        flushCard();
-        currentSection = sec[1].trim();
-        result.push({ type: 'section', title: currentSection });
-        return;
-      }
+const normalizePolicyTitle = ({ title, localEntries, category }) => {
+  const explicit = String(title ?? '').trim();
+  if (explicit) return explicit;
+  const first = String(localEntries?.[0] ?? '').trim();
+  if (first) return first;
+  return String(category ?? '').trim() || '政策对比项';
+};
 
-      const card = line.match(/^\[\[CARD\|(.*)\]\]$/);
-      if (card) {
-        flushCard();
-        const meta = parseCardMeta(card[1]);
-        currentCard = { type: 'card', category: meta.category || currentSection, city: meta.city || '', blocks: [] };
-        return;
-      }
+const hasMissingYangzhouPolicy = (entries) =>
+  (entries || []).some((entry) => /扬州暂无|暂无该项政策|暂无对应条款/.test(String(entry ?? '')));
 
-      if (line === '[[/CARD]]') {
-        flushCard();
-        return;
-      }
+const ensureCityBucket = (report, cityName) => {
+  const safeName = cityName || '其他城市';
+  let city = report.cities.find((item) => item.name === safeName);
+  if (!city) {
+    city = { name: safeName, summary: [], categories: [] };
+    report.cities.push(city);
+  }
+  return city;
+};
 
-      const block = line.match(/^\[\[BLOCK\|(.+?)\]\]$/);
-      if (block) {
-        if (!currentCard) currentCard = { type: 'card', category: currentSection, city: '', blocks: [] };
-        flushBlock();
-        const key = (block[1] || '').trim();
-        const isYangzhou = key === 'yangzhou';
-        const isDiff = key === 'diff';
-        const label = isYangzhou ? '扬州' : (isDiff ? '对比分析' : key);
-        const labelClass = isYangzhou ? 'yangzhou' : (isDiff ? 'comparison' : 'other');
-        if (labelClass === 'other' && !currentCard.city) currentCard.city = key;
-        currentBlock = { type: 'block', label, labelClass, blockKey: key, content: [], list: [] };
-        return;
-      }
+const ensureCategoryBucket = (city, categoryName) => {
+  const safeTitle = categoryName || '未分类';
+  let category = city.categories.find((item) => item.title === safeTitle);
+  if (!category) {
+    category = { title: safeTitle, items: [] };
+    city.categories.push(category);
+  }
+  return category;
+};
 
-      if (line === '---') {
-        flushCard();
-        result.push({ type: 'separator' });
-        return;
-      }
+const appendMatchedItem = (report, item) => {
+  const city = ensureCityBucket(report, item.city);
+  const category = ensureCategoryBucket(city, item.category);
+  category.items.push({
+    title: normalizePolicyTitle(item),
+    localEntries: item.localEntries || [],
+    yangzhouEntries: item.yangzhouEntries || [],
+    diffEntries: item.diffEntries || []
+  });
+};
 
-      if (line.startsWith('- ')) {
-        const text = line.replace(/^-+\s*/, '').trim();
-        if (currentBlock) currentBlock.list.push(text);
-        else if (currentCard) {
-          if (!currentCard.list) currentCard.list = [];
-          currentCard.list.push(text);
-        } else {
-          result.push({ type: 'content', text });
-        }
-        return;
-      }
+const appendMissingItem = (report, item) => {
+  report.missing.push({
+    city: item.city || '其他城市',
+    category: item.category || '未分类',
+    title: normalizePolicyTitle(item),
+    localEntries: item.localEntries || [],
+    diffEntries: item.diffEntries || []
+  });
+};
 
-      if (currentBlock) currentBlock.content.push(line);
-      else if (currentCard) {
-        if (!currentCard.content) currentCard.content = [];
-        currentCard.content.push(line);
-      } else {
-        result.push({ type: 'content', text: line });
-      }
-    });
+const parseLegacyMarkerMarkdown = (markdown) => {
+  const lines = (markdown || '').split('\n');
+  const result = [];
+  let currentSection = '';
+  let currentCard = null;
+  let currentBlock = null;
 
-    flushCard();
-    return result;
-  };
-
-  const parseMarkdown = (markdown) => {
-    const lines = (markdown || '').split('\n');
-    const result = [];
-    let currentCard = null;
-    let currentBlock = null;
-
-    const flushCard = () => {
-      if (currentBlock && currentCard) {
-        currentCard.blocks.push(currentBlock);
-        currentBlock = null;
-      }
-      if (currentCard) {
-        result.push(currentCard);
-        currentCard = null;
-      }
-    };
-
-    lines.forEach((line) => {
-      const trimmed = (line || '').trim();
-      if (!trimmed) return;
-
-      if (trimmed.startsWith('### ')) {
-        flushCard();
-        result.push({ type: 'section', title: trimmed.replace(/^###\s*/, '').trim() });
-        return;
-      }
-
-      if (trimmed === '---') {
-        flushCard();
-        result.push({ type: 'separator' });
-        return;
-      }
-
-      const labelMatch = trimmed.match(/^\*\*(扬州|其他城市|对比分析)\*\*(?:\s*[:：]\s*(.*))?$/);
-      if (labelMatch) {
-        if (!currentCard) currentCard = { type: 'card', blocks: [] };
-        if (currentBlock) currentCard.blocks.push(currentBlock);
-        const label = labelMatch[1];
-        const labelClass = label === '扬州' ? 'yangzhou' : (label === '对比分析' ? 'comparison' : 'other');
-        currentBlock = { type: 'block', label, labelClass, content: [], list: [] };
-        const inlineText = (labelMatch[2] || '').trim();
-        if (inlineText) currentBlock.content.push(inlineText);
-        return;
-      }
-
-      if (trimmed.startsWith('- ')) {
-        const text = trimmed.replace(/^-+\s*/, '').trim();
-        if (currentBlock) {
-          currentBlock.list.push(text);
-        } else if (currentCard) {
-          if (!currentCard.list) currentCard.list = [];
-          currentCard.list.push(text);
-        } else {
-          result.push({ type: 'content', text });
-        }
-        return;
-      }
-
-      if (currentBlock) {
-        currentBlock.content.push(trimmed);
-      } else if (currentCard) {
-        if (!currentCard.content) currentCard.content = [];
-        currentCard.content.push(trimmed);
-      } else {
-        result.push({ type: 'content', text: trimmed });
-      }
-    });
-
-    flushCard();
-    return result;
-  };
-
-  const parsed = (content || '').includes('[[SECTION|') ? parseMarkerMarkdown(content) : parseMarkdown(content);
-  const order = { other: 1, yangzhou: 2, comparison: 3 };
-  const renderInline = (text) => {
-    const s = String(text ?? '').replace(/__(.+?)__/g, '**$1**');
-    const parts = [];
-    const re = /\*\*(.+?)\*\*/g;
-    let lastIndex = 0;
-    let match;
-    while ((match = re.exec(s)) !== null) {
-      const start = match.index;
-      if (start > lastIndex) parts.push(s.slice(lastIndex, start));
-      parts.push(<strong key={`${start}-${re.lastIndex}`}>{match[1]}</strong>);
-      lastIndex = re.lastIndex;
+  const flushBlock = () => {
+    if (currentCard && currentBlock) {
+      currentCard.blocks.push(currentBlock);
+      currentBlock = null;
     }
-    if (lastIndex < s.length) parts.push(s.slice(lastIndex));
-    return parts.length > 0 ? parts : s;
   };
 
-  const parseCityLine = (text) => {
-    const s = String(text ?? '').trim();
-    const m = s.match(/^\*\*(.+?)\*\*\s*[:：]\s*(.*)$/);
-    if (!m) return { city: '', text: s };
-    return { city: m[1].trim(), text: (m[2] || '').trim() };
+  const flushCard = () => {
+    flushBlock();
+    if (currentCard) {
+      result.push(currentCard);
+      currentCard = null;
+    }
   };
 
-  const getBlockEntries = (block) => {
-    const list = Array.isArray(block?.list) ? block.list : [];
-    const contentLines = Array.isArray(block?.content) ? block.content : [];
-    return [...list, ...contentLines].filter(Boolean);
+  lines.forEach((rawLine) => {
+    const line = (rawLine || '').trim();
+    if (!line) return;
+
+    const sec = line.match(/^\[\[SECTION\|(.*)\]\]$/);
+    if (sec) {
+      flushCard();
+      currentSection = sec[1].trim();
+      result.push({ type: 'section', title: currentSection });
+      return;
+    }
+
+    const card = line.match(/^\[\[CARD\|(.*)\]\]$/);
+    if (card) {
+      flushCard();
+      const meta = parseMarkerMeta(card[1]);
+      currentCard = {
+        type: 'card',
+        category: meta.category || currentSection,
+        city: meta.city || '',
+        title: meta.title || '',
+        blocks: []
+      };
+      return;
+    }
+
+    if (line === '[[/CARD]]') {
+      flushCard();
+      return;
+    }
+
+    const block = line.match(/^\[\[BLOCK\|(.+?)\]\]$/);
+    if (block) {
+      if (!currentCard) {
+        currentCard = { type: 'card', category: currentSection, city: '', title: '', blocks: [] };
+      }
+      flushBlock();
+      const key = (block[1] || '').trim();
+      const isYangzhou = key === 'yangzhou';
+      const isDiff = key === 'diff';
+      const label = isYangzhou ? '扬州' : (isDiff ? '对比分析' : key);
+      const labelClass = isYangzhou ? 'yangzhou' : (isDiff ? 'comparison' : 'other');
+      if (labelClass === 'other' && !currentCard.city) currentCard.city = key;
+      currentBlock = { type: 'block', label, labelClass, blockKey: key, content: [], list: [] };
+      return;
+    }
+
+    if (line === '---') {
+      flushCard();
+      result.push({ type: 'separator' });
+      return;
+    }
+
+    if (line.startsWith('- ')) {
+      const text = line.replace(/^-+\s*/, '').trim();
+      if (currentBlock) currentBlock.list.push(text);
+      else if (currentCard) {
+        if (!currentCard.list) currentCard.list = [];
+        currentCard.list.push(text);
+      } else {
+        result.push({ type: 'content', text });
+      }
+      return;
+    }
+
+    if (currentBlock) currentBlock.content.push(line);
+    else if (currentCard) {
+      if (!currentCard.content) currentCard.content = [];
+      currentCard.content.push(line);
+    } else {
+      result.push({ type: 'content', text: line });
+    }
+  });
+
+  flushCard();
+  return result;
+};
+
+const parseLegacyMarkdown = (markdown) => {
+  const lines = (markdown || '').split('\n');
+  const result = [];
+  let currentCard = null;
+  let currentBlock = null;
+
+  const flushCard = () => {
+    if (currentBlock && currentCard) {
+      currentCard.blocks.push(currentBlock);
+      currentBlock = null;
+    }
+    if (currentCard) {
+      result.push(currentCard);
+      currentCard = null;
+    }
   };
+
+  lines.forEach((line) => {
+    const trimmed = (line || '').trim();
+    if (!trimmed) return;
+
+    if (trimmed.startsWith('### ')) {
+      flushCard();
+      result.push({ type: 'section', title: trimmed.replace(/^###\s*/, '').trim() });
+      return;
+    }
+
+    if (trimmed === '---') {
+      flushCard();
+      result.push({ type: 'separator' });
+      return;
+    }
+
+    const labelMatch = trimmed.match(/^\*\*(扬州|其他城市|对比分析)\*\*(?:\s*[:：]\s*(.*))?$/);
+    if (labelMatch) {
+      if (!currentCard) currentCard = { type: 'card', category: '', city: '', title: '', blocks: [] };
+      if (currentBlock) currentCard.blocks.push(currentBlock);
+      const label = labelMatch[1];
+      const labelClass = label === '扬州' ? 'yangzhou' : (label === '对比分析' ? 'comparison' : 'other');
+      currentBlock = { type: 'block', label, labelClass, content: [], list: [] };
+      const inlineText = (labelMatch[2] || '').trim();
+      if (inlineText) currentBlock.content.push(inlineText);
+      return;
+    }
+
+    if (trimmed.startsWith('- ')) {
+      const text = trimmed.replace(/^-+\s*/, '').trim();
+      if (currentBlock) {
+        currentBlock.list.push(text);
+      } else if (currentCard) {
+        if (!currentCard.list) currentCard.list = [];
+        currentCard.list.push(text);
+      } else {
+        result.push({ type: 'content', text });
+      }
+      return;
+    }
+
+    if (currentBlock) {
+      currentBlock.content.push(trimmed);
+    } else if (currentCard) {
+      if (!currentCard.content) currentCard.content = [];
+      currentCard.content.push(trimmed);
+    } else {
+      result.push({ type: 'content', text: trimmed });
+    }
+  });
+
+  flushCard();
+  return result;
+};
+
+const buildStructuredReportFromLegacy = (parsed) => {
+  const report = createStructuredReport();
+  const groups = [];
+  let current = null;
+
+  parsed.forEach((item) => {
+    if (item.type === 'section') {
+      current = { title: item.title, items: [] };
+      groups.push(current);
+      return;
+    }
+    if (!current) {
+      current = { title: '', items: [] };
+      groups.push(current);
+    }
+    current.items.push(item);
+  });
+
+  groups.forEach((group) => {
+    const cards = group.items.filter((item) => item.type === 'card');
+    const contents = group.items.filter((item) => item.type === 'content');
+    if (contents.length > 0) {
+      report.intro.push(...contents.map((item) => item.text).filter(Boolean));
+    }
+
+    cards.forEach((card) => {
+      const blocks = Array.isArray(card.blocks) ? card.blocks : [];
+      const otherBlock = blocks.find((block) => block.labelClass === 'other');
+      const yangzhouBlock = blocks.find((block) => block.labelClass === 'yangzhou');
+      const diffBlock = blocks.find((block) => block.labelClass === 'comparison');
+
+      const rawLocalEntries = getBlockEntries(otherBlock);
+      const rawYangzhouEntries = getBlockEntries(yangzhouBlock);
+      const diffEntries = getBlockEntries(diffBlock);
+
+      const firstLocal = rawLocalEntries[0] || '';
+      const parsedLead = parseCityLead(firstLocal);
+      const cleanedLocalEntries = [...rawLocalEntries];
+      if (cleanedLocalEntries.length > 0 && parsedLead.text && parsedLead.text !== firstLocal) {
+        cleanedLocalEntries[0] = parsedLead.text;
+      }
+
+      const city = card.city || parsedLead.city || '其他城市';
+      const category = card.category || group.title || '未分类';
+      const title = normalizePolicyTitle({
+        title: card.title,
+        localEntries: cleanedLocalEntries,
+        category
+      });
+
+      if (hasMissingYangzhouPolicy(rawYangzhouEntries)) {
+        appendMissingItem(report, {
+          city,
+          category,
+          title,
+          localEntries: cleanedLocalEntries,
+          diffEntries
+        });
+        return;
+      }
+
+      appendMatchedItem(report, {
+        city,
+        category,
+        title,
+        localEntries: cleanedLocalEntries,
+        yangzhouEntries: rawYangzhouEntries,
+        diffEntries
+      });
+    });
+  });
+
+  return report;
+};
+
+const parseModernMarkerMarkdown = (markdown) => {
+  const report = createStructuredReport();
+  const lines = (markdown || '').split('\n');
+  let currentCity = null;
+  let currentCategory = '';
+  let currentCard = null;
+  let currentMode = '';
+  let inMissingSection = false;
+
+  const flushCard = () => {
+    if (!currentCard) return;
+    const title = normalizePolicyTitle({
+      title: currentCard.title,
+      localEntries: currentCard.localEntries,
+      category: currentCard.category
+    });
+
+    if (inMissingSection || currentCard.yangzhouEntries.length === 0 || hasMissingYangzhouPolicy(currentCard.yangzhouEntries)) {
+      appendMissingItem(report, {
+        city: currentCard.city,
+        category: currentCard.category,
+        title,
+        localEntries: currentCard.localEntries,
+        diffEntries: currentCard.diffEntries.length > 0 ? currentCard.diffEntries : currentCard.noteEntries
+      });
+    } else {
+      appendMatchedItem(report, {
+        city: currentCard.city,
+        category: currentCard.category,
+        title,
+        localEntries: currentCard.localEntries,
+        yangzhouEntries: currentCard.yangzhouEntries,
+        diffEntries: currentCard.diffEntries
+      });
+    }
+    currentCard = null;
+    currentMode = '';
+  };
+
+  lines.forEach((rawLine) => {
+    const line = (rawLine || '').trim();
+    if (!line) return;
+
+    const cityMatch = line.match(/^\[\[CITY\|(.*)\]\]$/);
+    if (cityMatch) {
+      flushCard();
+      currentCity = ensureCityBucket(report, cityMatch[1].trim());
+      currentCategory = '';
+      inMissingSection = false;
+      currentMode = '';
+      return;
+    }
+
+    if (line === '[[/CITY]]') {
+      flushCard();
+      currentCity = null;
+      currentCategory = '';
+      currentMode = '';
+      return;
+    }
+
+    const categoryMatch = line.match(/^\[\[CATEGORY\|(.*)\]\]$/);
+    if (categoryMatch) {
+      flushCard();
+      currentCategory = categoryMatch[1].trim();
+      currentMode = '';
+      return;
+    }
+
+    const cardMatch = line.match(/^\[\[CARD\|(.*)\]\]$/);
+    if (cardMatch) {
+      flushCard();
+      const meta = parseMarkerMeta(cardMatch[1]);
+      currentCard = {
+        city: meta.city || currentCity?.name || '其他城市',
+        category: meta.category || currentCategory || '未分类',
+        title: meta.title || '',
+        localEntries: [],
+        yangzhouEntries: [],
+        diffEntries: [],
+        noteEntries: []
+      };
+      currentMode = '';
+      return;
+    }
+
+    if (line === '[[/CARD]]') {
+      flushCard();
+      return;
+    }
+
+    const blockMatch = line.match(/^\[\[BLOCK\|(.+?)\]\]$/);
+    if (blockMatch) {
+      currentMode = (blockMatch[1] || '').trim().toLowerCase();
+      return;
+    }
+
+    if (line === '[[SUMMARY]]') {
+      currentMode = 'summary';
+      return;
+    }
+
+    if (line === '[[/SUMMARY]]') {
+      currentMode = '';
+      return;
+    }
+
+    if (line === '[[MISSING]]') {
+      flushCard();
+      inMissingSection = true;
+      currentCategory = '';
+      currentMode = '';
+      return;
+    }
+
+    if (line === '[[/MISSING]]') {
+      flushCard();
+      inMissingSection = false;
+      currentMode = '';
+      return;
+    }
+
+    if (line === '---') {
+      flushCard();
+      return;
+    }
+
+    const text = line.startsWith('- ') ? line.replace(/^-+\s*/, '').trim() : line;
+    if (!text) return;
+
+    if (currentMode === 'summary' && currentCity) {
+      currentCity.summary.push(text);
+      return;
+    }
+
+    if (!currentCard) {
+      report.intro.push(text);
+      return;
+    }
+
+    if (currentMode === 'local') {
+      currentCard.localEntries.push(text);
+      return;
+    }
+    if (currentMode === 'yangzhou') {
+      currentCard.yangzhouEntries.push(text);
+      return;
+    }
+    if (currentMode === 'diff') {
+      currentCard.diffEntries.push(text);
+      return;
+    }
+    if (currentMode === 'note') {
+      currentCard.noteEntries.push(text);
+      return;
+    }
+
+    currentCard.diffEntries.push(text);
+  });
+
+  flushCard();
+  return report;
+};
+
+const PolicyMarkdown = ({ report }) => {
+  const parsedReport = report || buildStructuredPolicyComparisonReport('');
+  const {
+    cityCount,
+    totalMatched,
+    totalCategories,
+  } = getPolicyComparisonReportStats(parsedReport);
+  const missingByCity = parsedReport.missing.reduce((acc, item) => {
+    if (!acc[item.city]) acc[item.city] = [];
+    acc[item.city].push(item);
+    return acc;
+  }, {});
 
   return (
     <div className="markdown-content">
-      {(() => {
-        const groups = [];
-        let current = null;
-
-        parsed.forEach((item) => {
-          if (item.type === 'section') {
-            current = { title: item.title, items: [] };
-            groups.push(current);
-            return;
-          }
-          if (!current) {
-            current = { title: '', items: [] };
-            groups.push(current);
-          }
-          current.items.push(item);
-        });
-
-        return groups.map((group, gIdx) => {
-          const cards = group.items.filter((it) => it.type === 'card');
-          const separators = group.items.filter((it) => it.type === 'separator');
-          const contents = group.items.filter((it) => it.type === 'content');
-
-          return (
-            <div key={gIdx} className="policy-section-card">
-              {group.title ? <div className="policy-section-card-title">{group.title}</div> : null}
-
-              {contents.length > 0 ? (
-                <div className="policy-section-card-notes">
-                  {contents.map((c, i) => <p key={i}>{renderInline(c.text)}</p>)}
-                </div>
-              ) : null}
-
-              <div className="policy-section-card-list">
-                {cards.map((card, cIdx) => {
-                  const blocks = Array.isArray(card.blocks) ? card.blocks : [];
-                  const sorted = [...blocks].sort((a, b) => (order[a.labelClass] || 99) - (order[b.labelClass] || 99));
-                  const otherBlock = sorted.find(b => b.labelClass === 'other');
-                  const otherEntries = getBlockEntries(otherBlock);
-                  const otherFirst = otherEntries[0] || '';
-                  const parsedCity = parseCityLine(otherFirst);
-                  const cityName = card.city || parsedCity.city || '';
-                  const cardTitle = parsedCity.text || otherFirst || group.title || card.category || '';
-
-                  return (
-                    <div key={cIdx} className="policy-entry">
-                      <div className="policy-entry-body">
-                        {sorted.map((block, bIdx) => {
-                          const entries = getBlockEntries(block);
-                          const primary = entries[0] || '';
-                          const rest = entries.slice(1);
-
-                          let primaryText = primary;
-                          if (block.labelClass === 'other') {
-                            const parsed = parseCityLine(primary);
-                            primaryText = parsed.text || primary;
-                          }
-
-                          return (
-                            <div key={bIdx} className={`policy-block ${block.labelClass}`}>
-                              <div className="policy-inline-row">
-                                <span className={`city-label ${block.labelClass}`}>{block.label}</span>
-                                <div className="policy-inline-text">{renderInline(primaryText)}</div>
-                              </div>
-                              {rest.length > 0 ? (
-                                <ul className="policy-inline-list">
-                                  {rest.map((t, i) => <li key={i}>{renderInline(t)}</li>)}
-                                </ul>
-                              ) : null}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {separators.length > 0 ? null : null}
+      {(parsedReport.intro.length > 0 || parsedReport.cities.length > 0) ? (
+        <div className="report-overview">
+          <div className="report-overview-grid">
+            <div className="report-overview-metric">
+              <span className="metric-label">覆盖城市</span>
+              <strong>{cityCount}</strong>
             </div>
-          );
-        });
-      })()}
+            <div className="report-overview-metric">
+              <span className="metric-label">对比事项</span>
+              <strong>{totalMatched}</strong>
+            </div>
+            <div className="report-overview-metric">
+              <span className="metric-label">政策类别</span>
+              <strong>{totalCategories}</strong>
+            </div>
+          </div>
+          {parsedReport.intro.length > 0 ? (
+            <div className="report-overview-notes">
+              {parsedReport.intro.map((text, index) => <p key={index}>{renderInlineText(text)}</p>)}
+            </div>
+          ) : (
+            <p className="report-overview-note">
+              已按城市归并呈现周报中的政策差异，扬州未覆盖的外地政策已统一收纳到文末。
+            </p>
+          )}
+        </div>
+      ) : null}
+
+      {parsedReport.cities.map((city, cityIndex) => {
+        const cityItemCount = city.categories.reduce((sum, category) => sum + category.items.length, 0);
+        const citySummary = city.summary.join(' ');
+
+        return (
+          <section key={`${city.name}-${cityIndex}`} className="city-report-card">
+            <div className="city-report-header">
+              <div className="city-report-header-main">
+                <div className="city-report-eyebrow">City Comparison</div>
+                <h2>{city.name}</h2>
+                <p>
+                  {citySummary || `共 ${cityItemCount} 条对比事项，覆盖 ${city.categories.length} 个政策类别。`}
+                </p>
+              </div>
+              <div className="city-report-stats">
+                <div className="city-stat">
+                  <strong>{city.categories.length}</strong>
+                  <span>类别</span>
+                </div>
+                <div className="city-stat">
+                  <strong>{cityItemCount}</strong>
+                  <span>事项</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="city-category-stack">
+              {city.categories.map((category, categoryIndex) => (
+                <div key={`${category.title}-${categoryIndex}`} className="city-category-panel">
+                  <div className="city-category-heading">
+                    <div className="city-category-title">{category.title}</div>
+                    <div className="city-category-count">{category.items.length} 项</div>
+                  </div>
+                  <div className="comparison-item-list">
+                    {category.items.map((item, itemIndex) => (
+                      <article key={`${item.title}-${itemIndex}`} className="comparison-item-card">
+                        <div className="comparison-item-header">
+                          <h3>{item.title}</h3>
+                        </div>
+
+                        <div className="comparison-lanes comparison-lanes-horizontal">
+                          <section className="comparison-lane other">
+                            <div className="comparison-lane-label">{city.name}</div>
+                            <div className="comparison-lane-body">
+                              {item.localEntries.map((entry, index) => (
+                                <p key={index}>{renderInlineText(entry)}</p>
+                              ))}
+                            </div>
+                          </section>
+
+                          <section className="comparison-lane yangzhou">
+                            <div className="comparison-lane-label">扬州</div>
+                            <div className="comparison-lane-body">
+                              {item.yangzhouEntries.map((entry, index) => (
+                                <p key={index}>{renderInlineText(entry)}</p>
+                              ))}
+                            </div>
+                          </section>
+
+                          <section className="comparison-lane diff">
+                            <div className="comparison-lane-label">差异观察</div>
+                            <div className="comparison-lane-body">
+                              {(item.diffEntries.length > 0 ? item.diffEntries : ['差异结论未生成。']).map((entry, index) => (
+                                <p key={index}>{renderInlineText(entry)}</p>
+                              ))}
+                            </div>
+                          </section>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        );
+      })}
+
+      {parsedReport.missing.length > 0 ? (
+        <section className="missing-policy-section">
+          <div className="missing-policy-header">
+            <div className="missing-policy-eyebrow">Gap Summary</div>
+            <h2>扬州暂未覆盖政策</h2>
+            <p>以下政策在外地周报中出现，但当前扬州政策库未找到明确对应条款，统一列示以便后续补充。</p>
+          </div>
+
+          <div className="missing-policy-groups">
+            {Object.entries(missingByCity).map(([city, items]) => (
+              <div key={city} className="missing-city-card">
+                <div className="missing-city-title">
+                  <span>{city}</span>
+                  <strong>{items.length} 项</strong>
+                </div>
+                <div className="missing-item-list">
+                  {items.map((item, index) => (
+                    <article key={`${city}-${item.title}-${index}`} className="missing-item-card">
+                      <div className="missing-item-meta">{item.category}</div>
+                      <h3>{item.title}</h3>
+                      <div className="missing-item-body">
+                        {item.localEntries.map((entry, entryIndex) => (
+                          <p key={entryIndex}>{renderInlineText(entry)}</p>
+                        ))}
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
     </div>
   );
 };
@@ -322,7 +700,12 @@ const WeeklyComparison = () => {
   const [comparisonResult, setComparisonResult] = useState('');
   const [debugInfo, setDebugInfo] = useState({ extraction: null, comparison: null });
   const [error, setError] = useState('');
+  const [isExportingPdf, setIsExportingPdf] = useState(false);
   const reportRef = useRef(null);
+  const structuredReport = useMemo(
+    () => buildStructuredPolicyComparisonReport(comparisonResult),
+    [comparisonResult]
+  );
 
   // Load reports on mount
   useEffect(() => {
@@ -747,110 +1130,206 @@ const WeeklyComparison = () => {
   };
 
   const handleExportPdf = async () => {
-    if (!reportRef.current) return;
+    if (!comparisonResult || !selectedReport) return;
 
-    const reportElement = reportRef.current;
-    const originalWidth = reportElement.style.width;
-    const originalMaxWidth = reportElement.style.maxWidth;
+    const getDownloadFilenameFromDisposition = (headerValue, fallbackName) => {
+      if (!headerValue) return fallbackName;
+
+      const utf8Match = headerValue.match(/filename\*=UTF-8''([^;]+)/i);
+      if (utf8Match?.[1]) {
+        try {
+          return decodeURIComponent(utf8Match[1]);
+        } catch {
+          return fallbackName;
+        }
+      }
+
+      const quotedMatch = headerValue.match(/filename="([^"]+)"/i);
+      if (quotedMatch?.[1]) return quotedMatch[1];
+
+      const plainMatch = headerValue.match(/filename=([^;]+)/i);
+      if (plainMatch?.[1]) return plainMatch[1].trim();
+
+      return fallbackName;
+    };
+
+    const getApiErrorMessage = (rawText, fallbackMessage) => {
+      if (!rawText) return fallbackMessage;
+
+      const trimmedText = rawText.trim();
+      try {
+        const errorData = JSON.parse(trimmedText);
+        return errorData.details || errorData.error || fallbackMessage;
+      } catch {
+        const preMatch = trimmedText.match(/<pre>([\s\S]*?)<\/pre>/i);
+        const normalizedText = (preMatch?.[1] || trimmedText)
+          .replace(/&lt;/g, '<')
+          .replace(/&gt;/g, '>')
+          .replace(/&amp;/g, '&')
+          .trim();
+
+        if (normalizedText.includes('Cannot POST /api/policy/comparison/export-pdf')) {
+          return '政策对比 PDF 导出接口不可用。当前后端开发服务还没加载新接口，请重启 `npm run dev` 后再试。';
+        }
+
+        return normalizedText || fallbackMessage;
+      }
+    };
+
+    setIsExportingPdf(true);
 
     try {
-      reportElement.style.width = '430px';
-      reportElement.style.maxWidth = '430px';
-
-      ['div', 'p', 'h1', 'h2', 'h3', 'h4', 'ul', 'ol', 'li'].forEach((tag) => {
-        reportElement.querySelectorAll(tag).forEach((el) => {
-          el.dataset.prevPageBreakInside = el.style.pageBreakInside || '';
-          el.dataset.prevBreakInside = el.style.breakInside || '';
-          el.style.pageBreakInside = 'avoid';
-          el.style.breakInside = 'avoid';
-        });
+      const fallbackFilename = `${DEFAULT_POLICY_COMPARISON_TITLE}_${toLocalYMD(selectedReport.start_date || new Date())}.pdf`;
+      const response = await fetch('/api/policy/comparison/export-pdf', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          title: DEFAULT_POLICY_COMPARISON_TITLE,
+          startDate: selectedReport.start_date,
+          endDate: selectedReport.end_date,
+          sourceMode,
+          structuredReport,
+        }),
       });
 
-      const html2pdf = (await import('html2pdf.js')).default;
-      await html2pdf()
-        .from(reportElement)
-        .set({
-          margin: 0.3,
-          filename: `政策对比周报-${selectedReport.start_date}.pdf`,
-          pagebreak: { mode: ['css', 'legacy'] },
-          html2canvas: {
-            scale: 2,
-            useCORS: true,
-            backgroundColor: '#ffffff',
-            windowWidth: 430,
-            width: 430
-          },
-          jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' }
-        })
-        .save();
+      if (!response.ok) {
+        let errorMessage = `HTTP ${response.status}`;
+        const errorText = await response.text();
+        if (errorText) {
+          errorMessage = getApiErrorMessage(errorText, errorMessage);
+        }
+        throw new Error(errorMessage);
+      }
+
+      const pdfBlob = await response.blob();
+      const downloadUrl = URL.createObjectURL(pdfBlob);
+      const filename = getDownloadFilenameFromDisposition(
+        response.headers.get('content-disposition'),
+        fallbackFilename
+      );
+
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(downloadUrl);
+    } catch (err) {
+      console.error('导出PDF失败:', err);
+      alert(`导出PDF失败: ${err.message}`);
     } finally {
-      reportElement.style.width = originalWidth;
-      reportElement.style.maxWidth = originalMaxWidth;
-
-      ['div', 'p', 'h1', 'h2', 'h3', 'h4', 'ul', 'ol', 'li'].forEach((tag) => {
-        reportElement.querySelectorAll(tag).forEach((el) => {
-          el.style.pageBreakInside = el.dataset.prevPageBreakInside || '';
-          el.style.breakInside = el.dataset.prevBreakInside || '';
-          delete el.dataset.prevPageBreakInside;
-          delete el.dataset.prevBreakInside;
-        });
-      });
+      setIsExportingPdf(false);
     }
   };
 
   const handleExportImage = async () => {
     if (!reportRef.current) return;
 
-    const reportElement = reportRef.current;
-    const originalWidth = reportElement.style.width;
-
+    let exportWrapper = null;
+    const originalWidth = reportRef.current.style.width;
     try {
-      // 临时设置宽度以获得最佳移动端显示效果
-      reportElement.style.width = '430px'; // iPhone Pro Max width
+      const targetWidth = 1180;
+      const segmentCssHeight = 1100;
+      const maxCanvasHeight = 30000;
+      const maxCanvasArea = 120000000;
+      const totalCssHeight = Math.ceil(reportRef.current.scrollHeight);
+      const baseName = `政策对比周报-${selectedReport?.start_date || 'export'}`;
 
-      // 长内容在生产环境更容易触发 dataURL / 大画布限制，按高度降级缩放更稳
-      const contentHeight = Math.max(reportElement.scrollHeight, reportElement.offsetHeight, 1);
-      if (contentHeight > 12000) {
-        reportElement.style.width = originalWidth;
-        await handleExportPdf();
-        return;
+      reportRef.current.style.width = `${targetWidth}px`;
+
+      const preferredScale = Math.min(3, Math.max(2.5, window.devicePixelRatio || 2.5));
+      const heightLimitedScale = maxCanvasHeight / Math.max(totalCssHeight, 1);
+      const areaLimitedScale = Math.sqrt(maxCanvasArea / Math.max(targetWidth * totalCssHeight, 1));
+      const safeScale = Math.max(1, Math.min(preferredScale, heightLimitedScale, areaLimitedScale));
+
+      exportWrapper = document.createElement('div');
+      exportWrapper.style.position = 'fixed';
+      exportWrapper.style.left = '-100000px';
+      exportWrapper.style.top = '0';
+      exportWrapper.style.width = `${targetWidth}px`;
+      exportWrapper.style.background = '#ffffff';
+      exportWrapper.style.overflow = 'hidden';
+      exportWrapper.style.pointerEvents = 'none';
+      exportWrapper.style.zIndex = '-1';
+
+      const clone = reportRef.current.cloneNode(true);
+      clone.style.width = `${targetWidth}px`;
+      clone.style.maxWidth = `${targetWidth}px`;
+      clone.style.margin = '0';
+      clone.style.transform = 'translateY(0)';
+      clone.style.transformOrigin = 'top left';
+
+      exportWrapper.appendChild(clone);
+      document.body.appendChild(exportWrapper);
+
+      const canvasToBlob = (canvas, type = 'image/png', quality) => new Promise((resolve, reject) => {
+        canvas.toBlob((blob) => {
+          if (blob) resolve(blob);
+          else reject(new Error('图片编码失败'));
+        }, type, quality);
+      });
+
+      const downloadBlob = (blob, filename) => {
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(url), 2000);
+      };
+
+      const captureSlice = async (offsetY, height) => {
+        exportWrapper.style.height = `${height}px`;
+        clone.style.transform = `translateY(-${offsetY}px)`;
+        return await html2canvas(exportWrapper, {
+          scale: safeScale,
+          backgroundColor: '#ffffff',
+          useCORS: true,
+          logging: false,
+          windowWidth: targetWidth,
+          width: targetWidth,
+          height,
+          scrollX: 0,
+          scrollY: 0
+        });
+      };
+
+      const outputCanvas = document.createElement('canvas');
+      outputCanvas.width = Math.round(targetWidth * safeScale);
+      outputCanvas.height = Math.round(totalCssHeight * safeScale);
+      const ctx = outputCanvas.getContext('2d');
+      if (!ctx) throw new Error('无法创建导出画布');
+
+      let cursorCssY = 0;
+      while (cursorCssY < totalCssHeight) {
+        const currentCssHeight = Math.min(segmentCssHeight, totalCssHeight - cursorCssY);
+        const sliceCanvas = await captureSlice(cursorCssY, currentCssHeight);
+        const drawY = Math.round(cursorCssY * safeScale);
+        ctx.drawImage(sliceCanvas, 0, drawY);
+        cursorCssY += currentCssHeight;
       }
-      const scale = contentHeight > 7000 ? 1.5 : 2;
 
-      const canvas = await html2canvas(reportElement, {
-        scale,
-        backgroundColor: '#ffffff',
-        useCORS: true,
-        logging: false,
-        windowWidth: 430,
-        width: 430
-      });
+      const blob = await canvasToBlob(outputCanvas, 'image/png');
+      downloadBlob(blob, `${baseName}.png`);
 
-      // 恢复原始宽度
-      reportElement.style.width = originalWidth;
-
-      const blob = await new Promise((resolve, reject) => {
-        canvas.toBlob((result) => {
-          if (result) {
-            resolve(result);
-            return;
-          }
-          reject(new Error('图片生成失败'));
-        }, 'image/png');
-      });
-
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `政策对比周报-${selectedReport.start_date}.png`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      const notices = [];
+      if (safeScale < preferredScale) {
+        notices.push(`导出倍率已自动调整为 ${safeScale.toFixed(2)}x`);
+      }
+      if (notices.length > 0) {
+        alert(`${notices.join('，')}。当前导出为清晰版 PNG，文件约 ${(blob.size / 1024 / 1024).toFixed(2)}MB。`);
+      }
     } catch (err) {
-      reportElement.style.width = originalWidth;
       console.error('导出失败:', err);
       alert('导出图片失败，请重试');
+    } finally {
+      reportRef.current.style.width = originalWidth;
+      if (exportWrapper?.parentNode) {
+        exportWrapper.parentNode.removeChild(exportWrapper);
+      }
     }
   };
 
@@ -905,6 +1384,40 @@ const WeeklyComparison = () => {
     </div>
   );
 
+  const isResultReady = currentStep === 'result' && Boolean(comparisonResult) && Boolean(selectedReport);
+
+  const renderExportCapabilityBar = () => (
+    <div className={`export-capability-bar ${isResultReady ? 'ready' : 'pending'}`}>
+      <div className="export-actions export-actions-preview">
+        {isResultReady && (
+          <button
+            className="action-btn btn-secondary"
+            onClick={() => setCurrentStep('select')}
+            disabled={isExportingPdf}
+          >
+            重新开始
+          </button>
+        )}
+        <button
+          className="action-btn btn-primary"
+          onClick={handleExportPdf}
+          disabled={!isResultReady || isExportingPdf}
+          title={!isResultReady ? '完成对比后可生成 PDF' : '生成当前对比结果 PDF'}
+        >
+          <Download size={18} /> {isExportingPdf ? '生成PDF中...' : '生成PDF'}
+        </button>
+        <button
+          className="action-btn btn-primary"
+          onClick={handleExportImage}
+          disabled={!isResultReady || isExportingPdf}
+          title={!isResultReady ? '完成对比后可导出图片' : '导出当前对比结果图片'}
+        >
+          <Download size={18} /> 导出高清图片
+        </button>
+      </div>
+    </div>
+  );
+
   return (
     <div className="weekly-comparison-container">
       <div className="header-section" style={{ marginBottom: '2rem' }}>
@@ -913,6 +1426,7 @@ const WeeklyComparison = () => {
       </div>
 
       {renderStepIndicator()}
+      {renderExportCapabilityBar()}
 
       {error && (
         <div className="error-banner" style={{
@@ -1223,51 +1737,30 @@ const WeeklyComparison = () => {
       {/* Step 4: Result */}
       {currentStep === 'result' && (
         <div className="step-content">
-          <div className="export-actions">
-            <button
-              className="action-btn btn-secondary"
-              onClick={() => setCurrentStep('select')}
-            >
-              重新开始
-            </button>
-            <button
-              className="action-btn btn-primary"
-              onClick={handleExportImage}
-            >
-              <Download size={18} /> 导出高清图片（超长自动PDF）
-            </button>
-          </div>
-
-          {/* Mobile Preview Container */}
-          <div style={{
-            maxWidth: '430px',
-            margin: '0 auto',
-            background: '#ffffff',
-            borderRadius: '0',
-            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
-            overflow: 'hidden'
-          }}>
-            <div className="comparison-report" ref={reportRef} style={{
-              width: '100%',
-              maxWidth: '430px'
-            }}>
+          <div className="report-preview-shell">
+            <div className="report-preview-scroll">
+              <div className="comparison-report report-landscape" ref={reportRef}>
               <div className="report-header">
                 <div className="report-header-bg" />
                 <div className="report-header-inner">
-                  <div className="report-header-title">新闻周报-扬州公积金政策比对报告</div>
+                  <div className="report-header-title">扬州公积金政策城市对比</div>
                   {selectedReport?.start_date && selectedReport?.end_date ? (
-                    <div className="report-subtitle">
-                      对比周报时间：{new Date(selectedReport.start_date).toLocaleDateString()} ~ {new Date(selectedReport.end_date).toLocaleDateString()}
+                    <div className="report-header-meta">
+                      <div className="report-subtitle">
+                        周报区间：{new Date(selectedReport.start_date).toLocaleDateString()} ~ {new Date(selectedReport.end_date).toLocaleDateString()}
+                      </div>
+                      <div className="report-subtitle report-subtitle-secondary">建议手机横屏查看</div>
                     </div>
                   ) : null}
                 </div>
               </div>
-              <PolicyMarkdown content={comparisonResult} />
+              <PolicyMarkdown report={structuredReport} />
 
               <div className="report-footer">
                 <p>功能定制联系人:顾芷西 13305150560</p>
               </div>
             </div>
+          </div>
           </div>
           
           {renderPromptViewer(debugInfo.comparison, '对比阶段')}
