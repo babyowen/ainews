@@ -9,6 +9,7 @@ import WordCountStatsPage from './pages/WordCountStats';
 import HistoryReports from './pages/HistoryReports';
 import CurrentPolicyPage from './pages/PolicyComparison/CurrentPolicy';
 import WeeklyComparisonPage from './pages/PolicyComparison/WeeklyComparison';
+import RegionPolicyBrowser from './pages/PolicyComparison/RegionPolicyBrowser';
 import Layout from './components/Layout';
 import './App.css'
 
@@ -28,6 +29,7 @@ function App() {
             <Route path="/history" element={<HistoryReports />} />
             <Route path="/policy/current" element={<CurrentPolicyPage />} />
             <Route path="/policy/comparison" element={<WeeklyComparisonPage />} />
+            <Route path="/policy/regions" element={<RegionPolicyBrowser />} />
             <Route path="*" element={<Navigate to="/summary" />} />
           </Routes>
         </Layout>

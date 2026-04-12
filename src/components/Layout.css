@@ -1,215 +1,198 @@
+/* ============================================
+   Layout - 极简商务风格
+   配色：炭黑 #1F2937 + 琥珀金 #D97706
+   ============================================ */
+
 .layout-root {
   display: flex;
   min-height: 100vh;
   width: 100%;
   min-width: 0;
   overflow-x: hidden;
-  background: #f5f7fa;
-  align-items: stretch;
+  background: #fafaf9;
 }
 
+/* ============================================
+   Sidebar - 极简商务侧边栏
+   ============================================ */
 .sidebar {
-  width: 220px;
-  background: linear-gradient(180deg, #1a202c 0%, #2d3748 100%);
-  color: #fff;
+  width: 240px;
+  background: #1e2937;
+  color: #f5f5f4;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  padding: 32px 0;
+  padding: 0;
   position: relative;
-  box-shadow: 4px 0 20px rgba(0, 0, 0, 0.25);
-  border-right: 1px solid #4a5568;
+  flex-shrink: 0;
 }
 
-/* 移除复杂的光效背景，改为简单的装饰 */
-.sidebar::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 4px;
-  height: 100%;
-  background: linear-gradient(180deg, #3182ce 0%, #805ad5 50%, #38b2ac 100%);
-  z-index: 1;
-}
-
+/* Logo Section */
 .logo {
-  font-size: 1.8rem;
-  font-weight: 800;
-  margin-bottom: 3rem;
-  letter-spacing: 2px;
-  color: #fff;
-  position: relative;
-  z-index: 2;
-  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 24px 20px 20px;
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  color: #fafaf9;
+  letter-spacing: 0.02em;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-/* 给logo添加AI图标 */
-/* 移除旧的emoji前缀，使用SVG图标 */
+.logo svg {
+  flex-shrink: 0;
+}
 
+.logo-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.logo-text .primary {
+  font-size: 18px;
+  font-weight: 700;
+  color: #fafaf9;
+  line-height: 1.2;
+}
+
+.logo-text .secondary {
+  font-size: 11px;
+  font-weight: 500;
+  color: #d97706;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+/* Navigation Container */
 .sidebar nav {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
-  position: relative;
-  z-index: 2;
-  width: 85%;
+  gap: 2px;
+  padding: 12px 14px;
+  flex: 1;
+  overflow-y: auto;
 }
 
-.sidebar a {
-  color: #e2e8f0;
+/* Navigation Links */
+.sidebar a,
+.menu-trigger {
+  color: #a8a29e;
   text-decoration: none;
-  font-size: 1rem;
-  padding: 14px 20px;
-  border-radius: 10px;
-  transition: all 0.3s ease;
-  position: relative;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 14px;
+  padding: 11px 14px;
+  border-radius: 8px;
+  transition: all 0.2s ease;
   font-weight: 500;
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
+  cursor: pointer;
+  position: relative;
 }
 
-/* 为每个菜单项添加图标 */
-.sidebar a[href="/summary"]::before {
-  content: '📝';
-  font-size: 1.2rem;
+.sidebar a::before,
+.menu-trigger::before {
+  display: none;
 }
 
-.sidebar a[href="/analysis"]::before {
-  content: '📊';
-  font-size: 1.2rem;
+/* Menu Icons - SVG Style */
+.menu-icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  opacity: 0.7;
+  transition: opacity 0.2s ease;
 }
 
-.sidebar a[href="/report"]::before {
-  content: '📋';
-  font-size: 1.2rem;
+.sidebar a:hover .menu-icon,
+.sidebar a.active .menu-icon {
+  opacity: 1;
 }
 
-.sidebar a[href="/config"]::before {
-  content: '⚙️';
-  font-size: 1.2rem;
+/* Hover State */
+.sidebar a:hover,
+.menu-trigger:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #e7e5e4;
 }
 
-.sidebar a[href="/quality"]::before {
-  content: '🔍';
-  font-size: 1.2rem;
-}
-
-.sidebar a[href="/score-edit"]::before {
-  content: '✏️';
-  font-size: 1.2rem;
-}
-
-/* 字数统计页面的图标补齐 */
-.sidebar a[href="/word-count"]::before {
-  content: '📈';
-  font-size: 1.2rem;
-}
-
-/* 历史周报页面的图标 */
-.sidebar a[href="/history"]::before {
-  content: '📚';
-  font-size: 1.2rem;
-}
-
-.sidebar a:hover {
-  background: rgba(255, 255, 255, 0.15);
-  color: #fff;
-  transform: translateX(6px);
-  border-color: rgba(255, 255, 255, 0.3);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-}
-
+/* Active State */
 .sidebar a.active {
-  background: linear-gradient(135deg, #3182ce 0%, #805ad5 100%);
-  color: #fff;
-  border-color: #3182ce;
-  box-shadow: 0 6px 16px rgba(49, 130, 206, 0.4);
+  background: #d97706;
+  color: #ffffff;
   font-weight: 600;
 }
 
-.sidebar a.active:hover {
-  transform: translateX(6px);
-  box-shadow: 0 8px 20px rgba(49, 130, 206, 0.5);
+.sidebar a.active .menu-icon {
+  opacity: 1;
 }
 
-/* 简化底部装饰 */
-.sidebar::after {
+/* Active indicator - left border */
+.sidebar a.active::after {
   content: '';
   position: absolute;
-  bottom: 20px;
-  left: 20px;
-  right: 20px;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
-  z-index: 2;
+  left: -14px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 20px;
+  background: #d97706;
+  border-radius: 0 2px 2px 0;
 }
 
-.main-content {
-  flex: 1;
-  width: 100vw;
-  max-width: 100vw;
-  min-width: 0;
-  padding: 0;
-  background: #fff;
-  color: #222;
-}
-
-/* Nested Menu Styles */
+/* ============================================
+   Menu Group / Submenu
+   ============================================ */
 .menu-group {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 2px;
 }
 
 .menu-trigger {
-  cursor: pointer;
-  color: #e2e8f0;
-  font-size: 1rem;
-  padding: 14px 20px;
-  border-radius: 10px;
-  transition: all 0.3s ease;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  font-weight: 500;
+  justify-content: space-between;
+  user-select: none;
+}
+
+.menu-trigger.active-group {
+  color: #e7e5e4;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.menu-label {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  white-space: nowrap; /* 强制不换行 */
-}
-
-.menu-trigger::before {
-  content: '🏛️';
-  font-size: 1.2rem;
-}
-
-.menu-trigger:hover, .menu-trigger.active-group {
-  background: rgba(255, 255, 255, 0.15);
-  color: #fff;
-  border-color: rgba(255, 255, 255, 0.3);
+  gap: 10px;
 }
 
 .arrow {
-  font-size: 0.8rem;
-  transition: transform 0.3s ease;
+  font-size: 11px;
+  opacity: 0.5;
+  transition: transform 0.25s ease, opacity 0.2s ease;
+}
+
+.menu-trigger:hover .arrow,
+.menu-trigger.active-group .arrow {
+  opacity: 0.8;
 }
 
 .arrow.open {
   transform: rotate(180deg);
 }
 
+/* Submenu */
 .submenu {
   display: flex;
   flex-direction: column;
-  gap: 5px;
-  padding-left: 20px;
-  overflow: hidden;
+  gap: 2px;
+  padding-left: 12px;
+  margin-left: 9px;
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
   max-height: 0;
-  transition: max-height 0.3s ease-out;
+  overflow: hidden;
+  transition: max-height 0.3s ease;
 }
 
 .submenu.open {
@@ -217,17 +200,75 @@
 }
 
 .submenu a {
-  font-size: 0.9rem;
-  padding: 10px 15px;
+  font-size: 13px;
+  padding: 9px 14px;
+  color: #78716c;
 }
 
-/* Icons for submenu items */
-.sidebar a[href="/policy/current"]::before {
-  content: '📜';
-  font-size: 1rem;
+.submenu a:hover {
+  color: #d6d3d1;
+  background: rgba(255, 255, 255, 0.04);
 }
 
-.sidebar a[href="/policy/comparison"]::before {
-  content: '⚖️';
-  font-size: 1rem;
+.submenu a.active {
+  background: rgba(217, 119, 6, 0.15);
+  color: #fbbf24;
+  font-weight: 500;
+}
+
+.submenu a.active::after {
+  display: none;
+}
+
+/* ============================================
+   Main Content
+   ============================================ */
+.main-content {
+  flex: 1;
+  min-width: 0;
+  background: #fafaf9;
+  overflow-x: auto;
+}
+
+/* ============================================
+   Scrollbar Styling
+   ============================================ */
+.sidebar nav::-webkit-scrollbar {
+  width: 4px;
+}
+
+.sidebar nav::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.sidebar nav::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+}
+
+.sidebar nav::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* ============================================
+   Responsive
+   ============================================ */
+@media (max-width: 768px) {
+  .sidebar {
+    width: 200px;
+  }
+
+  .logo {
+    padding: 20px 16px 16px;
+  }
+
+  .sidebar nav {
+    padding: 10px 12px;
+  }
+
+  .sidebar a,
+  .menu-trigger {
+    padding: 10px 12px;
+    font-size: 13px;
+  }
 }

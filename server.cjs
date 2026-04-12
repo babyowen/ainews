@@ -3261,6 +3261,385 @@ app.get('/api/reports/keywords/list', async (req, res) => {
   }
 });
 
+// ============================================
+// 地域政策相关 API
+// ============================================
+
+// 国外/境外地区列表（需要过滤）
+const foreignRegions = ['新加坡', '日本', '韩国', '美国', '英国', '法国', '德国', '澳大利亚', '加拿大', '新西兰', '泰国', '马来西亚', '越南', '菲律宾', '印度尼西亚', '印度'];
+
+// 纯省级名称映射（如"湖南"映射到"湖南省"）
+const provinceNameMap = {
+  '北京': '北京市', '上海': '上海市', '天津': '天津市', '重庆': '重庆市',
+  '江苏': '江苏省', '浙江': '浙江省', '广东': '广东省', '山东': '山东省',
+  '河南': '河南省', '四川': '四川省', '湖北': '湖北省', '湖南': '湖南省',
+  '河北': '河北省', '福建': '福建省', '安徽': '安徽省', '辽宁': '辽宁省',
+  '陕西': '陕西省', '江西': '江西省', '黑龙江': '黑龙江省', '吉林': '吉林省',
+  '云南': '云南省', '贵州': '贵州省', '山西': '山西省', '广西': '广西壮族自治区',
+  '内蒙古': '内蒙古自治区', '新疆': '新疆维吾尔自治区', '西藏': '西藏自治区',
+  '宁夏': '宁夏回族自治区', '青海': '青海省', '甘肃': '甘肃省', '海南': '海南省',
+  '台湾': '台湾省', '香港': '香港特别行政区', '澳门': '澳门特别行政区'
+};
+
+// 直辖市列表
+const municipalities = ['北京', '上海', '天津', '重庆', '北京市', '上海市', '天津市', '重庆市'];
+
+// 判断是否为国外/境外地区
+function isForeignRegion(region) {
+  if (!region) return true;
+  return foreignRegions.some(foreign => region.includes(foreign));
+}
+
+// 地域分级识别函数
+function classifyRegion(region) {
+  if (!region) return null;
+
+  // 过滤国外数据
+  if (isForeignRegion(region)) {
+    return null;
+  }
+
+  // 全国级
+  if (region === '全国') {
+    return { level: 'national', name: '全国', parent: null };
+  }
+
+  // 直辖市（与省级同层级）
+  if (municipalities.includes(region)) {
+    const shortName = region.replace('市', '');
+    return { level: 'municipality', name: shortName + '市', parent: '全国' };
+  }
+
+  // 省级（以"省"、"自治区"结尾）
+  if (region.endsWith('省') || region.endsWith('自治区') || region.endsWith('特别行政区')) {
+    return { level: 'province', name: region, parent: '全国' };
+  }
+
+  // 纯省级名称（如"湖南"）
+  if (provinceNameMap[region]) {
+    return { level: 'province', name: provinceNameMap[region], parent: '全国', isShortName: true };
+  }
+
+  // 其他视为市级
+  return { level: 'city', name: region, parent: null };
+}
+
+// 拆分多地域（以|分隔）
+function splitMultiRegion(regionStr) {
+  if (!regionStr) return [];
+  return regionStr.split('|').map(r => r.trim()).filter(r => r && !isForeignRegion(r));
+}
+
+// 省份-城市映射表（用于识别城市所属省份）
+const provinceCityMap = {
+  '江苏省': ['南京', '苏州', '无锡', '常州', '扬州', '镇江', '泰州', '南通', '盐城', '淮安', '宿迁', '连云港', '徐州'],
+  '浙江省': ['杭州', '宁波', '温州', '嘉兴', '湖州', '绍兴', '金华', '衢州', '舟山', '台州', '丽水'],
+  '广东省': ['广州', '深圳', '珠海', '汕头', '佛山', '韶关', '湛江', '肇庆', '江门', '茂名', '惠州', '梅州', '汕尾', '河源', '阳江', '清远', '东莞', '中山', '潮州', '揭阳', '云浮'],
+  '山东省': ['济南', '青岛', '淄博', '枣庄', '东营', '烟台', '潍坊', '济宁', '泰安', '威海', '日照', '临沂', '德州', '聊城', '滨州', '菏泽'],
+  '河南省': ['郑州', '开封', '洛阳', '平顶山', '安阳', '鹤壁', '新乡', '焦作', '濮阳', '许昌', '漯河', '三门峡', '南阳', '商丘', '信阳', '周口', '驻马店'],
+  '四川省': ['成都', '自贡', '攀枝花', '泸州', '德阳', '绵阳', '广元', '遂宁', '内江', '乐山', '南充', '眉山', '宜宾', '广安', '达州', '雅安', '巴中', '资阳', '阿坝', '甘孜', '凉山'],
+  '湖北省': ['武汉', '黄石', '十堰', '宜昌', '襄阳', '鄂州', '荆门', '孝感', '荆州', '黄冈', '咸宁', '随州', '恩施', '仙桃', '潜江', '天门', '神农架'],
+  '湖南省': ['长沙', '株洲', '湘潭', '衡阳', '邵阳', '岳阳', '常德', '张家界', '益阳', '郴州', '永州', '怀化', '娄底', '湘西'],
+  '河北省': ['石家庄', '唐山', '秦皇岛', '邯郸', '邢台', '保定', '张家口', '承德', '沧州', '廊坊', '衡水'],
+  '福建省': ['福州', '厦门', '莆田', '三明', '泉州', '漳州', '南平', '龙岩', '宁德'],
+  '安徽省': ['合肥', '芜湖', '蚌埠', '淮南', '马鞍山', '淮北', '铜陵', '安庆', '黄山', '滁州', '阜阳', '宿州', '六安', '亳州', '池州', '宣城'],
+  '辽宁省': ['沈阳', '大连', '鞍山', '抚顺', '本溪', '丹东', '锦州', '营口', '阜新', '辽阳', '盘锦', '铁岭', '朝阳', '葫芦岛'],
+  '陕西省': ['西安', '铜川', '宝鸡', '咸阳', '渭南', '延安', '汉中', '榆林', '安康', '商洛'],
+  '江西省': ['南昌', '景德镇', '萍乡', '九江', '新余', '鹰潭', '赣州', '吉安', '宜春', '抚州', '上饶'],
+  '黑龙江省': ['哈尔滨', '齐齐哈尔', '鸡西', '鹤岗', '双鸭山', '大庆', '伊春', '佳木斯', '七台河', '牡丹江', '黑河', '绥化', '大兴安岭'],
+  '吉林省': ['长春', '吉林', '四平', '辽源', '通化', '白山', '松原', '白城', '延边', '长白山'],
+  '云南省': ['昆明', '曲靖', '玉溪', '保山', '昭通', '丽江', '普洱', '临沧', '楚雄', '红河', '文山', '西双版纳', '大理', '德宏', '怒江', '迪庆'],
+  '贵州省': ['贵阳', '六盘水', '遵义', '安顺', '毕节', '铜仁', '黔西南', '黔东南', '黔南'],
+  '山西省': ['太原', '大同', '阳泉', '长治', '晋城', '朔州', '晋中', '运城', '忻州', '临汾', '吕梁'],
+  '广西壮族自治区': ['南宁', '柳州', '桂林', '梧州', '北海', '防城港', '钦州', '贵港', '玉林', '百色', '贺州', '河池', '来宾', '崇左'],
+  '内蒙古自治区': ['呼和浩特', '包头', '乌海', '赤峰', '通辽', '鄂尔多斯', '呼伦贝尔', '巴彦淖尔', '乌兰察布', '兴安', '锡林郭勒', '阿拉善'],
+  '新疆维吾尔自治区': ['乌鲁木齐', '克拉玛依', '吐鲁番', '哈密', '昌吉', '博尔塔拉', '巴音郭楞', '阿克苏', '克孜勒苏', '喀什', '和田', '伊犁', '塔城', '阿勒泰', '石河子', '阿拉尔', '图木舒克', '五家渠', '北屯', '铁门关', '双河', '可克达拉', '昆玉', '胡杨河', '新星'],
+  '西藏自治区': ['拉萨', '日喀则', '昌都', '林芝', '山南', '那曲', '阿里'],
+  '宁夏回族自治区': ['银川', '石嘴山', '吴忠', '固原', '中卫'],
+  '青海省': ['西宁', '海东', '海北', '黄南', '海南', '果洛', '玉树', '海西'],
+  '甘肃省': ['兰州', '嘉峪关', '金昌', '白银', '天水', '武威', '张掖', '平凉', '酒泉', '庆阳', '定西', '陇南', '临夏', '甘南'],
+  '海南省': ['海口', '三亚', '三沙', '儋州', '五指山', '琼海', '文昌', '万宁', '东方', '定安', '屯昌', '澄迈', '临高', '白沙', '昌江', '乐东', '陵水', '保亭', '琼中'],
+  '台湾省': ['台北', '新北', '桃园', '台中', '台南', '高雄', '基隆', '新竹', '嘉义'],
+  '香港特别行政区': ['香港'],
+  '澳门特别行政区': ['澳门']
+};
+
+// 获取城市所属省份
+function getCityProvince(cityName) {
+  for (const [province, cities] of Object.entries(provinceCityMap)) {
+    if (cities.includes(cityName)) {
+      return province;
+    }
+  }
+  return null;
+}
+
+// 获取地域列表（带统计和层级结构）
+app.get('/api/policy/regions', async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+
+    let dateFilter = '';
+    const params = ['公积金'];
+
+    if (startDate && endDate) {
+      dateFilter = ' AND fetchdate >= ? AND fetchdate <= ?';
+      params.push(startDate, endDate);
+    }
+
+    // 查询各地域的新闻（不过滤，先获取原始数据）
+    const [rows] = await pool.query(`
+      SELECT region, COUNT(*) as count, AVG(score) as avgScore
+      FROM scored_news
+      WHERE keyword = ?
+        AND region IS NOT NULL
+        AND region != ''
+        ${dateFilter}
+      GROUP BY region
+      ORDER BY count DESC
+    `, params);
+
+    // 构建层级结构
+    const regionTree = {
+      national: { name: '全国', count: 0, avgScore: 0, children: [] },
+      provinces: {},
+      municipalities: {} // 直辖市单独处理
+    };
+
+    // 统计计数器（处理多地域拆分后的计数）
+    const regionStats = {};
+
+    rows.forEach(row => {
+      // 拆分多地域
+      const regions = splitMultiRegion(row.region);
+      if (regions.length === 0) return;
+
+      // 每个地域都计入统计（一条新闻可能属于多个地域）
+      regions.forEach(regionName => {
+        if (!regionStats[regionName]) {
+          regionStats[regionName] = { count: 0, totalScore: 0 };
+        }
+        regionStats[regionName].count += row.count;
+        regionStats[regionName].totalScore += parseFloat(row.avgScore || 0) * row.count;
+      });
+    });
+
+    // 处理统计数据并构建树
+    Object.entries(regionStats).forEach(([regionName, stats]) => {
+      const classified = classifyRegion(regionName);
+      if (!classified) return;
+
+      const avgScore = (stats.totalScore / stats.count).toFixed(2);
+
+      if (classified.level === 'national') {
+        regionTree.national.count = stats.count;
+        regionTree.national.avgScore = avgScore;
+      } else if (classified.level === 'municipality') {
+        // 直辖市与省级同层级
+        regionTree.municipalities[classified.name] = {
+          name: classified.name,
+          count: stats.count,
+          avgScore: avgScore,
+          type: 'municipality'
+        };
+      } else if (classified.level === 'province') {
+        const provinceName = classified.name;
+        if (!regionTree.provinces[provinceName]) {
+          regionTree.provinces[provinceName] = {
+            name: provinceName,
+            count: 0,
+            avgScore: 0,
+            children: [],
+            hasProvincialNews: false
+          };
+        }
+
+        // 纯省级名称（如"湖南"）算作省级新闻
+        if (classified.isShortName) {
+          regionTree.provinces[provinceName].children.push({
+            name: '省级',
+            count: stats.count,
+            avgScore: avgScore,
+            type: 'provincial'
+          });
+          regionTree.provinces[provinceName].hasProvincialNews = true;
+        }
+        regionTree.provinces[provinceName].count += stats.count;
+      } else if (classified.level === 'city') {
+        const provinceName = getCityProvince(regionName) || '其他';
+        if (!regionTree.provinces[provinceName]) {
+          regionTree.provinces[provinceName] = {
+            name: provinceName,
+            count: 0,
+            avgScore: 0,
+            children: [],
+            hasProvincialNews: false
+          };
+        }
+        regionTree.provinces[provinceName].children.push({
+          name: regionName,
+          count: stats.count,
+          avgScore: avgScore,
+          type: 'city'
+        });
+        regionTree.provinces[provinceName].count += stats.count;
+      }
+    });
+
+    // 计算各省份平均分
+    Object.values(regionTree.provinces).forEach(province => {
+      if (province.children.length > 0) {
+        const totalScore = province.children.reduce((sum, child) => sum + parseFloat(child.avgScore || 0) * child.count, 0);
+        province.avgScore = (totalScore / province.count).toFixed(2);
+      }
+    });
+
+    res.json(regionTree);
+  } catch (error) {
+    console.error('获取地域列表失败:', error);
+    res.status(500).json({ error: '获取地域列表失败', details: error.message });
+  }
+});
+
+// 按地域获取新闻
+app.get('/api/policy/region-news', async (req, res) => {
+  try {
+    const {
+      region,
+      regionLevel = 'city', // 'national' | 'province' | 'city' | 'municipality' | 'provincial'
+      startDate,
+      endDate,
+      page = 1,
+      pageSize = 20,
+      sortBy = 'fetchdate',
+      order = 'desc'
+    } = req.query;
+
+    if (!region) {
+      return res.status(400).json({ error: '地域参数必填' });
+    }
+
+    const validSortFields = ['fetchdate', 'score', 'title', 'source'];
+    const sortField = validSortFields.includes(sortBy) ? sortBy : 'fetchdate';
+    const sortOrder = order.toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+
+    // 构建查询条件
+    let whereClause = 'WHERE keyword = ?';
+    const params = ['公积金'];
+
+    if (regionLevel === 'national') {
+      whereClause += ' AND region = ?';
+      params.push('全国');
+    } else if (regionLevel === 'province') {
+      // 省级查询：包含该省省级新闻和下属所有城市的新闻
+      const cities = provinceCityMap[region] || [];
+      // 纯省级名称（如"湖南"）也要匹配
+      const shortProvinceName = region.replace('省', '').replace('自治区', '').replace('特别行政区', '');
+      const regionConditions = [
+        `region = ?`,
+        `region LIKE ?`,  // 匹配纯省级名称
+        ...cities.map(() => 'region LIKE ?')  // 使用LIKE匹配多地域中的城市
+      ];
+      whereClause += ` AND (${regionConditions.join(' OR ')})`;
+      params.push(region, `%${shortProvinceName}%`, ...cities.map(() => `%|%`));
+      // 重新构建params，需要更精确的匹配
+      params.length = 1; // 重置params
+      params.push(region);
+      // 纯省级名称匹配（region字段完全等于或包含在|分隔的列表中）
+      params.push(shortProvinceName);
+      // 城市匹配（城市名可能在多地域字段中）
+      cities.forEach(city => params.push(city));
+
+      // 重新构建SQL
+      const cityConditions = cities.map(() => `
+        region = ? OR
+        region LIKE CONCAT('%', ?, '%') OR
+        region LIKE CONCAT('%', ?, '|%') OR
+        region LIKE CONCAT('%|', ?, '%')
+      `).join(' OR ');
+
+      whereClause = `WHERE keyword = ? AND (
+        region = ? OR
+        region = ? OR
+        ${cityConditions ? cityConditions : '1=0'}
+      )`;
+
+      // 重新构建params
+      const newParams = ['公积金', region, shortProvinceName];
+      cities.forEach(city => {
+        newParams.push(city, city, city, city);
+      });
+      params.length = 0;
+      params.push(...newParams);
+
+    } else if (regionLevel === 'municipality') {
+      // 直辖市查询
+      const shortName = region.replace('市', '');
+      whereClause += ` AND (region = ? OR region = ? OR region LIKE ? OR region LIKE ? OR region LIKE ?)`;
+      params.push(region, shortName, `%${region}%`, `%${shortName}%`, `%${shortName}|%`);
+    } else if (regionLevel === 'provincial') {
+      // 纯省级新闻（如"湖南"而非"湖南省"）
+      const shortName = region.replace('省', '').replace('自治区', '').replace('特别行政区', '');
+      whereClause += ` AND (region = ? OR region LIKE ? OR region LIKE ? OR region LIKE ?)`;
+      params.push(shortName, `%${shortName}|%`, `%|${shortName}%`, `%|${shortName}|%`);
+    } else {
+      // 市级查询（支持多地域匹配）
+      // 使用 CONCAT('|', region, '|') 技巧来处理 | 分隔的多地域字段
+      // 例如：region='湖南|娄底' -> '|湖南|娄底|'，可以匹配 '%|娄底|%'
+      whereClause += ` AND (
+        region = ? OR
+        region LIKE CONCAT(?, '|%') OR
+        region LIKE CONCAT('%|', ?) OR
+        region LIKE CONCAT('%|', ?, '|%') OR
+        CONCAT('|', region, '|') LIKE CONCAT('%|', ?, '|%')
+      )`;
+      params.push(region, region, region, region, region);
+    }
+
+    // 过滤国外数据
+    const foreignExcludes = foreignRegions.map(() => 'region NOT LIKE ?').join(' AND ');
+    if (foreignRegions.length > 0) {
+      whereClause += ` AND (${foreignExcludes})`;
+      foreignRegions.forEach(fr => params.push(`%${fr}%`));
+    }
+
+    if (startDate && endDate) {
+      whereClause += ' AND fetchdate >= ? AND fetchdate <= ?';
+      params.push(startDate, endDate);
+    }
+
+    // 查询总数
+    const countSql = `SELECT COUNT(*) as total FROM scored_news ${whereClause}`;
+    const [countRows] = await pool.query(countSql, params);
+    const total = countRows[0].total;
+
+    // 查询数据
+    const dataSql = `
+      SELECT
+        id, title, content, link, source, score,
+        keyword, search_keyword, fetchdate, wordcount,
+        sourceapi, short_summary, region
+      FROM scored_news
+      ${whereClause}
+      ORDER BY ${sortField} ${sortOrder}
+      LIMIT ? OFFSET ?
+    `;
+    const dataParams = [...params, parseInt(pageSize), (parseInt(page) - 1) * parseInt(pageSize)];
+    const [rows] = await pool.query(dataSql, dataParams);
+
+    res.json({
+      rows,
+      total,
+      page: parseInt(page),
+      pageSize: parseInt(pageSize),
+      totalPages: Math.ceil(total / parseInt(pageSize))
+    });
+  } catch (error) {
+    console.error('获取地域新闻失败:', error);
+    res.status(500).json({ error: '获取地域新闻失败', details: error.message });
+  }
+});
+
 // 静态托管 dist 目录
 app.use(express.static(path.join(__dirname, 'dist')));
 
