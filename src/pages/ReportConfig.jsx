@@ -23,10 +23,24 @@ const ReportConfig = () => {
   });
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState('');
+  const [regionPromptVersions, setRegionPromptVersions] = useState([]);
+  const [regionPromptLoading, setRegionPromptLoading] = useState(false);
+  const [regionSaving, setRegionSaving] = useState(false);
+  const [regionDeletingId, setRegionDeletingId] = useState('');
+  const [regionEditForm, setRegionEditForm] = useState({
+    promptId: '',
+    name: '',
+    description: '',
+    systemPrompt: '',
+    userPromptSingle: '',
+    userPromptMulti: '',
+    isDefault: false
+  });
 
   useEffect(() => {
     fetchConfigData();
     fetchKeywordConfig();
+    fetchRegionPromptConfig();
   }, []);
 
   const fetchConfigData = async () => {
@@ -74,6 +88,23 @@ const ReportConfig = () => {
     }
   };
 
+  const fetchRegionPromptConfig = async () => {
+    setRegionPromptLoading(true);
+    try {
+      const res = await fetch('/api/config/region-policy-report-prompts');
+      if (res.ok) {
+        const data = await res.json();
+        setRegionPromptVersions(data.prompts || []);
+      } else {
+        setRegionPromptVersions([]);
+      }
+    } catch {
+      setRegionPromptVersions([]);
+    } finally {
+      setRegionPromptLoading(false);
+    }
+  };
+
   useEffect(() => {
     const loadKeywordPrompts = async () => {
       if (!selectedKeyword) {
@@ -109,7 +140,8 @@ const ReportConfig = () => {
 
   const configSections = [
     { key: 'keyword', label: '关键词 Prompt', icon: '🏷️' },
-    { key: 'policy', label: '政策相关 Prompt', icon: '⚖️' }
+    { key: 'policy', label: '政策相关 Prompt', icon: '⚖️' },
+    { key: 'regionReport', label: '地区政策报告 Prompt', icon: '🗺️' }
   ];
 
   if (loading) {
@@ -480,16 +512,270 @@ const ReportConfig = () => {
             </div>
           </div>
         )}
+
+        {activeSection === 'regionReport' && (
+          <div className="config-section">
+            <div className="section-header">
+              <h2>🗺️ 地区政策报告 Prompt 配置</h2>
+              <div className="section-stats">
+                <span className="stat-chip">版本数: {regionPromptVersions.length}</span>
+              </div>
+            </div>
+
+            <div className="keyword-manager">
+              <div className="keyword-sidebar">
+                <div className="keyword-toolbar">
+                  <button className="refresh-btn" onClick={fetchRegionPromptConfig} disabled={regionPromptLoading}>
+                    <span className="btn-icon">🔄</span>刷新版本
+                  </button>
+                  <button
+                    className="retry-btn"
+                    onClick={() => setRegionEditForm({
+                      promptId: '',
+                      name: '',
+                      description: '',
+                      systemPrompt: '',
+                      userPromptSingle: '',
+                      userPromptMulti: '',
+                      isDefault: false
+                    })}
+                  >
+                    新增版本
+                  </button>
+                </div>
+                <div className="keyword-list">
+                  {regionPromptLoading && <div className="loading-tip">加载中...</div>}
+                  {!regionPromptLoading && regionPromptVersions.length === 0 && (
+                    <div className="empty-tip">暂无地区政策报告 Prompt</div>
+                  )}
+                  {regionPromptVersions.map((p) => (
+                    <button
+                      key={p.id}
+                      className={`keyword-item ${regionEditForm.promptId === p.id ? 'active' : ''}`}
+                      onClick={() => setRegionEditForm({
+                        promptId: p.id,
+                        name: p.name,
+                        description: p.description || '',
+                        systemPrompt: p.systemPrompt || '',
+                        userPromptSingle: p.userPromptSingle || '',
+                        userPromptMulti: p.userPromptMulti || '',
+                        isDefault: !!p.isDefault
+                      })}
+                    >
+                      {p.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="keyword-content">
+                <div className="prompt-version-list">
+                  {regionPromptVersions.map((p) => (
+                    <div key={p.id} className={`prompt-version-card ${p.isDefault ? 'default' : ''}`}>
+                      <div className="prompt-version-header">
+                        <div className="left">
+                          <span className="version-title">{p.name}</span>
+                          {p.isDefault && <span className="default-badge">默认</span>}
+                        </div>
+                        <div className="right">
+                          <button
+                            className="mini-btn"
+                            onClick={() => setRegionEditForm({
+                              promptId: p.id,
+                              name: p.name,
+                              description: p.description || '',
+                              systemPrompt: p.systemPrompt || '',
+                              userPromptSingle: p.userPromptSingle || '',
+                              userPromptMulti: p.userPromptMulti || '',
+                              isDefault: !!p.isDefault
+                            })}
+                          >
+                            编辑
+                          </button>
+                          <button
+                            className="mini-btn danger"
+                            onClick={async () => {
+                              setRegionDeletingId(p.id);
+                              try {
+                                const r = await fetch(`/api/config/region-policy-report-prompts/${encodeURIComponent(p.id)}`, {
+                                  method: 'DELETE'
+                                });
+                                if (r.ok) {
+                                  const next = regionPromptVersions.filter((item) => item.id !== p.id);
+                                  setRegionPromptVersions(next);
+                                  if (regionEditForm.promptId === p.id) {
+                                    setRegionEditForm({
+                                      promptId: '',
+                                      name: '',
+                                      description: '',
+                                      systemPrompt: '',
+                                      userPromptSingle: '',
+                                      userPromptMulti: '',
+                                      isDefault: false
+                                    });
+                                  }
+                                }
+                              } finally {
+                                setRegionDeletingId('');
+                              }
+                            }}
+                            disabled={regionDeletingId === p.id}
+                          >
+                            {regionDeletingId === p.id ? '删除中...' : '删除'}
+                          </button>
+                        </div>
+                      </div>
+                      <div className="prompt-version-desc">{p.description || ''}</div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="edit-form">
+                  <div className="form-row">
+                    <label>版本ID（选填）</label>
+                    <input
+                      value={regionEditForm.promptId}
+                      onChange={(e) => setRegionEditForm({ ...regionEditForm, promptId: e.target.value })}
+                      placeholder="如：single-region-default"
+                    />
+                  </div>
+                  <div className="form-row">
+                    <label>版本名称</label>
+                    <input
+                      value={regionEditForm.name}
+                      onChange={(e) => setRegionEditForm({ ...regionEditForm, name: e.target.value })}
+                      placeholder="如：单地区时间线版"
+                    />
+                  </div>
+                  <div className="form-row">
+                    <label>描述</label>
+                    <input
+                      value={regionEditForm.description}
+                      onChange={(e) => setRegionEditForm({ ...regionEditForm, description: e.target.value })}
+                      placeholder="版本用途说明"
+                    />
+                  </div>
+                  <div className="form-row">
+                    <label>System Prompt</label>
+                    <textarea
+                      value={regionEditForm.systemPrompt}
+                      onChange={(e) => setRegionEditForm({ ...regionEditForm, systemPrompt: e.target.value })}
+                      rows={6}
+                      placeholder="系统提示词内容"
+                    />
+                  </div>
+                  <div className="form-row">
+                    <label>单地区 User Prompt</label>
+                    <textarea
+                      value={regionEditForm.userPromptSingle}
+                      onChange={(e) => setRegionEditForm({ ...regionEditForm, userPromptSingle: e.target.value })}
+                      rows={8}
+                      placeholder="支持 {analysisMode} {startDate} {endDate} {regions} {rawNewsCount} {filteredNewsCount} {excludedNewsCount} {usertopic} {regionBlocks}"
+                    />
+                  </div>
+                  <div className="form-row">
+                    <label>多地区 User Prompt</label>
+                    <textarea
+                      value={regionEditForm.userPromptMulti}
+                      onChange={(e) => setRegionEditForm({ ...regionEditForm, userPromptMulti: e.target.value })}
+                      rows={8}
+                      placeholder="支持 {analysisMode} {startDate} {endDate} {regions} {rawNewsCount} {filteredNewsCount} {excludedNewsCount} {usertopic} {regionBlocks}"
+                    />
+                  </div>
+                  <div className="form-row inline">
+                    <label>设为默认</label>
+                    <input
+                      type="checkbox"
+                      checked={!!regionEditForm.isDefault}
+                      onChange={(e) => setRegionEditForm({ ...regionEditForm, isDefault: e.target.checked })}
+                    />
+                  </div>
+                  <div className="form-actions">
+                    <button
+                      className="refresh-btn"
+                      disabled={regionSaving}
+                      onClick={async () => {
+                        const body = {
+                          promptId: (regionEditForm.promptId || '').trim(),
+                          name: (regionEditForm.name || '').trim(),
+                          description: (regionEditForm.description || '').trim(),
+                          systemPrompt: regionEditForm.systemPrompt || '',
+                          userPromptSingle: regionEditForm.userPromptSingle || '',
+                          userPromptMulti: regionEditForm.userPromptMulti || '',
+                          isDefault: !!regionEditForm.isDefault
+                        };
+
+                        if (!body.name || !body.description || !body.systemPrompt || !body.userPromptSingle || !body.userPromptMulti) {
+                          alert('请完整填写版本名称、描述、System Prompt、单地区 User Prompt、多地区 User Prompt');
+                          return;
+                        }
+
+                        setRegionSaving(true);
+                        try {
+                          const r = await fetch('/api/config/region-policy-report-prompts', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(body)
+                          });
+                          if (r.ok) {
+                            const j = await r.json();
+                            const next = [...regionPromptVersions];
+                            const idx = next.findIndex((item) => item.id === j.prompt.id);
+                            if (idx >= 0) next[idx] = j.prompt; else next.push(j.prompt);
+                            setRegionPromptVersions(next);
+                            setRegionEditForm({
+                              promptId: j.prompt.id,
+                              name: j.prompt.name,
+                              description: j.prompt.description || '',
+                              systemPrompt: j.prompt.systemPrompt || '',
+                              userPromptSingle: j.prompt.userPromptSingle || '',
+                              userPromptMulti: j.prompt.userPromptMulti || '',
+                              isDefault: !!j.prompt.isDefault
+                            });
+                            fetchRegionPromptConfig();
+                          }
+                        } finally {
+                          setRegionSaving(false);
+                        }
+                      }}
+                    >
+                      {regionSaving ? '保存中...' : '保存配置'}
+                    </button>
+                    <button
+                      className="retry-btn"
+                      onClick={() => setRegionEditForm({
+                        promptId: '',
+                        name: '',
+                        description: '',
+                        systemPrompt: '',
+                        userPromptSingle: '',
+                        userPromptMulti: '',
+                        isDefault: false
+                      })}
+                    >
+                      清空
+                    </button>
+                  </div>
+                  <div className="form-tip">保存后，“地区政策报告”页面会读取多版本 Prompt，并按单地区/多地区自动选择对应模板。</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* 底部操作区 */}
       <div className="config-footer">
         <div className="footer-info">
           <span className="info-icon">💡</span>
-          <span>默认提示词存储在 <code>config/prompts.md</code>；关键词提示词存储在 <code>config/keyword-prompts.json</code></span>
+          <span>默认提示词存储在 <code>config/prompts.md</code>；关键词提示词存储在 <code>config/keyword-prompts.json</code>；地区政策报告提示词存储在 <code>config/region-policy-report-prompts.json</code></span>
         </div>
         <button 
-          onClick={fetchConfigData}
+          onClick={() => {
+            fetchConfigData();
+            fetchKeywordConfig();
+            fetchRegionPromptConfig();
+          }}
           className="refresh-btn"
         >
           <span className="btn-icon">🔄</span>

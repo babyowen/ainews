@@ -162,6 +162,10 @@ export default function Layout({ children }) {
                 <MenuIcon type="map" />
                 地域政策浏览
               </Link>
+              <Link className={pathname === "/policy/region-report" ? "active" : ""} to="/policy/region-report">
+                <MenuIcon type="document" />
+                地区政策报告
+              </Link>
             </div>
           </div>
         </nav>
