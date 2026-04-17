@@ -8,7 +8,9 @@ const md = new MarkdownIt({
 });
 
 function renderMarkdownToPrintHtml(markdown = '') {
-  return md.render(String(markdown || ''));
+  return md
+    .render(String(markdown || ''))
+    .replace(/&lt;br\s*\/?&gt;/gi, '<br />');
 }
 
 module.exports = {
