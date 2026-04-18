@@ -3791,6 +3791,10 @@ function getRegionPolicySourceText(news = {}) {
 }
 
 function extractPolicySnippet(news = {}, maxLength = 150) {
+  const summary = String(news.short_summary || '').trim();
+  if (summary) {
+    return summary.length > maxLength ? `${summary.slice(0, maxLength)}...` : summary;
+  }
   const sourceText = getRegionPolicySourceText(news);
   const sentences = splitTextIntoSentences(sourceText);
   const actionSentences = sentences.filter((sentence) =>
@@ -3856,18 +3860,16 @@ function summarizeRegionPolicyNews(newsList = [], maxLength = 500) {
 
   for (const news of ordered) {
     const dateText = news.fetchdate ? formatPolicyDateYmd(news.fetchdate) : '日期不详';
-    const part = `${dateText} ${news.title || '未命名新闻'}：${extractPolicySnippet(news, 120)}`;
-    const nextText = parts.length > 0 ? `${parts.join('\n')}\n${part}` : part;
-    if (nextText.length > maxLength) {
-      break;
-    }
+    const fullSummary = String(news.short_summary || '').trim();
+    const snippet = fullSummary || extractPolicySnippet(news, 120);
+    const part = `${dateText} ${news.title || '未命名新闻'}：${snippet}`;
     parts.push(part);
   }
 
   const summary = parts.join('\n').trim();
   if (!summary) {
-    const fallback = extractPolicySnippet(ordered[0], Math.max(80, maxLength - 20));
-    return fallback.length > maxLength ? `${fallback.slice(0, maxLength)}...` : fallback;
+    const fallback = extractPolicySnippet(ordered[0], 480);
+    return fallback;
   }
   return summary;
 }
@@ -3894,7 +3896,8 @@ function buildRegionBlock(selection, newsList = []) {
 
   const lines = newsList.map((news) => {
     const dateText = news.fetchdate ? formatPolicyDateYmd(news.fetchdate) : '日期不详';
-    const snippet = extractPolicySnippet(news, 140);
+    const fullSummary = String(news.short_summary || '').trim();
+    const snippet = fullSummary || extractPolicySnippet(news, 140);
     return `- ${dateText}｜${news.title || '未命名新闻'}｜来源：${news.source || '未知'}｜地区：${news.region || selection.name}｜摘要：${snippet}`;
   });
 

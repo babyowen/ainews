@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import {
   Calendar,
   ChevronDown,
@@ -18,6 +19,16 @@ import {
   Building,
 } from 'lucide-react';
 import './RegionPolicyReport.css';
+
+function stripMarkdownFences(content = '') {
+  const text = String(content || '').trim();
+  // Remove outer ```markdown ... ``` or ``` ... ``` fences
+  const fenceMatch = text.match(/^```(?:markdown)?\s*\n?([\s\S]*?)\n?```\s*$/i);
+  if (fenceMatch) {
+    return fenceMatch[1].trim();
+  }
+  return text;
+}
 
 const formatDate = (dateStr) => {
   if (!dateStr) return '-';
@@ -44,7 +55,7 @@ const serializeSelection = (item) => buildSelectionKey(item);
 
 const RegionPolicyReport = () => {
   const [regionTree, setRegionTree] = useState({ national: null, provinces: {}, municipalities: {} });
-  const [expandedProvinces, setExpandedProvinces] = useState(new Set(['江苏省']));
+  const [expandedProvinces, setExpandedProvinces] = useState(new Set());
   const [selectedRegions, setSelectedRegions] = useState([]);
   const [dateRange, setDateRange] = useState(getDefaultDateRange());
   const [promptOptions, setPromptOptions] = useState([]);
@@ -338,7 +349,7 @@ const RegionPolicyReport = () => {
           rawNewsCount: reportData.meta?.rawNewsCount,
           filteredNewsCount: reportData.meta?.filteredNewsCount,
           excludedNewsCount: reportData.meta?.excludedNewsCount,
-          reportContent: reportData.reportContent,
+          reportContent: stripMarkdownFences(reportData.reportContent),
           newsReferences: reportSnapshot?.newsReferences || [],
         }),
       });
@@ -414,12 +425,15 @@ const RegionPolicyReport = () => {
                     className="rr-expand-btn"
                     onClick={() => hasChildren && toggleProvince(name)}
                   >
-                    {hasChildren ? (isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />) : <Building2 size={14} />}
+                    {hasChildren ? (isExpanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />) : <Building2 size={16} />}
                   </button>
                   <button
                     type="button"
                     className={`rr-region-item rr-region-item-province ${isSelected(provinceItem) ? 'selected' : ''}`}
-                    onClick={() => toggleSelection(provinceItem)}
+                    onClick={() => {
+                      toggleSelection(provinceItem);
+                      if (hasChildren && !isExpanded) toggleProvince(name);
+                    }}
                   >
                     <span className="rr-region-name">{name}</span>
                     <span className="rr-region-count">{data.count}条</span>
@@ -903,7 +917,7 @@ const RegionPolicyReport = () => {
                   <div className="rr-warning-box">你已修改纳入/排除勾选，当前报告与预览状态不一致。请重新生成后再导出 PDF。</div>
                 )}
                 <article className="rr-markdown">
-                  <ReactMarkdown>{reportData.reportContent}</ReactMarkdown>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{stripMarkdownFences(reportData.reportContent)}</ReactMarkdown>
                 </article>
               </div>
             )}

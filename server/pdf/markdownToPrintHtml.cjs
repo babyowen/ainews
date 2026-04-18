@@ -7,8 +7,16 @@ const md = new MarkdownIt({
   typographer: false,
 });
 
-function renderMarkdownToPrintHtml(markdown = '') {
-  return md
+const mdBreaks = new MarkdownIt({
+  html: false,
+  linkify: true,
+  breaks: true,
+  typographer: false,
+});
+
+function renderMarkdownToPrintHtml(markdown = '', options = {}) {
+  const renderer = options.breaks ? mdBreaks : md;
+  return renderer
     .render(String(markdown || ''))
     .replace(/&lt;br\s*\/?&gt;/gi, '<br />');
 }

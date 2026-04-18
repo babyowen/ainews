@@ -270,7 +270,7 @@
 
 .rr-province-row {
   display: grid;
-  grid-template-columns: 34px 1fr;
+  grid-template-columns: 38px 1fr;
   gap: 8px;
   align-items: start;
 }
@@ -279,10 +279,22 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  width: 38px;
+  min-width: 38px;
   height: 40px;
-  border-radius: 12px;
-  background: #eef3f8;
-  color: #4d6277;
+  border-radius: 10px;
+  background: #dce6f0;
+  color: #1d4f7d;
+  font-size: 18px;
+  border: 1px solid rgba(29, 79, 125, 0.15);
+  transition: background 0.15s ease;
+  padding: 0;
+}
+
+.rr-expand-btn svg {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
 }
 
 .rr-city-list {
@@ -852,6 +864,99 @@
 .rr-markdown ul,
 .rr-markdown ol {
   padding-left: 1.5em;
+}
+
+/* ── Markdown table ── */
+.rr-markdown table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 18px 0;
+  font-size: 13px;
+}
+
+.rr-markdown th,
+.rr-markdown td {
+  padding: 10px 12px;
+  border: 1px solid rgba(17, 35, 55, 0.10);
+  text-align: left;
+  vertical-align: top;
+}
+
+.rr-markdown th {
+  background: rgba(244, 248, 252, 0.92);
+  color: #17304d;
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+}
+
+.rr-markdown td {
+  color: #33475b;
+}
+
+.rr-markdown tr:nth-child(even) td {
+  background: rgba(247, 250, 253, 0.6);
+}
+
+/* ── Markdown blockquote ── */
+.rr-markdown blockquote {
+  margin: 16px 0;
+  padding: 10px 16px;
+  border-left: 3px solid rgba(44, 106, 163, 0.35);
+  background: rgba(237, 244, 251, 0.5);
+  color: #4a6077;
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.rr-markdown blockquote p {
+  margin: 0;
+  color: inherit;
+}
+
+/* ── Markdown code & pre ── */
+.rr-markdown code {
+  font-family: 'SF Mono', Menlo, Monaco, Consolas, monospace;
+  font-size: 0.9em;
+  background: rgba(17, 35, 55, 0.06);
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: #1d4f7d;
+}
+
+.rr-markdown pre {
+  margin: 16px 0;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: #0f1824;
+  color: #d7e3ef;
+  overflow-x: auto;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.rr-markdown pre code {
+  background: transparent;
+  padding: 0;
+  color: inherit;
+  font-size: inherit;
+  border-radius: 0;
+}
+
+/* ── Markdown hr / strong / em ── */
+.rr-markdown hr {
+  margin: 24px 0;
+  border: none;
+  border-top: 1px solid rgba(17, 35, 55, 0.10);
+}
+
+.rr-markdown strong {
+  color: #15304d;
+  font-weight: 700;
+}
+
+.rr-markdown em {
+  color: #4a6077;
 }
 
 .rr-debug-box {

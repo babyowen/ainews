@@ -9,6 +9,15 @@ function escapeHtml(value = '') {
     .replace(/'/g, '&#39;');
 }
 
+function stripMarkdownFences(content = '') {
+  const text = String(content || '').trim();
+  const fenceMatch = text.match(/^```(?:markdown)?\s*\n?([\s\S]*?)\n?```\s*$/i);
+  if (fenceMatch) {
+    return fenceMatch[1].trim();
+  }
+  return text;
+}
+
 function formatDate(dateString) {
   if (!dateString) return '';
   const date = new Date(dateString);
@@ -78,7 +87,8 @@ function buildRegionPolicyReportPdfHtml(payload = {}) {
   } = payload;
 
   const safeTitle = title || '地区政策报告';
-  const markdownHtml = renderMarkdownToPrintHtml(String(reportContent || ''));
+  const cleanedContent = stripMarkdownFences(reportContent);
+  const markdownHtml = renderMarkdownToPrintHtml(String(cleanedContent || ''), { breaks: true });
   const generatedText = generatedAt
     ? new Date(generatedAt).toLocaleString('zh-CN', { hour12: false })
     : new Date().toLocaleString('zh-CN', { hour12: false });
