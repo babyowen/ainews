@@ -497,6 +497,32 @@
   background: #218838;
 }
 
+.weekly-model-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #334155;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.weekly-model-select select {
+  min-width: 190px;
+  height: 44px;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  background: #fff;
+  color: #111827;
+  padding: 0 12px;
+  font-size: 14px;
+}
+
+.weekly-model-select select:disabled {
+  background: #f1f5f9;
+  color: #64748b;
+  cursor: not-allowed;
+}
+
 .generate-btn:disabled {
   background: #6c757d;
   cursor: not-allowed;

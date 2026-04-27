@@ -17,6 +17,11 @@ const {
   buildRegionPolicyReportPdfFilename,
   renderRegionPolicyReportPdf,
 } = require('./server/pdf/renderRegionPolicyReportPdf.cjs');
+const {
+  buildDeepSeekChatPayload,
+  getWeeklyReportModel,
+  listWeeklyReportModels,
+} = require('./services/weeklyReportModelConfig.cjs');
 
 const app = express();
 app.use(cors());
@@ -653,7 +658,6 @@ app.post('/api/modify-report', async (req, res) => {
   }
   
   try {
-    // 直接使用DeepSeek R1 API
     const fs = require('fs');
     const path = require('path');
     
@@ -918,9 +922,27 @@ app.post('/api/preview-report-message', async (req, res) => {
   }
 });
 
+app.get('/api/weekly-report/models', (req, res) => {
+  try {
+    res.json(listWeeklyReportModels());
+  } catch (err) {
+    console.error('Get weekly report models error:', err);
+    res.status(500).json({ error: 'Failed to load weekly report models', details: err.message });
+  }
+});
+
+app.get('/api/policy/models', (req, res) => {
+  try {
+    res.json(listWeeklyReportModels());
+  } catch (err) {
+    console.error('Get policy models error:', err);
+    res.status(500).json({ error: 'Failed to load policy models', details: err.message });
+  }
+});
+
 // 生成周报（实际调用大模型）
 app.post('/api/generate-report', async (req, res) => {
-  const { keyword, startDate, endDate, selectedNews, userPrompt, promptId, stream = false, summaryVersion } = req.body;
+  const { keyword, startDate, endDate, selectedNews, userPrompt, promptId, stream = false, summaryVersion, modelKey } = req.body;
   
   if (!keyword || !startDate || !endDate || !selectedNews || selectedNews.length === 0) {
     return res.status(400).json({ error: 'Missing required parameters' });
@@ -929,7 +951,7 @@ app.post('/api/generate-report', async (req, res) => {
 
 
   try {
-    // 直接使用DeepSeek R1 API
+    const modelConfig = getWeeklyReportModel(modelKey);
     const fs = require('fs');
     const path = require('path');
     
@@ -1016,15 +1038,17 @@ app.post('/api/generate-report', async (req, res) => {
         systemPrompt,
         userPrompt: finalUserPrompt,
         newsCount: selectedNews.length,
-        model: 'deepseek-reasoner',
+        model: modelConfig.label || modelConfig.model,
+        modelKey: modelConfig.key,
+        modelId: modelConfig.model,
         totalChars,
         estimatedTokens: estimateTokens(totalContent)
       };
       
       res.write(`data: ${JSON.stringify({ type: 'debug', data: debugInfo })}\n\n`);
-      res.write(`data: ${JSON.stringify({ type: 'status', message: '🔗 正在连接DeepSeek R1...' })}\n\n`);
-      console.log('DeepSeek API Request - Token estimate:', estimateTokens(totalContent));
-      console.log('Calling DeepSeek API...');
+      res.write(`data: ${JSON.stringify({ type: 'status', message: `🔗 正在连接${modelConfig.label || modelConfig.model}...` })}\n\n`);
+      console.log(`${modelConfig.model} API Request - Token estimate:`, estimateTokens(totalContent));
+      console.log(`Calling ${modelConfig.model} API...`);
       
       // 创建AbortController用于超时控制
       const controller = new AbortController();
@@ -1032,21 +1056,16 @@ app.post('/api/generate-report', async (req, res) => {
       
       try {
         // 调用DeepSeek API with stream
-        const response = await fetch('https://api.deepseek.com/chat/completions', {
+        const response = await fetch(modelConfig.endpoint, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}`
+            'Authorization': `Bearer ${process.env[modelConfig.apiKey]}`
           },
-          body: JSON.stringify({
-            model: 'deepseek-reasoner',
-            messages: [
+          body: JSON.stringify(buildDeepSeekChatPayload(modelConfig, [
               { role: 'system', content: systemPrompt },
               { role: 'user', content: finalUserPrompt }
-            ],
-            temperature: 0.7,
-            stream: true
-          }),
+            ], true)),
           signal: controller.signal
         });
         
@@ -1072,7 +1091,7 @@ app.post('/api/generate-report', async (req, res) => {
         return;
       }
       
-      res.write(`data: ${JSON.stringify({ type: 'status', message: '🤖 DeepSeek R1 开始思考...' })}\n\n`);
+      res.write(`data: ${JSON.stringify({ type: 'status', message: `🤖 ${modelConfig.label || modelConfig.model} 开始思考...` })}\n\n`);
       
       console.log('DeepSeek API Response OK, starting stream processing...');
       let fullReport = '';
@@ -1093,7 +1112,7 @@ app.post('/api/generate-report', async (req, res) => {
                 await pool.query(
                   `INSERT INTO weekly_reports (keyword, start_date, end_date, report_content, model_used, news_count)
                    VALUES (?, ?, ?, ?, ?, ?)`,
-                  [keyword, startDate, endDate, fullReport, 'deepseek-reasoner', selectedNews.length]
+                  [keyword, startDate, endDate, fullReport, modelConfig.model, selectedNews.length]
                 );
                 console.log('✅ 周报已保存到数据库, keyword:', keyword, 'dates:', startDate, '-', endDate);
               } catch (saveError) {
@@ -1147,20 +1166,16 @@ app.post('/api/generate-report', async (req, res) => {
       }
     } else {
       // 非流式模式
-      const response = await fetch('https://api.deepseek.com/chat/completions', {
+      const response = await fetch(modelConfig.endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}`
+          'Authorization': `Bearer ${process.env[modelConfig.apiKey]}`
         },
-        body: JSON.stringify({
-          model: 'deepseek-reasoner',
-          messages: [
+        body: JSON.stringify(buildDeepSeekChatPayload(modelConfig, [
             { role: 'system', content: systemPrompt },
             { role: 'user', content: finalUserPrompt }
-          ],
-          temperature: 0.7
-        })
+          ], false))
       });
       if (!response.ok) {
         const text = await response.text();
@@ -1188,7 +1203,7 @@ app.post('/api/generate-report', async (req, res) => {
         await pool.query(
           `INSERT INTO weekly_reports (keyword, start_date, end_date, report_content, model_used, news_count)
            VALUES (?, ?, ?, ?, ?, ?)`,
-          [keyword, startDate, endDate, report, 'deepseek-reasoner', selectedNews.length]
+          [keyword, startDate, endDate, report, modelConfig.model, selectedNews.length]
         );
         console.log('✅ 周报已保存到数据库 (非流式), keyword:', keyword, 'dates:', startDate, '-', endDate);
       } catch (saveError) {
@@ -1201,7 +1216,9 @@ app.post('/api/generate-report', async (req, res) => {
           systemPrompt,
           userPrompt: finalUserPrompt,
           newsCount: selectedNews.length,
-          model: 'deepseek-reasoner',
+          model: modelConfig.label || modelConfig.model,
+          modelKey: modelConfig.key,
+          modelId: modelConfig.model,
           totalChars,
           estimatedTokens: estimateTokens(totalContent)
         }
@@ -2336,13 +2353,14 @@ app.post('/api/policy/save', async (req, res) => {
 
 // 政策抽取 (Step 1)
 app.post('/api/policy/extract', async (req, res) => {
-  const { reportContent, reportId } = req.body;
+  const { reportContent, reportId, modelKey } = req.body;
   
   if (!reportContent && !reportId) {
     return res.status(400).json({ error: 'Missing report content or ID' });
   }
   
   try {
+    const modelConfig = getWeeklyReportModel(modelKey);
     let contentToProcess = reportContent;
     
     // 如果提供了ID但没有内容，从数据库获取
@@ -2451,22 +2469,19 @@ app.post('/api/policy/extract', async (req, res) => {
         maxTokens = 4096
       } = options || {};
 
-      const response = await fetch('https://api.deepseek.com/chat/completions', {
+      const response = await fetch(modelConfig.endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}`
+          'Authorization': `Bearer ${process.env[modelConfig.apiKey]}`
         },
-        body: JSON.stringify({
-          model: 'deepseek-chat',
-          messages: [
+        body: JSON.stringify(buildDeepSeekChatPayload(modelConfig, [
             { role: 'system', content: systemPrompt },
             { role: 'user', content: userPrompt }
-          ],
-          temperature,
+          ], false, {
           max_tokens: maxTokens,
           response_format: { type: 'json_object' }
-        })
+        }))
       });
 
       if (!response.ok) {
@@ -2525,22 +2540,19 @@ app.post('/api/policy/extract', async (req, res) => {
           String(repairSource || '').slice(0, 12000)
         ].join('\n');
 
-        const repairResp = await fetch('https://api.deepseek.com/chat/completions', {
+        const repairResp = await fetch(modelConfig.endpoint, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}`
+            'Authorization': `Bearer ${process.env[modelConfig.apiKey]}`
           },
-          body: JSON.stringify({
-            model: 'deepseek-chat',
-            messages: [
+          body: JSON.stringify(buildDeepSeekChatPayload(modelConfig, [
               { role: 'system', content: repairSystem },
               { role: 'user', content: repairUser }
-            ],
-            temperature: 0,
+            ], false, {
             max_tokens: 2048,
             response_format: { type: 'json_object' }
-          })
+          }))
         });
 
         if (repairResp.ok) {
@@ -2565,6 +2577,9 @@ app.post('/api/policy/extract', async (req, res) => {
     res.json({ 
       result: parsed,
       debug: {
+        model: modelConfig.label || modelConfig.model,
+        modelKey: modelConfig.key,
+        modelId: modelConfig.model,
         systemPrompt,
         userPrompt: finalUserPrompt
       }
@@ -2579,10 +2594,11 @@ app.post('/api/policy/extract', async (req, res) => {
 
 // 预览政策相关Prompt (Step 1 & 2)
 app.post('/api/policy/preview-prompt', async (req, res) => {
-  const { type, reportContent, reportId, extractedPolicy, currentPolicy } = req.body;
+  const { type, reportContent, reportId, extractedPolicy, currentPolicy, modelKey } = req.body;
   // type: 'extraction' or 'comparison'
   
   try {
+    const modelConfig = getWeeklyReportModel(modelKey);
     const fs = require('fs');
     const path = require('path');
     const policiesDir = path.join(__dirname, 'config/policies');
@@ -2661,6 +2677,9 @@ app.post('/api/policy/preview-prompt', async (req, res) => {
     }
     
     res.json({
+        model: modelConfig.label || modelConfig.model,
+        modelKey: modelConfig.key,
+        modelId: modelConfig.model,
         systemPrompt,
         userPrompt
     });
@@ -2673,13 +2692,14 @@ app.post('/api/policy/preview-prompt', async (req, res) => {
 
 // 政策对比 (Step 2)
 app.post('/api/policy/compare', async (req, res) => {
-  const { extractedPolicy, currentPolicy } = req.body;
+  const { extractedPolicy, currentPolicy, modelKey } = req.body;
   
   if (!extractedPolicy) {
     return res.status(400).json({ error: 'Missing extracted policy' });
   }
   
   try {
+    const modelConfig = getWeeklyReportModel(modelKey);
     const fs = require('fs');
     const path = require('path');
     
@@ -2719,21 +2739,16 @@ app.post('/api/policy/compare', async (req, res) => {
       .replace('{current}', JSON.stringify(currentPolicyContent, null, 2))
       .replace('{extracted}', JSON.stringify(extractedPolicy, null, 2));
       
-    // 调用 DeepSeek R1 (Reasoner for complex comparison)
-    const response = await fetch('https://api.deepseek.com/chat/completions', {
+    const response = await fetch(modelConfig.endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}`
+        'Authorization': `Bearer ${process.env[modelConfig.apiKey]}`
       },
-      body: JSON.stringify({
-        model: 'deepseek-reasoner',
-        messages: [
+      body: JSON.stringify(buildDeepSeekChatPayload(modelConfig, [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: finalUserPrompt }
-        ],
-        temperature: 0.7
-      })
+        ], false))
     });
     
     if (!response.ok) {
@@ -2746,6 +2761,9 @@ app.post('/api/policy/compare', async (req, res) => {
     res.json({ 
       markdown,
       debug: {
+        model: modelConfig.label || modelConfig.model,
+        modelKey: modelConfig.key,
+        modelId: modelConfig.model,
         systemPrompt,
         userPrompt: finalUserPrompt
       }

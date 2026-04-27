@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { FileText, ArrowRight, Check, Loader2, Download, FileJson, Scale } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import './WeeklyComparison.css';
+import { createInitialExtractionBatches } from './extractionPlan';
 import {
   buildStructuredPolicyComparisonReport,
   DEFAULT_POLICY_COMPARISON_TITLE,
@@ -701,6 +702,8 @@ const WeeklyComparison = () => {
   const [debugInfo, setDebugInfo] = useState({ extraction: null, comparison: null });
   const [error, setError] = useState('');
   const [isExportingPdf, setIsExportingPdf] = useState(false);
+  const [policyModels, setPolicyModels] = useState([]);
+  const [selectedPolicyModelKey, setSelectedPolicyModelKey] = useState('deepseek-v4-pro');
   const reportRef = useRef(null);
   const structuredReport = useMemo(
     () => buildStructuredPolicyComparisonReport(comparisonResult),
@@ -710,7 +713,21 @@ const WeeklyComparison = () => {
   // Load reports on mount
   useEffect(() => {
     fetchReports();
+    fetchPolicyModels();
   }, []);
+
+  const fetchPolicyModels = async () => {
+    try {
+      const res = await fetch('/api/policy/models');
+      if (!res.ok) return;
+      const list = await res.json();
+      setPolicyModels(Array.isArray(list) ? list : []);
+      const defaultModel = list.find(model => model.isDefault) || list[0];
+      if (defaultModel?.key) setSelectedPolicyModelKey(defaultModel.key);
+    } catch (err) {
+      console.warn('加载政策对比模型配置失败:', err);
+    }
+  };
 
   useEffect(() => {
     if (sourceMode !== 'news') return;
@@ -895,21 +912,18 @@ const WeeklyComparison = () => {
 
     try {
       const useNewsMode = sourceMode === 'news';
-      const chunkSize = 30;
-      const chunks = useNewsMode
-        ? Array.from({ length: Math.ceil(selectedNews.length / chunkSize) }, (_, i) => selectedNews.slice(i * chunkSize, (i + 1) * chunkSize))
-        : [];
+      const initialBatches = useNewsMode ? createInitialExtractionBatches(selectedNews) : [];
       if (useNewsMode) {
-        const initial = chunks.map((chunk, idx) => ({
-          id: String(idx + 1),
-          news: chunk,
-          newsCount: chunk.length,
+        const initial = initialBatches.map((batch) => ({
+          id: batch.id,
+          news: batch.news,
+          newsCount: batch.news.length,
           status: 'pending',
           extractedCount: 0,
           addedCount: 0,
           result: null,
           error: '',
-          depth: 0
+          depth: batch.depth
         }));
         setExtractionBatchTotal(initial.length);
         setExtractionBatchCurrent(initial.length > 0 ? 1 : 0);
@@ -923,25 +937,20 @@ const WeeklyComparison = () => {
       }
 
       const digestText = useNewsMode
-        ? (chunks.length <= 1
-          ? buildNewsDigest(selectedReport.start_date, selectedReport.end_date, selectedNews, { totalSelected: selectedNews.length, includeLink: false })
-          : chunks.map((chunk, idx) => buildNewsDigest(selectedReport.start_date, selectedReport.end_date, chunk, { chunkIndex: idx + 1, totalChunks: chunks.length, totalSelected: selectedNews.length, batchId: String(idx + 1), includeLink: false })).join('\n\n==== 分组分隔 ====\n\n'))
+        ? buildNewsDigest(selectedReport.start_date, selectedReport.end_date, selectedNews, { totalSelected: selectedNews.length, includeLink: false })
         : '';
 
       if (useNewsMode) setNewsDigest(digestText);
 
       // 1. Get Preview Prompt immediately
       try {
-        const previewContent = useNewsMode
-          ? (chunks.length > 1
-            ? buildNewsDigest(selectedReport.start_date, selectedReport.end_date, chunks[0], { chunkIndex: 1, totalChunks: chunks.length, totalSelected: selectedNews.length, batchId: '1', includeLink: false })
-            : digestText)
-          : null;
+        const previewContent = useNewsMode ? digestText : null;
         const previewRes = await fetch('/api/policy/preview-prompt', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ 
             type: 'extraction',
+            modelKey: selectedPolicyModelKey,
             ...(useNewsMode ? { reportContent: previewContent } : { reportId: selectedReport.id })
           })
         });
@@ -954,11 +963,11 @@ const WeeklyComparison = () => {
       }
 
       // 2. Start actual extraction
-      if (!useNewsMode || chunks.length <= 1) {
+      if (!useNewsMode) {
         const res = await fetch('/api/policy/extract', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(useNewsMode ? { reportContent: digestText } : { reportId: selectedReport.id })
+          body: JSON.stringify({ reportId: selectedReport.id, modelKey: selectedPolicyModelKey })
         });
 
         if (!res.ok) {
@@ -975,19 +984,10 @@ const WeeklyComparison = () => {
         if (data.debug) {
           setDebugInfo(prev => ({ ...prev, extraction: data.debug }));
         }
-        if (useNewsMode && chunks.length === 1) {
-          const extractedCount = countPolicyDetails(data.result);
-          setExtractionBatches(prev => prev.map((b) => b.id === '1' ? { ...b, status: 'done', extractedCount, addedCount: extractedCount, result: data.result } : b));
-        }
       } else {
         let merged = null;
         let lastDebug = null;
-
-        let queue = chunks.map((chunk, idx) => ({
-          id: String(idx + 1),
-          news: chunk,
-          depth: 0
-        }));
+        let queue = initialBatches;
 
         const updateBatch = (id, patch) => {
           setExtractionBatches(prev => prev.map((b) => b.id === id ? { ...b, ...patch } : b));
@@ -1015,7 +1015,7 @@ const WeeklyComparison = () => {
           const res = await fetch('/api/policy/extract', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ reportContent: groupDigest })
+            body: JSON.stringify({ reportContent: groupDigest, modelKey: selectedPolicyModelKey })
           });
           if (!res.ok) {
             let details = '';
@@ -1095,7 +1095,8 @@ const WeeklyComparison = () => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ 
             type: 'comparison',
-            extractedPolicy: extractedPolicy 
+            extractedPolicy: extractedPolicy,
+            modelKey: selectedPolicyModelKey
           })
         });
         if (previewRes.ok) {
@@ -1110,7 +1111,7 @@ const WeeklyComparison = () => {
       const res = await fetch('/api/policy/compare', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ extractedPolicy })
+        body: JSON.stringify({ extractedPolicy, modelKey: selectedPolicyModelKey })
       });
 
       if (!res.ok) throw new Error('对比失败');
@@ -1344,6 +1345,11 @@ const WeeklyComparison = () => {
             🛠️ 查看完整提示词 ({label})
           </summary>
           <div style={{ marginTop: '1rem', background: '#f8fafc', padding: '1rem', borderRadius: '8px', border: '1px solid #e2e8f0', textAlign: 'left' }}>
+            {debugData.model && (
+              <div style={{ marginBottom: '1rem', fontSize: '0.85rem', color: '#334155', fontWeight: 700 }}>
+                模型：{debugData.model}
+              </div>
+            )}
             {debugData.systemPrompt && (
               <div style={{ marginBottom: '1rem' }}>
                 <h4 style={{ fontSize: '0.875rem', color: '#475569', marginBottom: '0.5rem' }}>System Prompt:</h4>
@@ -1427,6 +1433,23 @@ const WeeklyComparison = () => {
 
       {renderStepIndicator()}
       {renderExportCapabilityBar()}
+      <div className="policy-model-selector">
+        <label htmlFor="policy-model-select">DeepSeek模型</label>
+        <select
+          id="policy-model-select"
+          value={selectedPolicyModelKey}
+          onChange={(e) => setSelectedPolicyModelKey(e.target.value)}
+          disabled={loading}
+        >
+          {(policyModels.length > 0 ? policyModels : [
+            { key: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro' },
+            { key: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash' }
+          ]).map(model => (
+            <option key={model.key} value={model.key}>{model.label || model.model}</option>
+          ))}
+        </select>
+        <span>用于政策 JSON 提取和后续对比分析</span>
+      </div>
 
       {error && (
         <div className="error-banner" style={{

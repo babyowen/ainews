@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import ErrorBoundary from '../components/ErrorBoundary';
 import html2canvas from 'html2canvas';
 import { KEYWORDS } from '../config/keywords';
+import { finalizeStreamingReport } from '../utils/streamingReport';
 // import PromptModal from '../components/PromptModal';
 import './ReportGenerator.css';
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, BorderStyle, WidthType, Table, TableRow, TableCell, ImageRun, ExternalHyperlink, PageBreak } from 'docx';
@@ -15,6 +16,8 @@ const ReportGenerator = () => {
   // 获取模型简称
   const getModelShortName = (modelName) => {
     if (!modelName) return 'DeepSeek R1';
+    if (modelName.includes('deepseek-v4-flash')) return 'DeepSeek V4 Flash';
+    if (modelName.includes('deepseek-v4-pro')) return 'DeepSeek V4 Pro';
     if (modelName.includes('deepseek')) return 'DeepSeek R1';
     if (modelName.includes('KIMI') || modelName.includes('kimi')) return 'KIMI K2';
     if (modelName.includes('gpt')) return 'GPT-4';
@@ -36,6 +39,8 @@ const ReportGenerator = () => {
   const [summaryVersion, setSummaryVersion] = useState('short');
   const [promptOptions, setPromptOptions] = useState([]);
   const [selectedPromptId, setSelectedPromptId] = useState('');
+  const [weeklyReportModels, setWeeklyReportModels] = useState([]);
+  const [selectedWeeklyModelKey, setSelectedWeeklyModelKey] = useState('deepseek-v4-flash');
 
   const selectedChars = useMemo(() => {
     return selectedNews.reduce((sum, news) => {
@@ -189,6 +194,22 @@ const ReportGenerator = () => {
     if (selectedKeyword) loadPrompts();
   }, [selectedKeyword]);
 
+  useEffect(() => {
+    const loadWeeklyReportModels = async () => {
+      try {
+        const res = await fetch('/api/weekly-report/models');
+        if (!res.ok) return;
+        const list = await res.json();
+        setWeeklyReportModels(Array.isArray(list) ? list : []);
+        const defaultModel = list.find(model => model.isDefault) || list[0];
+        if (defaultModel?.key) setSelectedWeeklyModelKey(defaultModel.key);
+      } catch (error) {
+        console.warn('加载周报模型配置失败:', error);
+      }
+    };
+    loadWeeklyReportModels();
+  }, []);
+
   // 查询新闻
   const handleSearchNews = async () => {
     if (!startDate || !endDate) {
@@ -287,6 +308,7 @@ const ReportGenerator = () => {
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
+      let accumulatedContent = '';
 
       while (true) {
         const { value, done } = await reader.read();
@@ -313,11 +335,12 @@ const ReportGenerator = () => {
                   setStreamingReasoning(prev => prev + parsed.content);
                   break;
                 case 'content':
+                  accumulatedContent += parsed.content;
                   setStreamingContent(prev => prev + parsed.content);
                   setGeneratedReport(prev => prev + parsed.content);
                   break;
                 case 'done':
-                  setGeneratedReport(parsed.report);
+                  setGeneratedReport(finalizeStreamingReport(parsed.report, accumulatedContent));
                   setStreamingStatus('✅ 周报修改完成！');
                   setShowModifyInput(false);
                   setModifyRequest('');
@@ -836,6 +859,8 @@ const ReportGenerator = () => {
       return;
     }
 
+    const selectedModel = weeklyReportModels.find(model => model.key === selectedWeeklyModelKey);
+
     const requestParams = {
       keyword: selectedKeyword,
       startDate,
@@ -844,7 +869,8 @@ const ReportGenerator = () => {
       userPrompt,
       stream: true,
       promptId: selectedPromptId,
-      summaryVersion
+      summaryVersion,
+      modelKey: selectedWeeklyModelKey
     };
 
     setLastRequestParams(requestParams); // 保存请求参数以便重试
@@ -855,7 +881,7 @@ const ReportGenerator = () => {
     setStreamingContent('');
     setStreamingReasoning('');
     setStreamingStatus('🚀 准备开始生成周报...');
-    setCurrentModel('DeepSeek R1');
+    setCurrentModel(selectedModel?.label || 'DeepSeek V4 Flash');
 
     try {
       const response = await fetch('/api/generate-report', {
@@ -873,6 +899,7 @@ const ReportGenerator = () => {
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
+      let accumulatedContent = '';
 
       while (true) {
         const { value, done } = await reader.read();
@@ -900,12 +927,16 @@ const ReportGenerator = () => {
                   setStreamingReasoning(prev => prev + parsed.content);
                   break;
                 case 'content':
+                  accumulatedContent += parsed.content;
                   setStreamingContent(prev => prev + parsed.content);
                   setGeneratedReport(prev => prev + parsed.content);
                   break;
                 case 'done':
-                  setGeneratedReport(parsed.report);
-                  setOriginalReport(parsed.report);
+                  {
+                    const finalReport = finalizeStreamingReport(parsed.report, accumulatedContent);
+                    setGeneratedReport(finalReport);
+                    setOriginalReport(finalReport);
+                  }
                   setStreamingStatus('✅ 周报生成完成！');
                   setCanRetry(false);
                   setShowModifyInput(false);
@@ -939,12 +970,14 @@ const ReportGenerator = () => {
 
   // 使用指定参数生成周报（用于重试）
   const handleGenerateReportWithParams = async (params) => {
+    const retryModel = weeklyReportModels.find(model => model.key === params?.modelKey);
     setCanRetry(false);
     setIsGeneratingReport(true);
     setGeneratedReport('');
     setStreamingContent('');
     setStreamingReasoning('');
     setStreamingStatus('🔄 重新开始生成周报...');
+    if (retryModel?.label) setCurrentModel(retryModel.label);
 
     try {
       const response = await fetch('/api/generate-report', {
@@ -962,6 +995,7 @@ const ReportGenerator = () => {
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
+      let accumulatedContent = '';
 
       while (true) {
         const { value, done } = await reader.read();
@@ -989,12 +1023,16 @@ const ReportGenerator = () => {
                   setStreamingReasoning(prev => prev + parsed.content);
                   break;
                 case 'content':
+                  accumulatedContent += parsed.content;
                   setStreamingContent(prev => prev + parsed.content);
                   setGeneratedReport(prev => prev + parsed.content);
                   break;
                 case 'done':
-                  setGeneratedReport(parsed.report);
-                  setOriginalReport(parsed.report);
+                  {
+                    const finalReport = finalizeStreamingReport(parsed.report, accumulatedContent);
+                    setGeneratedReport(finalReport);
+                    setOriginalReport(finalReport);
+                  }
                   setStreamingStatus('✅ 周报生成完成！');
                   setCanRetry(false);
                   setShowModifyInput(false);
@@ -1063,6 +1101,7 @@ const ReportGenerator = () => {
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
+      let accumulatedContent = '';
 
       while (true) {
         const { value, done } = await reader.read();
@@ -1090,12 +1129,16 @@ const ReportGenerator = () => {
                   setStreamingReasoning(prev => prev + parsed.content);
                   break;
                 case 'content':
+                  accumulatedContent += parsed.content;
                   setStreamingContent(prev => prev + parsed.content);
                   setGeneratedReport(prev => prev + parsed.content);
                   break;
                 case 'done':
-                  setGeneratedReport(parsed.report);
-                  setOriginalReport(parsed.report);
+                  {
+                    const finalReport = finalizeStreamingReport(parsed.report, accumulatedContent);
+                    setGeneratedReport(finalReport);
+                    setOriginalReport(finalReport);
+                  }
                   setStreamingStatus('✅ 周报生成完成！');
                   setCanRetry(false);
                   setShowModifyInput(false);
@@ -1363,6 +1406,8 @@ const ReportGenerator = () => {
       // 获取模型简称
       const getModelShortName = (modelName) => {
         if (!modelName) return 'DeepSeek R1';
+        if (modelName.includes('deepseek-v4-flash')) return 'DeepSeek V4 Flash';
+        if (modelName.includes('deepseek-v4-pro')) return 'DeepSeek V4 Pro';
         if (modelName.includes('deepseek')) return 'DeepSeek R1';
         if (modelName.includes('KIMI') || modelName.includes('kimi')) return 'KIMI K2';
         if (modelName.includes('gpt')) return 'GPT-4';
@@ -1796,8 +1841,23 @@ const ReportGenerator = () => {
             disabled={isGeneratingReport || isGeneratingKimiReport || selectedNews.length === 0}
             className="generate-btn"
           >
-            {isGeneratingReport ? '生成中...' : 'DS生成周报'}
+            {isGeneratingReport ? '生成中...' : 'DeepSeek生成周报'}
           </button>
+          <label className="weekly-model-select">
+            <span>DeepSeek模型</span>
+            <select
+              value={selectedWeeklyModelKey}
+              onChange={(e) => setSelectedWeeklyModelKey(e.target.value)}
+              disabled={isGeneratingReport || isGeneratingKimiReport}
+            >
+              {(weeklyReportModels.length > 0 ? weeklyReportModels : [
+                { key: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash' },
+                { key: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro' }
+              ]).map(model => (
+                <option key={model.key} value={model.key}>{model.label || model.model}</option>
+              ))}
+            </select>
+          </label>
           <button 
             onClick={handleGenerateKimiReport}
             disabled={isGeneratingReport || isGeneratingKimiReport || selectedNews.length === 0}
