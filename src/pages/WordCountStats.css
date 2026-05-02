@@ -4,6 +4,56 @@
   margin: 0 auto;
 }
 
+/* KeyDigest data-console refresh */
+.word-count-stats {
+  max-width: 1440px;
+  padding: 24px;
+  color: var(--kd-ink);
+}
+
+.word-count-stats .page-header {
+  text-align: left;
+  margin-bottom: 18px;
+  padding: 22px 24px;
+  border: 1px solid var(--kd-line);
+  border-radius: var(--kd-radius-lg);
+  background: linear-gradient(135deg, rgba(32, 53, 71, 0.96), rgba(31, 93, 104, 0.92));
+  color: #fff;
+  box-shadow: var(--kd-shadow);
+}
+
+.word-count-stats .page-header h1 {
+  margin: 0;
+  color: #fff;
+  font-size: 30px;
+}
+
+.word-count-stats .page-header p {
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 14px;
+}
+
+.word-count-stats .date-range-selector,
+.word-count-stats .legend-container,
+.word-count-stats .calendar-container {
+  border: 1px solid var(--kd-line);
+  border-radius: var(--kd-radius-lg);
+  background: #fff;
+  box-shadow: var(--kd-shadow-sm);
+}
+
+.word-count-stats .data-info {
+  border-radius: 999px;
+  background: var(--kd-accent-soft);
+  color: var(--kd-accent-dark);
+  font-weight: 800;
+}
+
+.word-count-stats .week-header,
+.word-count-stats .week-summary-header {
+  background: var(--kd-panel);
+}
+
 .page-header {
   text-align: center;
   margin-bottom: 30px;

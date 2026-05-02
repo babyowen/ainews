@@ -4,6 +4,57 @@
   margin: 0 auto;
 }
 
+/* KeyDigest data-console refresh */
+.history-reports-page {
+  max-width: 1440px;
+  padding: 24px;
+  color: var(--kd-ink);
+}
+
+.history-reports-page .page-header {
+  margin-bottom: 18px;
+  padding: 22px 24px;
+  border: 1px solid var(--kd-line);
+  border-radius: var(--kd-radius-lg);
+  background: linear-gradient(135deg, rgba(32, 53, 71, 0.96), rgba(31, 93, 104, 0.92));
+  color: #fff;
+  box-shadow: var(--kd-shadow);
+}
+
+.history-reports-page .page-header h1 {
+  margin: 0;
+  color: #fff;
+  font-size: 30px;
+}
+
+.history-reports-page .page-header p {
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 14px;
+}
+
+.history-reports-page .filter-section,
+.history-reports-page .table-section {
+  border: 1px solid var(--kd-line);
+  border-radius: var(--kd-radius-lg);
+  background: #fff;
+  box-shadow: var(--kd-shadow-sm);
+}
+
+.history-reports-page .btn-primary,
+.history-reports-page .btn-view,
+.history-reports-page .btn-export {
+  background: var(--kd-accent);
+  color: #fff;
+}
+
+.history-reports-page .reports-table thead {
+  background: var(--kd-panel);
+}
+
+.history-reports-page .reports-table tbody tr:hover {
+  background: #f1fafa !important;
+}
+
 .page-header {
   margin-bottom: 30px;
 }

@@ -7,6 +7,79 @@
   overflow-x: hidden;
 }
 
+/* KeyDigest data-console refresh */
+.config-container {
+  background: var(--kd-page);
+  color: var(--kd-ink);
+}
+
+.config-container .config-header {
+  max-width: 1440px;
+  margin: 24px auto 18px;
+  padding: 22px 24px;
+  border: 1px solid var(--kd-line);
+  border-radius: var(--kd-radius-lg);
+  background: linear-gradient(135deg, rgba(32, 53, 71, 0.96), rgba(31, 93, 104, 0.92));
+  color: #fff;
+  box-shadow: var(--kd-shadow);
+}
+
+.config-container .header-bg,
+.config-container .title-glow {
+  display: none;
+}
+
+.config-container .title-section {
+  margin-bottom: 0;
+}
+
+.config-container .main-title h1 {
+  color: #fff;
+  background: none;
+  -webkit-text-fill-color: currentColor;
+  font-size: 30px;
+}
+
+.config-container .subtitle {
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 14px;
+}
+
+.config-container .config-navigation,
+.config-container .config-content {
+  max-width: 1440px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.config-container .config-navigation,
+.config-container .config-section,
+.config-container .keyword-sidebar,
+.config-container .keyword-content,
+.config-container .prompt-version-card,
+.config-container .editor-panel {
+  border-color: var(--kd-line);
+  background: #fff;
+  color: var(--kd-ink);
+  box-shadow: var(--kd-shadow-sm);
+}
+
+.config-container .nav-tab {
+  color: var(--kd-ink-muted);
+}
+
+.config-container .nav-tab.active {
+  background: var(--kd-accent);
+  color: #fff;
+}
+
+.config-container input,
+.config-container select,
+.config-container textarea {
+  border-color: var(--kd-line);
+  color: var(--kd-ink);
+}
+
 /* 页面头部区域 */
 .config-header {
   position: relative;

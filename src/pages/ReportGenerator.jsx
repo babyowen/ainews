@@ -4,6 +4,8 @@ import ErrorBoundary from '../components/ErrorBoundary';
 import html2canvas from 'html2canvas';
 import { KEYWORDS } from '../config/keywords';
 import { finalizeStreamingReport } from '../utils/streamingReport';
+import { getRecentCompleteSaturdayRange } from '../utils/dateRanges';
+import { buildUnifiedWeeklyModelOptions, parseUnifiedWeeklyModelKey } from '../utils/modelOptions';
 // import PromptModal from '../components/PromptModal';
 import './ReportGenerator.css';
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, BorderStyle, WidthType, Table, TableRow, TableCell, ImageRun, ExternalHyperlink, PageBreak } from 'docx';
@@ -11,7 +13,7 @@ import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, Bord
 const ReportGenerator = () => {
   // 可选择的关键词列表（集中配置）
   const availableKeywords = KEYWORDS;
-  const [selectedKeyword, setSelectedKeyword] = useState('江苏省国资委'); // 默认选择江苏省国资委
+  const [selectedKeyword, setSelectedKeyword] = useState('公积金'); // 默认选择公积金
   
   // 获取模型简称
   const getModelShortName = (modelName) => {
@@ -41,6 +43,12 @@ const ReportGenerator = () => {
   const [selectedPromptId, setSelectedPromptId] = useState('');
   const [weeklyReportModels, setWeeklyReportModels] = useState([]);
   const [selectedWeeklyModelKey, setSelectedWeeklyModelKey] = useState('deepseek-v4-flash');
+  const [selectedUnifiedModelKey, setSelectedUnifiedModelKey] = useState('deepseek:deepseek-v4-flash');
+
+  const unifiedModelOptions = useMemo(
+    () => buildUnifiedWeeklyModelOptions(weeklyReportModels),
+    [weeklyReportModels]
+  );
 
   const selectedChars = useMemo(() => {
     return selectedNews.reduce((sum, news) => {
@@ -142,28 +150,11 @@ const ReportGenerator = () => {
 
 *本报告基于公开信息整理分析，仅供参考。如需更详细信息，请查阅相关官方文件。*`;
 
-  // 初始化默认日期：开始日期为上一个周日，结束日期为昨天
+  // 初始化默认日期：最近完整周六到周六
   useEffect(() => {
-    const today = new Date();
-    
-    // 获取昨天
-    const yesterday = new Date(today);
-    yesterday.setDate(today.getDate() - 1);
-    
-    // 获取上一个周日
-    const lastSunday = new Date(today);
-    const currentDayOfWeek = today.getDay(); // 0=周日, 1=周一, ..., 6=周六
-    
-    if (currentDayOfWeek === 0) {
-      // 如果今天是周日，上一个周日是7天前
-      lastSunday.setDate(today.getDate() - 7);
-    } else {
-      // 如果今天不是周日，上一个周日是 currentDayOfWeek 天前
-      lastSunday.setDate(today.getDate() - currentDayOfWeek);
-    }
-    
-    setStartDate(lastSunday.toISOString().split('T')[0]);
-    setEndDate(yesterday.toISOString().split('T')[0]);
+    const range = getRecentCompleteSaturdayRange();
+    setStartDate(range.startDate);
+    setEndDate(range.endDate);
   }, []);
 
   // 自动加载新闻（当日期或关键词准备好时）
@@ -201,8 +192,12 @@ const ReportGenerator = () => {
         if (!res.ok) return;
         const list = await res.json();
         setWeeklyReportModels(Array.isArray(list) ? list : []);
-        const defaultModel = list.find(model => model.isDefault) || list[0];
-        if (defaultModel?.key) setSelectedWeeklyModelKey(defaultModel.key);
+        const v4Flash = list.find(model => model.key === 'deepseek-v4-flash');
+        const defaultModel = v4Flash || list.find(model => model.isDefault) || list[0];
+        if (defaultModel?.key) {
+          setSelectedWeeklyModelKey(defaultModel.key);
+          setSelectedUnifiedModelKey(`deepseek:${defaultModel.key}`);
+        }
       } catch (error) {
         console.warn('加载周报模型配置失败:', error);
       }
@@ -231,7 +226,9 @@ const ReportGenerator = () => {
       const response = await fetch(apiUrl);
       const data = await response.json();
       setNewsList(data);
-      setSelectedNews([]); // 清空之前的选择
+      // 默认选中4分以上的新闻
+      const highScoreNews = data.filter(news => Number(news.score) >= 4);
+      setSelectedNews(highScoreNews);
       setShowReport(false); // 隐藏之前的报告
     } catch (error) {
       console.error('获取新闻失败:', error);
@@ -458,7 +455,7 @@ const ReportGenerator = () => {
           if (hashCount === 1) {
             // 一级标题
             if (titleText !== lastH1Title) {
-              html += `<h1 style="font-size: 64px; margin: 40px 0 24px 0; color: #1a2240; font-weight: 700; text-align: left; letter-spacing: 0.3px; border-bottom: 2px solid #3d8bfd; padding-bottom: 12px; font-family: 'PingFang SC', 'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif; line-height: 1.3;">${titleText}</h1>`;
+              html += `<h1 style="font-size: 64px; margin: 40px 0 24px 0; color: #203547; font-weight: 700; text-align: left; letter-spacing: 0.3px; border-bottom: 2px solid #38a6a5; padding-bottom: 12px; font-family: 'PingFang SC', 'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif; line-height: 1.3;">${titleText}</h1>`;
               lastH1Title = titleText;
             }
           } else if (hashCount === 2) {
@@ -540,7 +537,7 @@ const ReportGenerator = () => {
       ">
         <!-- 头部区块 -->
         <div style="
-          background: linear-gradient(90deg, #232526 0%, #3d8bfd 100%);
+          background: linear-gradient(135deg, #203547 0%, #1f5d68 62%, #38a6a5 100%);
           padding: 48px 0 24px 0;
           text-align: center;
           position: relative;
@@ -567,7 +564,7 @@ const ReportGenerator = () => {
               color: #ffffff;
               letter-spacing: 0.5px;
               font-weight: 400;
-            ">🤖 AI新闻总结</span>
+            ">KeyDigest 智能新闻周报</span>
           </div>
           
           <!-- 信息行 -->
@@ -578,7 +575,7 @@ const ReportGenerator = () => {
             border-radius: 8px;
             padding: 12px 20px;
             font-size: 22px;
-            color: #3d8bfd;
+            color: #1b7f81;
             font-weight: 500;
             letter-spacing: 0.3px;
             display: flex;
@@ -853,13 +850,13 @@ const ReportGenerator = () => {
   };
 
   // 流式生成周报
-  const handleGenerateReport = async () => {
+  const handleGenerateReport = async (overrideModelKey = selectedWeeklyModelKey) => {
     if (selectedNews.length === 0) {
       alert('请至少选择一条新闻');
       return;
     }
 
-    const selectedModel = weeklyReportModels.find(model => model.key === selectedWeeklyModelKey);
+    const selectedModel = weeklyReportModels.find(model => model.key === overrideModelKey);
 
     const requestParams = {
       keyword: selectedKeyword,
@@ -870,7 +867,8 @@ const ReportGenerator = () => {
       stream: true,
       promptId: selectedPromptId,
       summaryVersion,
-      modelKey: selectedWeeklyModelKey
+      modelKey: overrideModelKey,
+      provider: 'deepseek'
     };
 
     setLastRequestParams(requestParams); // 保存请求参数以便重试
@@ -961,6 +959,17 @@ const ReportGenerator = () => {
     }
   };
 
+  const handleGenerateUnifiedReport = async () => {
+    const parsed = parseUnifiedWeeklyModelKey(selectedUnifiedModelKey);
+    if (parsed.provider === 'kimi') {
+      await handleGenerateKimiReport();
+      return;
+    }
+    const nextModelKey = parsed.modelKey || 'deepseek-v4-flash';
+    setSelectedWeeklyModelKey(nextModelKey);
+    await handleGenerateReport(nextModelKey);
+  };
+
   // 重试生成周报
   const handleRetryGenerate = () => {
     if (lastRequestParams) {
@@ -971,16 +980,21 @@ const ReportGenerator = () => {
   // 使用指定参数生成周报（用于重试）
   const handleGenerateReportWithParams = async (params) => {
     const retryModel = weeklyReportModels.find(model => model.key === params?.modelKey);
+    const isKimiRetry = params?.provider === 'kimi';
     setCanRetry(false);
     setIsGeneratingReport(true);
     setGeneratedReport('');
     setStreamingContent('');
     setStreamingReasoning('');
     setStreamingStatus('🔄 重新开始生成周报...');
-    if (retryModel?.label) setCurrentModel(retryModel.label);
+    if (isKimiRetry) {
+      setCurrentModel('KIMI K2');
+    } else if (retryModel?.label) {
+      setCurrentModel(retryModel.label);
+    }
 
     try {
-      const response = await fetch('/api/generate-report', {
+      const response = await fetch(isKimiRetry ? '/api/generate-kimi-report' : '/api/generate-report', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1072,7 +1086,8 @@ const ReportGenerator = () => {
       userPrompt,
       stream: true,
       promptId: selectedPromptId,
-      summaryVersion
+      summaryVersion,
+      provider: 'kimi'
     };
 
     setLastRequestParams(requestParams);
@@ -1173,20 +1188,14 @@ const ReportGenerator = () => {
     });
   };
 
-  // 获取评分对应的颜色和样式
-  const getScoreStyle = (score) => {
-    const numScore = parseFloat(score);
-    if (numScore >= 4) {
-      return { backgroundColor: '#28a745', color: 'white', label: '高分' }; // 绿色 - 高分
-    } else if (numScore >= 3) {
-      return { backgroundColor: '#17a2b8', color: 'white', label: '中等' }; // 青色 - 中等
-    } else if (numScore >= 2) {
-      return { backgroundColor: '#ffc107', color: '#333', label: '较低' }; // 黄色 - 较低
-    } else if (numScore >= 1) {
-      return { backgroundColor: '#fd7e14', color: 'white', label: '低分' }; // 橙色 - 低分
-    } else {
-      return { backgroundColor: '#dc3545', color: 'white', label: '很低' }; // 红色 - 很低
-    }
+  const getScoreClass = (score) => {
+    const numScore = Number(score);
+    if (numScore >= 5) return 'rg-score-5';
+    if (numScore >= 4) return 'rg-score-4';
+    if (numScore >= 3) return 'rg-score-3';
+    if (numScore >= 2) return 'rg-score-2';
+    if (numScore >= 1) return 'rg-score-1';
+    return 'rg-score-0';
   };
 
   // 估算token数量 (基于DeepSeek官方标准: 1个中文字符≈0.6token, 1个英文字符≈0.3token)
@@ -1486,7 +1495,7 @@ const ReportGenerator = () => {
                                         new TextRun({
                                           text: `时间：${formatDate(startDate)} - ${formatDate(endDate)}`,
                                           size: 12,
-                                          color: '3d8bfd',
+                                          color: '1b7f81',
                                           font: 'Inter'
                                         })
                                       ]
@@ -1505,7 +1514,7 @@ const ReportGenerator = () => {
                                         new TextRun({
                                           text: `AI评分价值新闻：${selectedNews.length} 条`,
                                           size: 12,
-                                          color: '3d8bfd',
+                                          color: '1b7f81',
                                           font: 'Inter'
                                         })
                                       ]
@@ -1524,7 +1533,7 @@ const ReportGenerator = () => {
                                         new TextRun({
                                           text: `大模型：${getModelShortName(debugInfo?.model)}`,
                                           size: 12,
-                                          color: '3d8bfd',
+                                          color: '1b7f81',
                                           font: 'Inter'
                                         })
                                       ]
@@ -1545,8 +1554,8 @@ const ReportGenerator = () => {
                         type: WidthType.PERCENTAGE,
                       },
                       shading: {
-                        fill: '3d8bfd',
-                        color: '3d8bfd'
+                        fill: '203547',
+                        color: '203547'
                       }
                     })
                   ]
@@ -1648,223 +1657,202 @@ const ReportGenerator = () => {
 
   return (
     <ErrorBoundary>
-    <div className="report-generator">
-      <div className="page-header bg-gradient-to-r from-neutral-900 to-blue-500 rounded-xl py-8 mb-7 shadow-[0_4px_24px_rgba(61,139,253,0.10)] relative text-center overflow-hidden">
-        <div className="inline-flex items-center gap-3 font-black tracking-wider text-white drop-shadow-md">
-          <span className="text-4xl mr-2 [filter:drop-shadow(0_2px_8px_#3d8bfd88)]">🧬</span>
-          <span className="text-4xl font-sans">AI News Report Generator</span>
+    <div className="report-generator kd-page">
+      <header className="kd-page-header report-workbench-header">
+        <div>
+          <p className="kd-page-kicker">WEEKLY REPORT</p>
+          <h1 className="kd-page-title">周报生成</h1>
+          <p className="kd-page-subtitle">默认最近完整周六到周六，筛选新闻后统一选择模型生成周报。</p>
         </div>
-        <div className="h-1.5 bg-gradient-to-r from-blue-500/80 to-indigo-500/80 mt-4 mx-auto max-w-[320px] rounded shadow-[0_0_12px_2px_rgba(61,139,253,0.27)] opacity-85"></div>
-      </div>
+        <div className="report-header-stats">
+          <span>{selectedKeyword}</span>
+          <span>{startDate || '-'} 至 {endDate || '-'}</span>
+          <span>{selectedNews.length} 条已选</span>
+        </div>
+      </header>
 
-      {/* 筛选区域 */}
-      <div className="filter-section">
-        <div className="filter-row">
+      <section className="report-control-panel kd-panel">
+        <div className="report-filter-grid">
           <div className="filter-item">
-            <label>关键词:</label>
-            <select 
-              value={selectedKeyword} 
-              onChange={(e) => setSelectedKeyword(e.target.value)}
-              className="keyword-select"
-            >
+            <label>关键词</label>
+            <select value={selectedKeyword} onChange={(e) => setSelectedKeyword(e.target.value)} className="keyword-select">
               {availableKeywords.map(keyword => (
-                <option key={keyword} value={keyword}>
-                  {keyword}
-                </option>
+                <option key={keyword} value={keyword}>{keyword}</option>
               ))}
             </select>
           </div>
-          
+
           <div className="filter-item">
-            <label>开始日期:</label>
-            <input 
-              type="date" 
-              value={startDate} 
-              onChange={(e) => setStartDate(e.target.value)}
-              className="date-input"
-            />
+            <label>开始日期</label>
+            <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="date-input" />
           </div>
-          
+
           <div className="filter-item">
-            <label>结束日期:</label>
-            <input 
-              type="date" 
-              value={endDate} 
-              onChange={(e) => setEndDate(e.target.value)}
-              className="date-input"
-            />
+            <label>结束日期</label>
+            <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="date-input" />
           </div>
-          
-          <button 
-            onClick={handleSearchNews} 
-            disabled={isLoadingNews}
-            className="search-btn"
-          >
-            {isLoadingNews ? '查询中...' : '查询新闻'}
-          </button>
-        </div>
-        
-        <div className="score-filter-section">
-          <div className="score-filter-item">
-            <label>分数筛选:</label>
+
+          <div className="filter-item">
+            <label>分数筛选</label>
             <select value={scoreFilter} onChange={(e) => setScoreFilter(e.target.value)} className="score-select">
-              <option value="min3">3分以上</option>
               <option value="min4">4分以上</option>
+              <option value="min3">3分以上</option>
               <option value="all">全部新闻</option>
             </select>
           </div>
-          <div className="score-filter-item">
-            <label>短总结:</label>
-            <input type="checkbox" checked={summaryVersion === 'short'} onChange={(e) => setSummaryVersion(e.target.checked ? 'short' : 'full')} />
-          </div>
-          
-        </div>
-      </div>
 
-      {/* 新闻列表区域 */}
-      {newsList.length > 0 && (
-        <div className="news-section">
-          <div className="news-header">
-            <h2>新闻列表 ({newsList.length} 条)</h2>
-            <div className="select-actions">
-              <button 
-                onClick={() => handleSelectAll(true)}
-                className="select-all-btn"
-              >
-                全选
+          <div className="filter-item filter-actions-cell">
+            <label>操作</label>
+            <div className="filter-actions-row">
+              <label className="summary-toggle-item">
+                <input type="checkbox" checked={summaryVersion === 'short'} onChange={(e) => setSummaryVersion(e.target.checked ? 'short' : 'full')} />
+                短总结
+              </label>
+              <button onClick={handleSearchNews} disabled={isLoadingNews} className="search-btn kd-btn-dark">
+                {isLoadingNews ? '查询中...' : '查询新闻'}
               </button>
-              <button 
-                onClick={() => handleSelectAll(false)}
-                className="select-none-btn"
-              >
-                取消全选
-              </button>
-              <span className="selected-count">已选择: {selectedNews.length} 条，共{selectedChars}字</span>
             </div>
           </div>
-          
-          <div className="news-list">
-            {newsList.map(news => {
-              const isSelected = selectedNews.some(item => item.id === news.id);
-              const toggleSelect = () => handleNewsSelect(news, !isSelected);
-              const keyToggle = (e) => { if (e.key === 'Enter' || e.key === ' ') toggleSelect(); };
-              return (
-                <div
-                  key={news.id}
-                  className={`news-item ${isSelected ? 'selected' : ''}`}
-                  onClick={toggleSelect}
-                  role="button"
-                  tabIndex={0}
-                  onKeyDown={keyToggle}
-                >
-                <div className="news-title-row">
-                  <input 
-                    type="checkbox" 
-                    checked={isSelected}
-                    onChange={(e) => handleNewsSelect(news, e.target.checked)}
-                    className="news-checkbox"
-                    onClick={(e) => e.stopPropagation()}
-                  />
-                  <h3 className="news-title">
-                    {news.link ? (
-                      <a href={news.link} target="_blank" rel="noopener noreferrer" className="news-title-link" onClick={(e) => e.stopPropagation()}>
-                        {news.title}
-                      </a>
-                    ) : (
-                      news.title
-                    )}
-                  </h3>
+        </div>
+      </section>
+
+      {/* 新闻列表 + 生成设置 双栏 */}
+      {newsList.length > 0 && (
+        <div className="report-workbench">
+          <div className="report-workbench-left">
+            <section className="news-section kd-panel">
+              <div className="news-header">
+                <div>
+                  <h2>新闻列表 ({newsList.length} 条)</h2>
+                  <p>浏览新闻列表并勾选所需条目。</p>
                 </div>
-                <div className="news-meta">
-                  <span className="news-source">来源: {news.source || '未知'}</span>
-                  <span className="news-keyword">主关键词: {news.keyword || '未知'}</span>
-                  <span className="news-search-keyword">搜索关键词: {news.search_keyword || '未知'}</span>
-                  <span className="news-date-prominent">📅 {formatDate(news.fetchdate)}</span>
-                  {news.score && (
-                    <span 
-                      className="news-score-colored"
-                      style={getScoreStyle(news.score)}
-                    >
-                      ⭐ {news.score}分
-                    </span>
-                  )}
-                  {(summaryVersion === 'short' && (news.short_summary || news.content)) && (
-                    <span className="short-badge">短</span>
-                  )}
-                </div>
-                <div className="news-summary">
-                  {summaryVersion === 'short'
-                    ? (news.short_summary || news.content || '')
-                    : ((news.content || news.short_summary || '').substring(0, 250) + '...')}
+                <div className="select-actions">
+                  <button
+                    onClick={() => handleSelectAll(true)}
+                    className="select-all-btn"
+                  >
+                    全选
+                  </button>
+                  <button
+                    onClick={() => handleSelectAll(false)}
+                    className="select-none-btn"
+                  >
+                    取消全选
+                  </button>
+                  <span className="selected-count">已选择: {selectedNews.length} 条，共{selectedChars}字</span>
                 </div>
               </div>
-            );})}
-          </div>
-        </div>
-      )}
 
-      {/* 生成周报按钮 */}
-      {newsList.length > 0 && (
-        <div className="generate-section">
-          <div className="prompt-chooser">
-            <div className="prompt-list">
-              {(promptOptions && promptOptions.length > 0 ? promptOptions : [{ id: '', name: '默认', description: '使用默认的prompt配置' }]).map(p => {
-                const active = selectedPromptId === p.id;
-                const onKey = (e) => { if (e.key === 'Enter' || e.key === ' ') setSelectedPromptId(p.id); };
-                return (
-                  <div
-                    key={p.id}
-                    className={`prompt-card ${active ? 'selected' : ''}`}
-                    onClick={() => setSelectedPromptId(p.id)}
-                    role="button"
-                    tabIndex={0}
-                    onKeyDown={onKey}
-                  >
-                    <div className="prompt-card-header">
+              <div className="news-list">
+                {newsList.map(news => {
+                  const isSelected = selectedNews.some(item => item.id === news.id);
+                  const toggleSelect = () => handleNewsSelect(news, !isSelected);
+                  const keyToggle = (e) => { if (e.key === 'Enter' || e.key === ' ') toggleSelect(); };
+                  return (
+                    <div
+                      key={news.id}
+                      className={`news-item ${isSelected ? 'selected' : ''}`}
+                      onClick={toggleSelect}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={keyToggle}
+                    >
+                    <div className="news-title-row">
                       <input
-                        type="radio"
-                        className="prompt-radio"
-                        checked={active}
-                        onChange={() => setSelectedPromptId(p.id)}
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={(e) => handleNewsSelect(news, e.target.checked)}
+                        className="news-checkbox"
                         onClick={(e) => e.stopPropagation()}
                       />
-                      <span className="prompt-card-title">{p.name}</span>
+                      <h3 className="news-title">
+                        {news.link ? (
+                          <a href={news.link} target="_blank" rel="noopener noreferrer" className="news-title-link" onClick={(e) => e.stopPropagation()}>
+                            {news.title}
+                          </a>
+                        ) : (
+                          news.title
+                        )}
+                      </h3>
                     </div>
-                    <div className="prompt-card-desc">{p.description || ''}</div>
+                    <div className="news-meta">
+                      <span className="rg-meta-tag">{news.source || '未知'}</span>
+                      <span className="rg-meta-tag">{news.keyword || '未知'}</span>
+                      <span className="rg-meta-tag">{news.search_keyword || '未知'}</span>
+                      <span className="rg-meta-tag">{formatDate(news.fetchdate)}</span>
+                      {news.score && (
+                        <span className={`rg-score-badge ${getScoreClass(news.score)}`}>{news.score}分</span>
+                      )}
+                      {(summaryVersion === 'short' && (news.short_summary || news.content)) && (
+                        <span className="rg-score-badge rg-score-short">短</span>
+                      )}
+                    </div>
+                    <div className="news-summary">
+                      {summaryVersion === 'short'
+                        ? (news.short_summary || news.content || '')
+                        : ((news.content || news.short_summary || '').substring(0, 250) + '...')}
+                    </div>
                   </div>
-                );
-              })}
-            </div>
+                );})}
+              </div>
+            </section>
           </div>
-          <button 
-            onClick={handleGenerateReport}
-            disabled={isGeneratingReport || isGeneratingKimiReport || selectedNews.length === 0}
-            className="generate-btn"
-          >
-            {isGeneratingReport ? '生成中...' : 'DeepSeek生成周报'}
-          </button>
-          <label className="weekly-model-select">
-            <span>DeepSeek模型</span>
-            <select
-              value={selectedWeeklyModelKey}
-              onChange={(e) => setSelectedWeeklyModelKey(e.target.value)}
-              disabled={isGeneratingReport || isGeneratingKimiReport}
-            >
-              {(weeklyReportModels.length > 0 ? weeklyReportModels : [
-                { key: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash' },
-                { key: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro' }
-              ]).map(model => (
-                <option key={model.key} value={model.key}>{model.label || model.model}</option>
-              ))}
-            </select>
-          </label>
-          <button 
-            onClick={handleGenerateKimiReport}
-            disabled={isGeneratingReport || isGeneratingKimiReport || selectedNews.length === 0}
-            className="generate-btn kimi-btn"
-          >
-            {isGeneratingKimiReport ? '生成中...' : 'KIMI生成周报'}
-          </button>
+
+          <div className="report-workbench-right">
+            <section className="generate-section kd-panel">
+              <div className="generate-section-header">
+                <div>
+                  <h2>生成设置</h2>
+                  <p>选定提示词版本和生成模型后，一键生成周报。</p>
+                </div>
+              </div>
+              <div className="generate-sub-panel">
+                <div className="generate-sub-title">提示词版本</div>
+                <div className="prompt-list">
+                  {(promptOptions && promptOptions.length > 0 ? promptOptions : [{ id: '', name: '默认', description: '使用默认配置' }]).map(p => {
+                    const active = selectedPromptId === p.id;
+                    return (
+                      <button
+                        key={p.id}
+                        type="button"
+                        className={`prompt-chip ${active ? 'active' : ''}`}
+                        onClick={() => setSelectedPromptId(p.id)}
+                      >
+                        <span className="prompt-chip-name">{p.name}</span>
+                        <span className="prompt-chip-desc">{p.description || ''}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <div className="generate-sub-panel">
+                <div className="generate-sub-title">生成模型</div>
+                <div className="model-action-row">
+                  <select
+                    className="model-select"
+                    value={selectedUnifiedModelKey}
+                    onChange={(e) => {
+                      setSelectedUnifiedModelKey(e.target.value);
+                      const parsed = parseUnifiedWeeklyModelKey(e.target.value);
+                      if (parsed.provider === 'deepseek') setSelectedWeeklyModelKey(parsed.modelKey);
+                    }}
+                    disabled={isGeneratingReport || isGeneratingKimiReport}
+                  >
+                    {unifiedModelOptions.map(model => (
+                      <option key={model.key} value={model.key}>{model.label}</option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={handleGenerateUnifiedReport}
+                    disabled={isGeneratingReport || isGeneratingKimiReport || selectedNews.length === 0}
+                    className="generate-btn kd-btn-primary"
+                  >
+                    {(isGeneratingReport || isGeneratingKimiReport) ? '生成中...' : '生成周报'}
+                  </button>
+                </div>
+              </div>
+            </section>
+          </div>
         </div>
       )}
 
@@ -1963,7 +1951,7 @@ const ReportGenerator = () => {
                 <div className="report-content">
                   <ReactMarkdown
                     components={{
-                      h1: ({node, ...props}) => <h1 style={{fontSize:'28px',margin:'24px 0 16px 0',color:'#1a2240',fontWeight:800,textAlign:'left',letterSpacing:'0.5px',borderBottom:'2px solid #3d8bfd',paddingBottom:'8px',fontFamily:'inherit',lineHeight:'1.2'}} {...props} />,
+                      h1: ({node, ...props}) => <h1 style={{fontSize:'28px',margin:'24px 0 16px 0',color:'#203547',fontWeight:800,textAlign:'left',letterSpacing:'0.5px',borderBottom:'2px solid #38a6a5',paddingBottom:'8px',fontFamily:'inherit',lineHeight:'1.2'}} {...props} />,
                       h2: ({node, ...props}) => <h2 style={{fontSize:'24px',margin:'20px 0 12px 0',color:'#2c3e50',fontWeight:700,textAlign:'left',letterSpacing:'0.3px',fontFamily:'inherit',lineHeight:'1.3'}} {...props} />,
                       h3: ({node, ...props}) => <h3 style={{fontSize:'20px',margin:'16px 0 10px 0',color:'#34495e',fontWeight:600,textAlign:'left',fontFamily:'inherit',lineHeight:'1.4'}} {...props} />,
                       h4: ({node, ...props}) => <h4 style={{fontSize:'18px',margin:'14px 0 8px 0',color:'#5a678a',fontWeight:500,textAlign:'left',fontFamily:'inherit',lineHeight:'1.4'}} {...props} />,
@@ -1973,7 +1961,7 @@ const ReportGenerator = () => {
                       strong: ({node, ...props}) => <strong style={{color:'#1a2240',fontWeight:700,fontFamily:'inherit'}} {...props} />,
                       em: ({node, ...props}) => <em style={{color:'#555',fontStyle:'italic',fontFamily:'inherit'}} {...props} />,
                       p: ({node, ...props}) => <p style={{margin:'12px 0',textAlign:'left',lineHeight:'1.7',color:'#333',fontFamily:'inherit',overflowWrap:'break-word',wordWrap:'break-word'}} {...props} />,
-                      blockquote: ({node, ...props}) => <blockquote style={{margin:'16px 0',padding:'12px 16px',borderLeft:'4px solid #3d8bfd',background:'#f8f9fa',fontStyle:'italic',color:'#666',fontFamily:'inherit'}} {...props} />,
+                      blockquote: ({node, ...props}) => <blockquote style={{margin:'16px 0',padding:'12px 16px',borderLeft:'4px solid #38a6a5',background:'#f8fbfb',fontStyle:'italic',color:'#607681',fontFamily:'inherit'}} {...props} />,
                       code: ({node, ...props}) => <code style={{background:'#f1f3f4',padding:'2px 6px',borderRadius:'4px',fontSize:'14px',color:'#d73a49',fontFamily:'"SF Mono", Monaco, "Consolas", "Liberation Mono", "DejaVu Sans Mono", "Courier New", monospace'}} {...props} />,
                       pre: ({node, ...props}) => <pre style={{background:'#f8f9fa',padding:'16px',borderRadius:'8px',overflowX:'auto',fontSize:'14px',lineHeight:'1.5',border:'1px solid #e1e5e9',fontFamily:'"SF Mono", Monaco, "Consolas", "Liberation Mono", "DejaVu Sans Mono", "Courier New", monospace',whiteSpace:'pre-wrap'}} {...props} />,
                     }}

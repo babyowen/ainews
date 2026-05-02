@@ -1,0 +1,298 @@
+.filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 16px 24px;
+  flex-wrap: wrap;
+}
+
+.filter-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.filter-group label {
+  color: var(--kd-ink-muted);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.filter-group select,
+.filter-group input[type="text"] {
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--kd-line);
+  border-radius: var(--kd-radius);
+  background: #fff;
+  color: var(--kd-ink);
+  font-size: 14px;
+  font-weight: 600;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.filter-group select:focus,
+.filter-group input[type="text"]:focus {
+  border-color: var(--kd-accent);
+  box-shadow: 0 0 0 3px rgba(56, 166, 165, 0.16);
+}
+
+/* 日期选择器 */
+.date-picker-wrap {
+  position: relative;
+}
+
+.date-picker-input {
+  min-width: 120px;
+  cursor: pointer;
+}
+
+.date-picker-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+  background: transparent;
+}
+
+.date-picker-popup {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 1000;
+  min-width: 280px;
+  padding: 16px;
+  border: 1px solid var(--kd-line);
+  border-radius: var(--kd-radius-lg);
+  background: #fff;
+  box-shadow: var(--kd-shadow-strong);
+}
+
+.date-picker-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.date-picker-nav-btn {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--kd-line);
+  border-radius: var(--kd-radius);
+  background: var(--kd-surface-soft);
+  color: var(--kd-ink);
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.date-picker-nav-btn:hover {
+  border-color: var(--kd-accent);
+  background: var(--kd-accent-soft);
+  color: var(--kd-accent-dark);
+}
+
+.date-picker-month {
+  color: var(--kd-ink);
+  font-size: 15px;
+  font-weight: 700;
+  min-width: 110px;
+  text-align: center;
+}
+
+.date-picker-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+  margin-bottom: 6px;
+}
+
+.date-picker-weekday {
+  text-align: center;
+  padding: 4px 0;
+  color: var(--kd-ink-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.date-picker-days {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+}
+
+.date-picker-day {
+  display: grid;
+  place-items: center;
+  height: 34px;
+  padding: 0;
+  border: none;
+  border-radius: var(--kd-radius-sm);
+  background: transparent;
+  color: var(--kd-ink);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.date-picker-day:hover:not(:disabled) {
+  background: var(--kd-accent-soft);
+  color: var(--kd-accent-dark);
+}
+
+.date-picker-day.other-month {
+  color: var(--kd-line-strong);
+}
+
+.date-picker-day.today {
+  background: var(--kd-surface-soft);
+  font-weight: 700;
+}
+
+.date-picker-day.selected {
+  background: var(--kd-accent);
+  color: #fff;
+  font-weight: 700;
+}
+
+.date-picker-day.selected:hover {
+  background: var(--kd-accent-dark);
+}
+
+.date-picker-shortcuts {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--kd-line);
+}
+
+.date-picker-shortcut {
+  padding: 4px 12px;
+  border: 1px solid var(--kd-line);
+  border-radius: var(--kd-radius-sm);
+  background: #fff;
+  color: var(--kd-ink-muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.date-picker-shortcut:hover {
+  border-color: var(--kd-accent);
+  background: var(--kd-accent-soft);
+  color: var(--kd-accent-dark);
+}
+
+/* 轮次复选框 */
+.round-checkboxes {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.round-checkboxes label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--kd-ink);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.round-checkboxes input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--kd-accent);
+  cursor: pointer;
+}
+
+/* 分数筛选 */
+.score-filter {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.score-filter-label {
+  color: var(--kd-ink-muted);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.score-checkboxes {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.score-checkboxes label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border: 1px solid var(--kd-line);
+  border-radius: var(--kd-radius);
+  background: #fff;
+  color: var(--kd-ink-muted);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.score-checkboxes label.active {
+  border-color: var(--kd-accent);
+  background: var(--kd-accent-soft);
+  color: var(--kd-accent-dark);
+}
+
+.score-checkboxes input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--kd-accent);
+  cursor: pointer;
+}
+
+.score-filter-confirm {
+  margin-left: 6px;
+  min-height: 30px;
+  padding: 0 14px;
+  border-radius: var(--kd-radius);
+  background: var(--kd-accent);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(56, 166, 165, 0.22);
+}
+
+.score-filter-confirm:hover {
+  background: var(--kd-accent-dark);
+}
+
+@media (max-width: 820px) {
+  .filter-bar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 14px;
+  }
+
+  .score-filter {
+    flex-wrap: wrap;
+  }
+
+  .score-checkboxes {
+    flex-wrap: wrap;
+  }
+}

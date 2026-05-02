@@ -40,24 +40,24 @@ const QualityAnalysis = () => {
 
   // 渲染总结内容块
   const renderSummaryBlock = (title, content, icon, color, description) => (
-    <div className={`summary-block ${color}`}>
-      <div className="summary-header">
-        <div className="summary-icon">{icon}</div>
-        <div className="summary-title-group">
-          <h3 className="summary-title">{title}</h3>
-          {description && <p className="summary-description">{description}</p>}
+    <div className={`quality-summary-block ${color}`}>
+      <div className="quality-block-header">
+        <div className="quality-block-icon">{icon}</div>
+        <div className="quality-block-title-group">
+          <h3 className="quality-block-title">{title}</h3>
+          {description && <p className="quality-block-description">{description}</p>}
         </div>
       </div>
-      <div className="summary-content">
+      <div className="quality-block-content">
         {content ? (
           <ReactMarkdown
             components={{
-              h1: ({node, ...props}) => <h2 style={{fontSize:18,margin:'12px 0 8px 0',color:'#1a2240',fontWeight:700}} {...props} />,
-              h2: ({node, ...props}) => <h3 style={{fontSize:16,margin:'10px 0 6px 0',color:'#3d4673',fontWeight:600}} {...props} />,
-              h3: ({node, ...props}) => <h4 style={{fontSize:15,margin:'8px 0 4px 0',color:'#5a678a',fontWeight:500}} {...props} />,
+              h1: ({node, ...props}) => <h2 style={{fontSize:18,margin:'12px 0 8px 0',color:'var(--kd-ink)',fontWeight:700}} {...props} />,
+              h2: ({node, ...props}) => <h3 style={{fontSize:16,margin:'10px 0 6px 0',color:'var(--kd-ink-muted)',fontWeight:600}} {...props} />,
+              h3: ({node, ...props}) => <h4 style={{fontSize:15,margin:'8px 0 4px 0',color:'var(--kd-ink-soft)',fontWeight:500}} {...props} />,
               ul: ({node, ...props}) => <ul style={{margin:'6px 0 6px 18px',padding:0}} {...props} />,
               li: ({node, ...props}) => <li style={{margin:'3px 0'}} {...props} />,
-              strong: ({node, ...props}) => <strong style={{color:'#1a2240'}} {...props} />,
+              strong: ({node, ...props}) => <strong style={{color:'var(--kd-ink)'}} {...props} />,
               p: ({node, ...props}) => <p style={{margin:'6px 0',lineHeight:1.6}} {...props} />,
             }}
           >
@@ -73,63 +73,57 @@ const QualityAnalysis = () => {
   );
 
   return (
-    <div className="quality-analysis-container">
-      {/* 页面标题 */}
-      <header className="quality-analysis-header">
-        <div className="header-content">
-          <h1 className="header-title">🔍 质量分析</h1>
-          <p className="header-subtitle">对比分析各轮次总结内容和LLM修改建议的有效性</p>
+    <div className="quality-analysis-page">
+      <header className="kd-page-header">
+        <div>
+          <p className="kd-page-kicker">QUALITY ANALYSIS</p>
+          <h1 className="kd-page-title">质量分析</h1>
+          <p className="kd-page-subtitle">对比分析各轮次总结内容和 LLM 修改建议的有效性。</p>
         </div>
       </header>
 
       {/* 筛选控件 */}
-      <div className="filter-section">
-        <div className="filter-group">
-          <label className="filter-label">
-            <span className="label-icon">🔑</span>
-            关键词
-          </label>
-          <select 
-            className="filter-select"
-            value={keyword}
-            onChange={(e) => setKeyword(e.target.value)}
+      <section className="quality-filter-panel kd-panel">
+        <div className="quality-filter-row">
+          <div className="quality-filter-group">
+            <label>关键词</label>
+            <select
+              value={keyword}
+              onChange={(e) => setKeyword(e.target.value)}
+            >
+              {keywordOptions.map(option => (
+                <option key={option} value={option}>{option}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="quality-filter-group">
+            <label>日期</label>
+            <input
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+            />
+          </div>
+
+          <button
+            className="quality-refresh-btn kd-btn-primary"
+            onClick={fetchData}
+            disabled={loading}
           >
-            {keywordOptions.map(option => (
-              <option key={option} value={option}>{option}</option>
-            ))}
-          </select>
+            {loading ? '分析中...' : '重新分析'}
+          </button>
         </div>
-
-        <div className="filter-group">
-          <label className="filter-label">
-            <span className="label-icon">📅</span>
-            日期
-          </label>
-          <input
-            type="date"
-            className="filter-date"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-          />
-        </div>
-
-        <button 
-          className="refresh-btn"
-          onClick={fetchData}
-          disabled={loading}
-        >
-          {loading ? '🔄 分析中...' : '🔍 重新分析'}
-        </button>
-      </div>
+      </section>
 
       {/* 分析结果区域 */}
-      <div className="analysis-results">
+      <div className="quality-results">
         {loading ? (
           <Loading />
         ) : error ? (
           <Error />
         ) : analysisData ? (
-          <div className="summary-blocks">
+          <div className="quality-summary-blocks">
             {renderSummaryBlock(
               "第一轮总结",
               analysisData.round1Summary,
@@ -137,7 +131,7 @@ const QualityAnalysis = () => {
               "round-1",
               "初始AI总结，基于原始新闻数据生成"
             )}
-            
+
             {renderSummaryBlock(
               "LLM修改建议",
               analysisData.modifyAdvice,
@@ -145,7 +139,7 @@ const QualityAnalysis = () => {
               "modify-advice",
               "基于第一轮总结内容，LLM给出的优化建议"
             )}
-            
+
             {renderSummaryBlock(
               "第二轮总结",
               analysisData.round2Summary,
@@ -153,7 +147,7 @@ const QualityAnalysis = () => {
               "round-2",
               "根据修改建议优化后的总结内容"
             )}
-            
+
             {renderSummaryBlock(
               "昨天总结",
               analysisData.yesterdaySummary,
@@ -161,7 +155,7 @@ const QualityAnalysis = () => {
               "yesterday",
               "前一天的总结内容，作为对比参考"
             )}
-            
+
             {renderSummaryBlock(
               "第三轮总结",
               analysisData.round3Summary,
