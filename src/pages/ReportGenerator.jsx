@@ -150,7 +150,7 @@ const ReportGenerator = () => {
 
 *本报告基于公开信息整理分析，仅供参考。如需更详细信息，请查阅相关官方文件。*`;
 
-  // 初始化默认日期：最近完整周六到周六
+  // 初始化默认日期：最近周六到今天
   useEffect(() => {
     const range = getRecentCompleteSaturdayRange();
     setStartDate(range.startDate);
@@ -212,6 +212,7 @@ const ReportGenerator = () => {
       return;
     }
 
+    setShowReport(false); // 在请求开始时清空旧报告，避免异步响应覆盖后续生成的报告显隐状态
     setIsLoadingNews(true);
     try {
       let apiUrl;
@@ -222,14 +223,13 @@ const ReportGenerator = () => {
       } else {
         apiUrl = `/api/weekly-news?keyword=${selectedKeyword}&startDate=${startDate}&endDate=${endDate}&minScore=3`;
       }
-      
+
       const response = await fetch(apiUrl);
       const data = await response.json();
       setNewsList(data);
       // 默认选中4分以上的新闻
       const highScoreNews = data.filter(news => Number(news.score) >= 4);
       setSelectedNews(highScoreNews);
-      setShowReport(false); // 隐藏之前的报告
     } catch (error) {
       console.error('获取新闻失败:', error);
       alert('获取新闻失败，请稍后重试');
@@ -1662,7 +1662,7 @@ const ReportGenerator = () => {
         <div>
           <p className="kd-page-kicker">WEEKLY REPORT</p>
           <h1 className="kd-page-title">周报生成</h1>
-          <p className="kd-page-subtitle">默认最近完整周六到周六，筛选新闻后统一选择模型生成周报。</p>
+          <p className="kd-page-subtitle">默认最近周六至今天，筛选新闻后统一选择模型生成周报。</p>
         </div>
         <div className="report-header-stats">
           <span>{selectedKeyword}</span>
@@ -1671,47 +1671,58 @@ const ReportGenerator = () => {
         </div>
       </header>
 
-      <section className="report-control-panel kd-panel">
+      <section className="report-control-panel kd-panel" aria-label="周报新闻选择条件">
         <div className="report-filter-grid">
-          <div className="filter-item">
-            <label>关键词</label>
-            <select value={selectedKeyword} onChange={(e) => setSelectedKeyword(e.target.value)} className="keyword-select">
-              {availableKeywords.map(keyword => (
-                <option key={keyword} value={keyword}>{keyword}</option>
-              ))}
-            </select>
+          <div className="filter-group filter-group-keyword">
+            <label className="filter-item">
+              <span>关键词</span>
+              <select value={selectedKeyword} onChange={(e) => setSelectedKeyword(e.target.value)} className="keyword-select">
+                {availableKeywords.map(keyword => (
+                  <option key={keyword} value={keyword}>{keyword}</option>
+                ))}
+              </select>
+            </label>
           </div>
 
-          <div className="filter-item">
-            <label>开始日期</label>
-            <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="date-input" />
-          </div>
-
-          <div className="filter-item">
-            <label>结束日期</label>
-            <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="date-input" />
-          </div>
-
-          <div className="filter-item">
-            <label>分数筛选</label>
-            <select value={scoreFilter} onChange={(e) => setScoreFilter(e.target.value)} className="score-select">
-              <option value="min4">4分以上</option>
-              <option value="min3">3分以上</option>
-              <option value="all">全部新闻</option>
-            </select>
-          </div>
-
-          <div className="filter-item filter-actions-cell">
-            <label>操作</label>
-            <div className="filter-actions-row">
-              <label className="summary-toggle-item">
-                <input type="checkbox" checked={summaryVersion === 'short'} onChange={(e) => setSummaryVersion(e.target.checked ? 'short' : 'full')} />
-                短总结
+          <div className="filter-group filter-group-date">
+            <div className="date-pair">
+              <label className="filter-item">
+                <span>开始</span>
+                <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="date-input" />
               </label>
-              <button onClick={handleSearchNews} disabled={isLoadingNews} className="search-btn kd-btn-dark">
-                {isLoadingNews ? '查询中...' : '查询新闻'}
-              </button>
+              <label className="filter-item">
+                <span>结束</span>
+                <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="date-input" />
+              </label>
             </div>
+          </div>
+
+          <div className="filter-group filter-group-score">
+            <label className="filter-item">
+              <span>分数</span>
+              <select value={scoreFilter} onChange={(e) => setScoreFilter(e.target.value)} className="score-select">
+                <option value="min4">4分以上</option>
+                <option value="min3">3分以上</option>
+                <option value="all">全部新闻</option>
+              </select>
+            </label>
+          </div>
+
+          <div className="filter-group filter-group-version">
+            <label className={`summary-toggle-item ${summaryVersion === 'short' ? 'active' : ''}`}>
+              <input type="checkbox" checked={summaryVersion === 'short'} onChange={(e) => setSummaryVersion(e.target.checked ? 'short' : 'full')} />
+              <span className="summary-toggle-control" aria-hidden="true"></span>
+              <span className="summary-toggle-copy">
+                <span className="summary-toggle-title">短总结</span>
+                <span className="summary-toggle-note">{summaryVersion === 'short' ? '精简内容' : '完整内容'}</span>
+              </span>
+            </label>
+          </div>
+
+          <div className="filter-group filter-group-action">
+            <button onClick={handleSearchNews} disabled={isLoadingNews} className="search-btn kd-btn-dark">
+              {isLoadingNews ? '查询中...' : '查询新闻'}
+            </button>
           </div>
         </div>
       </section>

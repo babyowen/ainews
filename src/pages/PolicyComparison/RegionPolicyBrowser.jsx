@@ -254,8 +254,8 @@ const RegionPolicyBrowser = () => {
         <div className="header-left">
           <div className="header-badge-icon">
             <svg width="44" height="44" viewBox="0 0 44 44" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <rect width="44" height="44" rx="10" fill="#fafaf9" stroke="#e7e5e4" strokeWidth="1"/>
-              <path d="M22 11C17.5 11 14 14.5 14 19C14 25 22 33 22 33C22 33 30 25 30 19C30 14.5 26.5 11 22 11ZM22 22C20.3 22 19 20.7 19 19C19 17.3 20.3 16 22 16C23.7 16 25 17.3 25 19C25 20.7 23.7 22 22 22Z" fill="#d97706"/>
+              <rect width="44" height="44" rx="10" fill="var(--kd-panel)" stroke="var(--kd-line)" strokeWidth="1"/>
+              <path d="M22 11C17.5 11 14 14.5 14 19C14 25 22 33 22 33C22 33 30 25 30 19C30 14.5 26.5 11 22 11ZM22 22C20.3 22 19 20.7 19 19C19 17.3 20.3 16 22 16C23.7 16 25 17.3 25 19C25 20.7 23.7 22 22 22Z" fill="#38a6a5"/>
               <circle cx="22" cy="19" r="2" fill="#fff"/>
             </svg>
           </div>

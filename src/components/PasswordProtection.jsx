@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import './PasswordProtection.css';
 
-const PasswordProtection = ({ children, onAuthenticated, title = '🔐 管理员验证', description = '请输入管理员密码来访问修改评分功能' }) => {
+const PasswordProtection = ({ children, onAuthenticated, title = '管理员验证', description = '请输入管理员密码来访问修改评分功能' }) => {
   const [password, setPassword] = useState('');
   const [isAuthenticated, setIsAuthenticated] = useState(() => {
     // 检查是否在30分钟内已经验证过
@@ -72,7 +72,7 @@ const PasswordProtection = ({ children, onAuthenticated, title = '🔐 管理员
     return (
       <div className="authenticated-container">
         <div className="logout-header">
-          <span className="auth-status">🔒 管理员模式</span>
+          <span className="auth-status">管理员模式</span>
           <button onClick={handleLogout} className="logout-btn">
             退出登录
           </button>
@@ -128,7 +128,7 @@ const PasswordProtection = ({ children, onAuthenticated, title = '🔐 管理员
         </form>
         
                   <div className="password-hint">
-            <p>💡 验证后30分钟内无需重复输入密码</p>
+            <p>验证后30分钟内无需重复输入密码</p>
            
             
           </div>

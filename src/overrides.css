@@ -1,7 +1,6 @@
 /* Final scoped visual pass. Imported last to normalize legacy page CSS. */
 .score-edit-page,
 .word-count-stats,
-.history-reports-page,
 .weekly-comparison-container,
 .report-generator {
   max-width: 1440px;
@@ -11,9 +10,7 @@
 
 .score-edit-page .page-header,
 .word-count-stats .page-header,
-.history-reports-page .page-header,
-.weekly-comparison-container .header-section,
-.config-container .config-header {
+.weekly-comparison-container .header-section {
   position: relative;
   text-align: left;
   margin: 24px auto 18px;
@@ -30,9 +27,7 @@
 
 .score-edit-page .page-header::before,
 .word-count-stats .page-header::before,
-.history-reports-page .page-header::before,
-.weekly-comparison-container .header-section::before,
-.config-container .config-header::before {
+.weekly-comparison-container .header-section::before {
   content: "";
   position: absolute;
   inset: 0;
@@ -46,9 +41,7 @@
 
 .score-edit-page .page-header::after,
 .word-count-stats .page-header::after,
-.history-reports-page .page-header::after,
-.weekly-comparison-container .header-section::after,
-.config-container .config-header::after {
+.weekly-comparison-container .header-section::after {
   content: "";
   position: absolute;
   right: 28px;
@@ -63,18 +56,14 @@
 
 .score-edit-page .page-header > *,
 .word-count-stats .page-header > *,
-.history-reports-page .page-header > *,
-.weekly-comparison-container .header-section > *,
-.config-container .config-header > * {
+.weekly-comparison-container .header-section > * {
   position: relative;
   z-index: 1;
 }
 
 .score-edit-page .page-header h1,
 .word-count-stats .page-header h1,
-.history-reports-page .page-header h1,
-.weekly-comparison-container .header-section h1,
-.config-container .main-title h1 {
+.weekly-comparison-container .header-section h1 {
   margin: 0;
   color: #fff;
   background: none;
@@ -86,9 +75,7 @@
 
 .score-edit-page .page-header p,
 .word-count-stats .page-header p,
-.history-reports-page .page-header p,
-.weekly-comparison-container .header-section p,
-.config-container .subtitle {
+.weekly-comparison-container .header-section p {
   margin: 8px 0 0;
   color: rgba(255, 255, 255, 0.72);
   font-size: 14px;
@@ -99,18 +86,10 @@
 .word-count-stats .date-range-selector,
 .word-count-stats .legend-container,
 .word-count-stats .calendar-container,
-.history-reports-page .filter-section,
-.history-reports-page .table-section,
 .weekly-comparison-container .step-content,
 .weekly-comparison-container .news-picker,
 .weekly-comparison-container .report-card,
-.weekly-comparison-container .policy-model-selector,
-.config-container .config-navigation,
-.config-container .config-section,
-.config-container .keyword-sidebar,
-.config-container .keyword-content,
-.config-container .prompt-version-card,
-.config-container .editor-panel {
+.weekly-comparison-container .policy-model-selector {
   border: 1px solid var(--kd-line);
   border-radius: var(--kd-radius-lg);
   background: #fff;
@@ -118,45 +97,8 @@
   box-shadow: var(--kd-shadow-sm);
 }
 
-.config-container {
-  background: var(--kd-page);
-  color: var(--kd-ink);
-}
-
-.config-container .config-header {
-  max-width: 1440px;
-}
-
-.config-container .header-bg,
-.config-container .title-glow {
-  display: none;
-}
-
-.config-container .title-section {
-  margin-bottom: 0;
-}
-
-.config-container .config-navigation,
-.config-container .config-content {
-  max-width: 1440px;
-  margin-left: auto;
-  margin-right: auto;
-}
-
-.config-container .nav-tab {
-  color: var(--kd-ink-muted);
-}
-
-.config-container .nav-tab.active {
-  background: var(--kd-accent);
-  color: #fff;
-}
-
 .score-edit-page .confirm-btn,
 .score-edit-page .modify-btn,
-.history-reports-page .btn-primary,
-.history-reports-page .btn-view,
-.history-reports-page .btn-export,
 .weekly-comparison-container .action-btn.btn-primary {
   background: var(--kd-accent);
   color: #fff;
@@ -165,8 +107,6 @@
 .score-edit-page input,
 .score-edit-page select,
 .word-count-stats select,
-.history-reports-page input,
-.history-reports-page select,
 .config-container input,
 .config-container select,
 .config-container textarea {
@@ -194,13 +134,8 @@
 }
 
 .word-count-stats .week-header,
-.word-count-stats .week-summary-header,
-.history-reports-page .reports-table thead {
+.word-count-stats .week-summary-header {
   background: var(--kd-panel);
-}
-
-.history-reports-page .reports-table tbody tr:hover {
-  background: #f1fafa !important;
 }
 
 .weekly-comparison-container .step-item.active .step-circle {
@@ -241,7 +176,6 @@
 @media (max-width: 820px) {
   .score-edit-page,
   .word-count-stats,
-  .history-reports-page,
   .weekly-comparison-container,
   .report-generator {
     padding: 16px;

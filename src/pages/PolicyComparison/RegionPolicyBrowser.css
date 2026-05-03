@@ -1,131 +1,108 @@
-/* ============================================
-   地域政策浏览 - 极简商务风格
-   配色：炭黑 #1F2937 + 琥珀金 #D97706
-   ============================================ */
-
-/* CSS Variables */
-:root {
-  --color-bg: #fafaf9;
-  --color-surface: #ffffff;
-  --color-border: #e7e5e4;
-  --color-text-primary: #1c1917;
-  --color-text-secondary: #57534e;
-  --color-text-tertiary: #a8a29e;
-  --color-accent: #d97706;
-  --color-accent-light: #f59e0b;
-  --color-accent-bg: #fffbeb;
-  --color-navy: #1e3a5f;
-  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
-  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-}
+/* Region Policy Browser — all rules scoped under .region-policy-browser per page-CSS convention */
 
 /* ============================================
-   Page Header - 商务风格
+   Page Header
    ============================================ */
 .region-policy-browser {
-  padding: 24px 32px 32px;
+  padding: 24px;
   max-width: 1600px;
   margin: 0 auto;
-  background: var(--color-bg);
   min-height: 100vh;
 }
 
-.page-header {
+.region-policy-browser .page-header {
   margin-bottom: 24px;
   padding: 20px 24px;
-  background: #ffffff;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-sm);
+  background: var(--kd-surface);
+  border: 1px solid var(--kd-line);
+  border-radius: var(--kd-radius-lg);
+  box-shadow: var(--kd-shadow-sm);
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 24px;
 }
 
-.header-left {
+.region-policy-browser .header-left {
   display: flex;
   align-items: center;
   gap: 14px;
 }
 
-.header-badge-icon {
+.region-policy-browser .header-badge-icon {
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
-.header-badge-icon svg {
+.region-policy-browser .header-badge-icon svg {
   display: block;
 }
 
-.header-text {
+.region-policy-browser .header-text {
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 
-.header-label {
+.region-policy-browser .header-label {
   font-size: 11px;
-  font-weight: 600;
-  color: var(--color-accent);
+  font-weight: 800;
+  color: var(--kd-accent-dark);
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
 
-.header-text h1 {
+.region-policy-browser .header-text h1 {
   font-size: 22px;
-  font-weight: 700;
-  color: var(--color-text-primary);
+  font-weight: 800;
+  color: var(--kd-ink);
   margin: 0;
   letter-spacing: -0.01em;
   line-height: 1.2;
 }
 
-/* Header right section - 卡片式 */
-.header-meta {
+/* Header right section */
+.region-policy-browser .header-meta {
   display: flex;
   align-items: center;
   gap: 16px;
 }
 
-.meta-card {
+.region-policy-browser .meta-card {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 14px;
-  background: var(--color-accent-bg);
-  border: 1px solid rgba(217, 119, 6, 0.15);
-  border-radius: 20px;
+  padding: 6px 14px;
+  background: var(--kd-accent-soft);
+  border: 1px solid rgba(56, 166, 165, 0.18);
+  border-radius: 999px;
   font-size: 13px;
-  font-weight: 500;
-  color: var(--color-accent);
+  font-weight: 700;
+  color: var(--kd-accent-dark);
 }
 
-.meta-card svg {
-  color: var(--color-accent);
+.region-policy-browser .meta-card svg {
+  color: var(--kd-accent-dark);
 }
 
-.meta-divider {
+.region-policy-browser .meta-divider {
   width: 1px;
   height: 20px;
-  background: var(--color-border);
+  background: var(--kd-line);
 }
 
-.meta-text {
+.region-policy-browser .meta-text {
   font-size: 13px;
-  color: var(--color-text-tertiary);
-  font-weight: 400;
+  color: var(--kd-ink-soft);
+  font-weight: 500;
 }
 
 /* ============================================
    Main Layout
    ============================================ */
-.browser-container {
+.region-policy-browser .browser-container {
   display: grid;
   grid-template-columns: 280px 1fr;
   gap: 24px;
@@ -133,86 +110,86 @@
 }
 
 /* ============================================
-   Sidebar - 地域选择
+   Sidebar — Region selector
    ============================================ */
-.region-sidebar {
-  background: var(--color-surface);
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--color-border);
-  box-shadow: var(--shadow-sm);
+.region-policy-browser .region-sidebar {
+  background: var(--kd-surface);
+  border-radius: var(--kd-radius-lg);
+  border: 1px solid var(--kd-line);
+  box-shadow: var(--kd-shadow-sm);
   overflow: hidden;
   position: sticky;
   top: 24px;
 }
 
-.sidebar-header {
+.region-policy-browser .sidebar-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 20px;
-  background: linear-gradient(135deg, #f5f5f4 0%, #fafaf9 100%);
-  border-bottom: 1px solid var(--color-border);
+  padding: 14px 18px;
+  background: var(--kd-panel);
+  border-bottom: 1px solid var(--kd-line);
 }
 
-.sidebar-header h3 {
+.region-policy-browser .sidebar-header h3 {
   margin: 0;
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--color-text-primary);
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--kd-ink);
   letter-spacing: 0.02em;
 }
 
-.sidebar-hint {
+.region-policy-browser .sidebar-hint {
   font-size: 12px;
-  color: var(--color-text-tertiary);
-  font-weight: 400;
+  color: var(--kd-ink-soft);
+  font-weight: 500;
 }
 
 /* ============================================
-   Date Filter - 单行布局
+   Date Filter
    ============================================ */
-.date-filter {
+.region-policy-browser .date-filter {
   padding: 12px;
-  border-bottom: 1px solid var(--color-border);
-  background: var(--color-surface);
+  border-bottom: 1px solid var(--kd-line);
+  background: var(--kd-surface);
 }
 
-.filter-row {
+.region-policy-browser .filter-row {
   display: flex;
   align-items: center;
   gap: 6px;
   flex-wrap: nowrap;
 }
 
-.filter-row svg {
-  color: var(--color-text-tertiary);
+.region-policy-browser .filter-row svg {
+  color: var(--kd-ink-soft);
   flex-shrink: 0;
   width: 14px;
   height: 14px;
 }
 
-.filter-row input[type="date"] {
+.region-policy-browser .filter-row input[type="date"] {
   padding: 5px 6px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
+  border: 1px solid var(--kd-line);
+  border-radius: var(--kd-radius-sm);
   font-size: 12px;
-  color: var(--color-text-primary);
-  background: var(--color-surface);
+  color: var(--kd-ink);
+  background: var(--kd-surface);
   font-family: inherit;
   width: 102px;
   flex-shrink: 0;
   text-align: center;
 }
 
-.filter-row input[type="date"]:focus {
+.region-policy-browser .filter-row input[type="date"]:focus {
   outline: none;
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 2px rgba(217, 119, 6, 0.1);
+  border-color: var(--kd-accent);
+  box-shadow: 0 0 0 3px rgba(56, 166, 165, 0.12);
 }
 
-.filter-row span {
+.region-policy-browser .filter-row span {
   font-size: 12px;
-  color: var(--color-text-tertiary);
+  color: var(--kd-ink-soft);
   white-space: nowrap;
   flex-shrink: 0;
   padding: 0 2px;
@@ -221,256 +198,258 @@
 /* ============================================
    Region Tree
    ============================================ */
-.region-tree-container {
+.region-policy-browser .region-tree-container {
   max-height: calc(100vh - 280px);
   overflow-y: auto;
   padding: 8px;
 }
 
-.region-tree {
+.region-policy-browser .region-tree {
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 
 /* Region Item Base */
-.region-item {
+.region-policy-browser .region-item {
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 10px 12px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--kd-radius-sm);
   cursor: pointer;
   transition: all 0.15s ease;
-  font-size: 14px;
+  font-size: 13.5px;
   border: 1px solid transparent;
 }
 
-.region-item:hover {
-  background: #f5f5f4;
+.region-policy-browser .region-item:hover {
+  background: var(--kd-panel);
 }
 
-.region-item.active {
-  background: var(--color-accent-bg);
-  border-color: var(--color-accent);
-  color: var(--color-accent);
+.region-policy-browser .region-item.active {
+  background: var(--kd-accent-soft);
+  border-color: var(--kd-accent);
+  color: var(--kd-accent-dark);
 }
 
-.region-item svg {
+.region-policy-browser .region-item svg {
   flex-shrink: 0;
-  color: var(--color-text-tertiary);
+  color: var(--kd-ink-soft);
   width: 16px;
   height: 16px;
 }
 
-.region-item.active svg {
-  color: var(--color-accent);
+.region-policy-browser .region-item.active svg {
+  color: var(--kd-accent-dark);
 }
 
-.region-name {
+.region-policy-browser .region-name {
   flex: 1;
-  font-weight: 500;
-  color: var(--color-text-primary);
+  font-weight: 600;
+  color: var(--kd-ink);
 }
 
-.region-item.active .region-name {
-  color: var(--color-accent);
+.region-policy-browser .region-item.active .region-name {
+  color: var(--kd-accent-dark);
+  font-weight: 700;
+}
+
+.region-policy-browser .region-count {
+  font-size: 11.5px;
+  color: var(--kd-ink-soft);
+  background: var(--kd-panel);
+  padding: 2px 8px;
+  border-radius: 999px;
   font-weight: 600;
 }
 
-.region-count {
-  font-size: 12px;
-  color: var(--color-text-tertiary);
-  background: #f5f5f4;
-  padding: 2px 8px;
-  border-radius: 12px;
+.region-policy-browser .region-item.active .region-count {
+  background: rgba(56, 166, 165, 0.15);
+  color: var(--kd-accent-dark);
+}
+
+.region-policy-browser .region-score {
+  font-size: 11px;
+  color: var(--kd-ink-soft);
+  margin-left: 2px;
   font-weight: 500;
 }
 
-.region-item.active .region-count {
-  background: rgba(217, 119, 6, 0.15);
-  color: var(--color-accent);
-}
-
-.region-score {
-  font-size: 11px;
-  color: var(--color-text-tertiary);
-  margin-left: 2px;
-}
-
-.region-item.active .region-score {
-  color: var(--color-accent-light);
+.region-policy-browser .region-item.active .region-score {
+  color: var(--kd-accent);
 }
 
 /* National Level */
-.region-item.national {
-  background: linear-gradient(135deg, #1e3a5f 0%, #2d4a6f 100%);
-  color: white;
+.region-policy-browser .region-item.national {
+  background: linear-gradient(135deg, #203547 0%, #1f5d68 100%);
+  color: #fff;
   margin-bottom: 4px;
   border: none;
 }
 
-.region-item.national:hover {
-  background: linear-gradient(135deg, #152d4a 0%, #1e3a5f 100%);
+.region-policy-browser .region-item.national:hover {
+  background: linear-gradient(135deg, #152b38 0%, #164a52 100%);
 }
 
-.region-item.national.active {
-  background: var(--color-accent);
-  box-shadow: 0 2px 8px rgba(217, 119, 6, 0.3);
+.region-policy-browser .region-item.national.active {
+  background: var(--kd-accent);
+  box-shadow: 0 2px 8px rgba(56, 166, 165, 0.3);
 }
 
-.region-item.national .region-name,
-.region-item.national .region-count {
-  color: white;
+.region-policy-browser .region-item.national .region-name,
+.region-policy-browser .region-item.national .region-count {
+  color: #fff;
 }
 
-.region-item.national svg {
+.region-policy-browser .region-item.national svg {
   color: rgba(255, 255, 255, 0.9);
 }
 
-.region-item.national.active svg {
-  color: white;
+.region-policy-browser .region-item.national.active svg {
+  color: #fff;
 }
 
-.region-item.national .region-count {
+.region-policy-browser .region-item.national .region-count {
   background: rgba(255, 255, 255, 0.2);
 }
 
 /* Municipality Level */
-.region-item.municipality {
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
+.region-policy-browser .region-item.municipality {
+  background: var(--kd-surface-soft);
+  border: 1px solid var(--kd-line);
   margin-bottom: 2px;
 }
 
-.region-item.municipality:hover {
-  background: #f1f5f9;
-  border-color: #cbd5e1;
+.region-policy-browser .region-item.municipality:hover {
+  background: var(--kd-panel);
+  border-color: var(--kd-line-strong);
 }
 
-.region-item.municipality.active {
-  background: #eff6ff;
-  border-color: #3b82f6;
+.region-policy-browser .region-item.municipality.active {
+  background: var(--kd-accent-soft);
+  border-color: var(--kd-accent);
 }
 
-.region-item.municipality.active .region-name {
-  color: #1e40af;
+.region-policy-browser .region-item.municipality.active .region-name {
+  color: var(--kd-accent-dark);
 }
 
 /* Province Level */
-.province-group {
+.region-policy-browser .province-group {
   margin-bottom: 2px;
 }
 
-.region-item.province {
-  font-weight: 500;
+.region-policy-browser .region-item.province {
+  font-weight: 600;
 }
 
-.region-item.province:hover {
-  background: #f5f5f4;
+.region-policy-browser .region-item.province:hover {
+  background: var(--kd-panel);
 }
 
 /* City List */
-.city-list {
+.region-policy-browser .city-list {
   margin-left: 8px;
   padding-left: 12px;
-  border-left: 2px solid var(--color-border);
+  border-left: 2px solid var(--kd-line);
   display: flex;
   flex-direction: column;
   gap: 1px;
 }
 
-.region-item.city {
+.region-policy-browser .region-item.city {
   padding: 8px 10px;
   font-size: 13px;
 }
 
-.region-item.city .region-name {
-  font-weight: 400;
+.region-policy-browser .region-item.city .region-name {
+  font-weight: 500;
 }
 
 /* Provincial Sub-item */
-.region-item.provincial-sub {
-  background: #fefce8;
-  border-left: 3px solid var(--color-accent);
+.region-policy-browser .region-item.provincial-sub {
+  background: var(--kd-surface-soft);
+  border-left: 3px solid var(--kd-accent);
 }
 
-.region-item.provincial-sub:hover {
-  background: #fef9c3;
+.region-policy-browser .region-item.provincial-sub:hover {
+  background: var(--kd-panel);
 }
 
-.region-item.provincial-sub.active {
-  background: var(--color-accent-bg);
+.region-policy-browser .region-item.provincial-sub.active {
+  background: var(--kd-accent-soft);
 }
 
-.region-item.provincial-sub .region-name {
-  font-weight: 500;
-  color: var(--color-accent);
+.region-policy-browser .region-item.provincial-sub .region-name {
+  font-weight: 600;
+  color: var(--kd-accent-dark);
 }
 
 /* ============================================
-   Main Content - News List
+   Main Content — News List
    ============================================ */
-.news-content {
-  background: var(--color-surface);
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--color-border);
-  box-shadow: var(--shadow-sm);
+.region-policy-browser .news-content {
+  background: var(--kd-surface);
+  border-radius: var(--kd-radius-lg);
+  border: 1px solid var(--kd-line);
+  box-shadow: var(--kd-shadow-sm);
   min-height: 600px;
 }
 
-.content-header {
-  padding: 20px 24px;
-  border-bottom: 1px solid var(--color-border);
-  background: linear-gradient(135deg, #fafaf9 0%, #ffffff 100%);
-  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+.region-policy-browser .content-header {
+  padding: 18px 24px;
+  border-bottom: 1px solid var(--kd-line);
+  background: var(--kd-panel);
+  border-radius: var(--kd-radius-lg) var(--kd-radius-lg) 0 0;
 }
 
-.content-header h2 {
+.region-policy-browser .content-header h2 {
   display: flex;
   align-items: center;
   gap: 12px;
   font-size: 18px;
-  font-weight: 600;
-  color: var(--color-text-primary);
+  font-weight: 800;
+  color: var(--kd-ink);
   margin: 0 0 4px 0;
 }
 
-.header-badge {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--color-accent);
-  background: var(--color-accent-bg);
+.region-policy-browser .header-badge {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--kd-accent-dark);
+  background: var(--kd-accent-soft);
   padding: 4px 12px;
-  border-radius: 20px;
-  border: 1px solid rgba(217, 119, 6, 0.2);
+  border-radius: 999px;
+  border: 1px solid rgba(56, 166, 165, 0.18);
 }
 
-.header-hint {
-  font-size: 13px;
-  color: var(--color-text-tertiary);
+.region-policy-browser .header-hint {
+  font-size: 12.5px;
+  color: var(--kd-ink-soft);
   margin: 0;
   padding-left: 2px;
+  font-weight: 500;
 }
 
 /* ============================================
    Loading & Empty States
    ============================================ */
-.loading-state {
+.region-policy-browser .loading-state {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   padding: 80px 20px;
-  color: var(--color-text-secondary);
+  color: var(--kd-ink-muted);
   gap: 16px;
 }
 
-.spinner {
+.region-policy-browser .spinner {
   width: 32px;
   height: 32px;
-  border: 3px solid var(--color-border);
-  border-top-color: var(--color-accent);
+  border: 3px solid var(--kd-line);
+  border-top-color: var(--kd-accent);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
@@ -479,83 +458,85 @@
   to { transform: rotate(360deg); }
 }
 
-.error-state {
+.region-policy-browser .error-state {
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 60px 20px;
-  color: #dc2626;
+  color: var(--kd-danger);
   font-size: 14px;
+  font-weight: 600;
 }
 
-.empty-state {
+.region-policy-browser .empty-state {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   padding: 100px 20px;
-  color: var(--color-text-tertiary);
+  color: var(--kd-ink-soft);
   gap: 16px;
 }
 
-.empty-state svg {
+.region-policy-browser .empty-state svg {
   opacity: 0.4;
-  color: var(--color-text-tertiary);
+  color: var(--kd-ink-soft);
 }
 
-.empty-state p {
+.region-policy-browser .empty-state p {
   margin: 0;
   font-size: 14px;
+  font-weight: 500;
 }
 
 /* ============================================
    News Table
    ============================================ */
-.news-table-container {
+.region-policy-browser .news-table-container {
   overflow-x: auto;
   padding: 0 4px;
 }
 
-.news-table {
+.region-policy-browser .news-table {
   width: 100%;
   border-collapse: separate;
   border-spacing: 0;
-  font-size: 14px;
+  font-size: 12.5px;
 }
 
-.news-table th {
-  padding: 14px 16px;
+.region-policy-browser .news-table th {
+  padding: 12px 14px;
   text-align: left;
-  font-weight: 600;
-  color: var(--color-text-secondary);
-  background: #fafaf9;
-  font-size: 12px;
+  font-weight: 800;
+  color: var(--kd-ink-muted);
+  background: var(--kd-panel);
+  font-size: 11px;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  border-bottom: 2px solid var(--color-border);
+  letter-spacing: 0.08em;
+  border-bottom: 2px solid var(--kd-line);
   white-space: nowrap;
 }
 
-.news-table td {
-  padding: 14px 16px;
-  border-bottom: 1px solid var(--color-border);
-  color: var(--color-text-primary);
+.region-policy-browser .news-table td {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--kd-line);
+  color: var(--kd-ink);
   vertical-align: top;
 }
 
-.news-table tbody tr:hover {
-  background: #fafaf9;
+.region-policy-browser .news-table tbody tr:hover {
+  background: var(--kd-panel);
 }
 
-.news-table tbody tr:last-child td {
+.region-policy-browser .news-table tbody tr:last-child td {
   border-bottom: none;
 }
 
 /* Title Cell */
-.title-cell a {
-  color: var(--color-text-primary);
+.region-policy-browser .title-cell a {
+  color: var(--kd-ink);
   text-decoration: none;
-  font-weight: 500;
+  font-weight: 600;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -564,110 +545,110 @@
   transition: color 0.15s ease;
 }
 
-.title-cell a:hover {
-  color: var(--color-accent);
+.region-policy-browser .title-cell a:hover {
+  color: var(--kd-accent-dark);
 }
 
 /* Score Badge */
-.score-badge {
+.region-policy-browser .score-badge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   min-width: 28px;
   height: 28px;
   border-radius: 6px;
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 12.5px;
+  font-weight: 700;
 }
 
-.score-badge.score-0,
-.score-badge.score-1 {
-  background: #fee2e2;
-  color: #991b1b;
+.region-policy-browser .score-badge.score-0,
+.region-policy-browser .score-badge.score-1 {
+  background: #fff5f4;
+  color: var(--kd-danger);
 }
 
-.score-badge.score-2,
-.score-badge.score-3 {
-  background: #fef3c7;
-  color: #92400e;
+.region-policy-browser .score-badge.score-2,
+.region-policy-browser .score-badge.score-3 {
+  background: #fef9e7;
+  color: #b48a00;
 }
 
-.score-badge.score-4 {
-  background: #dcfce7;
-  color: #166534;
+.region-policy-browser .score-badge.score-4 {
+  background: #e8f6f4;
+  color: var(--kd-success);
 }
 
-.score-badge.score-5 {
-  background: #d97706;
-  color: #ffffff;
+.region-policy-browser .score-badge.score-5 {
+  background: var(--kd-accent);
+  color: #fff;
 }
 
 /* Action Button */
-.btn-link {
-  padding: 6px 14px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  background: var(--color-surface);
-  color: var(--color-text-secondary);
-  font-size: 13px;
-  font-weight: 500;
+.region-policy-browser .btn-link {
+  padding: 5px 12px;
+  border: 1px solid var(--kd-line);
+  border-radius: var(--kd-radius-sm);
+  background: var(--kd-surface);
+  color: var(--kd-ink-muted);
+  font-size: 12.5px;
+  font-weight: 700;
   cursor: pointer;
   transition: all 0.15s ease;
 }
 
-.btn-link:hover {
-  background: var(--color-accent);
-  color: white;
-  border-color: var(--color-accent);
+.region-policy-browser .btn-link:hover {
+  background: var(--kd-accent);
+  color: #fff;
+  border-color: var(--kd-accent);
 }
 
 /* ============================================
    Pagination
    ============================================ */
-.pagination {
+.region-policy-browser .pagination {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 16px;
-  padding: 20px 24px;
-  border-top: 1px solid var(--color-border);
+  padding: 16px 24px;
+  border-top: 1px solid var(--kd-line);
 }
 
-.pagination button {
-  padding: 8px 16px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  background: var(--color-surface);
-  color: var(--color-text-primary);
-  font-size: 14px;
-  font-weight: 500;
+.region-policy-browser .pagination button {
+  padding: 7px 16px;
+  border: 1px solid var(--kd-line);
+  border-radius: var(--kd-radius-sm);
+  background: var(--kd-surface);
+  color: var(--kd-ink);
+  font-size: 13px;
+  font-weight: 700;
   cursor: pointer;
   transition: all 0.15s ease;
 }
 
-.pagination button:hover:not(:disabled) {
-  background: var(--color-accent);
-  color: white;
-  border-color: var(--color-accent);
+.region-policy-browser .pagination button:hover:not(:disabled) {
+  background: var(--kd-accent);
+  color: #fff;
+  border-color: var(--kd-accent);
 }
 
-.pagination button:disabled {
+.region-policy-browser .pagination button:disabled {
   opacity: 0.4;
   cursor: not-allowed;
-  background: #f5f5f4;
+  background: var(--kd-panel);
 }
 
-.page-info {
-  font-size: 14px;
-  color: var(--color-text-secondary);
-  font-weight: 500;
+.region-policy-browser .page-info {
+  font-size: 12.5px;
+  color: var(--kd-ink-muted);
+  font-weight: 700;
 }
 
 /* ============================================
    Responsive Design
    ============================================ */
 @media (max-width: 1200px) {
-  .browser-container {
+  .region-policy-browser .browser-container {
     grid-template-columns: 260px 1fr;
   }
 }
@@ -677,67 +658,67 @@
     padding: 16px;
   }
 
-  .page-header {
+  .region-policy-browser .page-header {
     flex-direction: column;
     align-items: flex-start;
     gap: 16px;
     padding: 16px;
   }
 
-  .header-meta {
+  .region-policy-browser .header-meta {
     width: 100%;
     justify-content: flex-start;
     flex-wrap: wrap;
     gap: 12px;
   }
 
-  .meta-divider {
+  .region-policy-browser .meta-divider {
     display: none;
   }
 
-  .browser-container {
+  .region-policy-browser .browser-container {
     grid-template-columns: 1fr;
   }
 
-  .region-sidebar {
+  .region-policy-browser .region-sidebar {
     position: static;
     max-height: 400px;
   }
 
-  .region-tree-container {
+  .region-policy-browser .region-tree-container {
     max-height: 280px;
   }
 
-  .date-filter {
+  .region-policy-browser .date-filter {
     padding: 10px;
   }
 
-  .filter-row input[type="date"] {
+  .region-policy-browser .filter-row input[type="date"] {
     width: 95px;
     font-size: 11px;
   }
 
-  .news-table th,
-  .news-table td {
-    padding: 12px 10px;
-    font-size: 13px;
+  .region-policy-browser .news-table th,
+  .region-policy-browser .news-table td {
+    padding: 10px;
+    font-size: 12px;
   }
 }
 
 /* Scrollbar Styling */
-.region-tree-container::-webkit-scrollbar {
+.region-policy-browser .region-tree-container::-webkit-scrollbar {
   width: 6px;
 }
 
-.region-tree-container::-webkit-scrollbar-track {
+.region-policy-browser .region-tree-container::-webkit-scrollbar-track {
   background: transparent;
 }
 
-.region-tree-container::-webkit-scrollbar-thumb {
-  background: #d6d3d1;
+.region-policy-browser .region-tree-container::-webkit-scrollbar-thumb {
+  background: var(--kd-line-strong);
   border-radius: 3px;
 }
 
-.region-tree-container::-webkit-scrollbar-thumb:hover {
-  background: #a8a29e;
+.region-policy-browser .region-tree-container::-webkit-scrollbar-thumb:hover {
+  background: var(--kd-ink-soft);
 }

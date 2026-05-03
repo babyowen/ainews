@@ -31,6 +31,7 @@ const HistoryReports = () => {
   const [selectedReport, setSelectedReport] = useState(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [exportingId, setExportingId] = useState(null);
+  const [pdfExportingId, setPdfExportingId] = useState(null);
 
   useEffect(() => {
     loadKeywords();
@@ -275,7 +276,7 @@ const HistoryReports = () => {
               color: #ffffff;
               letter-spacing: 0.5px;
               font-weight: 400;
-            ">🤖 AI新闻总结</span>
+            ">AI新闻总结</span>
           </div>
 
           <!-- 信息行 -->
@@ -459,6 +460,97 @@ const HistoryReports = () => {
     return model;
   };
 
+  const getDownloadFilenameFromDisposition = (headerValue, fallbackName) => {
+    if (!headerValue) return fallbackName;
+    const utf8Match = headerValue.match(/filename\*=UTF-8''([^;]+)/i);
+    if (utf8Match?.[1]) {
+      try { return decodeURIComponent(utf8Match[1]); } catch { return fallbackName; }
+    }
+    const quotedMatch = headerValue.match(/filename="([^"]+)"/i);
+    if (quotedMatch?.[1]) return quotedMatch[1];
+    const plainMatch = headerValue.match(/filename=([^;]+)/i);
+    if (plainMatch?.[1]) return plainMatch[1].trim();
+    return fallbackName;
+  };
+
+  const getApiErrorMessage = (rawText, fallbackMessage) => {
+    if (!rawText) return fallbackMessage;
+    const trimmedText = rawText.trim();
+    try {
+      const errorData = JSON.parse(trimmedText);
+      return errorData.details || errorData.error || fallbackMessage;
+    } catch {
+      const preMatch = trimmedText.match(/<pre>([\s\S]*?)<\/pre>/i);
+      const normalizedText = (preMatch?.[1] || trimmedText)
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&amp;/g, '&')
+        .trim();
+      if (normalizedText.includes('Cannot POST')) {
+        return 'PDF导出服务未启动，请联系管理员';
+      }
+      return normalizedText || fallbackMessage;
+    }
+  };
+
+  const handleGeneratePdf = async (report, includeContact = false) => {
+    setPdfExportingId(report.id);
+    try {
+      let fullReport = report;
+      if (!report.report_content || report.report_content.length < 1000) {
+        fullReport = await fetchReportDetail(report.id);
+      }
+      if (!fullReport || !fullReport.report_content) {
+        throw new Error('报告内容为空');
+      }
+
+      const modelShortName = getModelShortName(fullReport.model_used);
+      const contactSuffix = includeContact ? '_带联系方式' : '';
+      const fallbackFilename = `AI新闻周报_${fullReport.keyword}_${modelShortName}${contactSuffix}_${new Date().toISOString().split('T')[0]}.pdf`;
+
+      const response = await fetch('/api/reports/export-pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          keyword: fullReport.keyword,
+          startDate: fullReport.start_date,
+          endDate: fullReport.end_date,
+          newsCount: fullReport.news_count,
+          modelName: modelShortName,
+          reportContent: fullReport.report_content,
+          includeContact,
+        }),
+      });
+
+      if (!response.ok) {
+        let errorMessage = `HTTP ${response.status}`;
+        const errorText = await response.text();
+        if (errorText) errorMessage = getApiErrorMessage(errorText, errorMessage);
+        throw new Error(errorMessage);
+      }
+
+      const pdfBlob = await response.blob();
+      const downloadUrl = URL.createObjectURL(pdfBlob);
+      const filename = getDownloadFilenameFromDisposition(
+        response.headers.get('content-disposition'),
+        fallbackFilename
+      );
+
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(downloadUrl);
+    } catch (error) {
+      console.error('生成PDF失败:', error);
+      alert(`生成PDF失败: ${error.message}`);
+    } finally {
+      setPdfExportingId(null);
+    }
+  };
+
   const truncateContent = (content, maxLength = 150) => {
     if (!content) return '';
     if (content.length <= maxLength) return content;
@@ -477,16 +569,21 @@ const HistoryReports = () => {
   };
 
   return (
-    <div className="history-reports-page">
-      <div className="page-header">
-        <h1>历史周报</h1>
-        <p>查看和管理所有生成的周报</p>
-      </div>
+    <div className="history-reports-page kd-page">
+      <header className="kd-page-header">
+        <div className="history-header-text">
+          <div className="kd-page-kicker">HISTORY REPORTS</div>
+          <h1 className="kd-page-title">历史周报</h1>
+          <p className="kd-page-subtitle">
+            查看和管理所有生成的周报
+          </p>
+        </div>
+      </header>
 
       {/* 筛选区域 */}
-      <div className="filter-section">
-        <div className="filter-row">
-          <div className="filter-item">
+      <div className="history-filter-bar kd-panel">
+        <div className="history-filter-grid">
+          <div className="history-filter-item">
             <label>关键词</label>
             <select
               value={filters.keyword}
@@ -499,7 +596,7 @@ const HistoryReports = () => {
             </select>
           </div>
 
-          <div className="filter-item">
+          <div className="history-filter-item">
             <label>开始日期</label>
             <input
               type="date"
@@ -508,7 +605,7 @@ const HistoryReports = () => {
             />
           </div>
 
-          <div className="filter-item">
+          <div className="history-filter-item">
             <label>结束日期</label>
             <input
               type="date"
@@ -517,7 +614,7 @@ const HistoryReports = () => {
             />
           </div>
 
-          <div className="filter-item">
+          <div className="history-filter-item">
             <label>模型</label>
             <select
               value={filters.model}
@@ -530,24 +627,27 @@ const HistoryReports = () => {
             </select>
           </div>
 
-          <div className="filter-actions">
-            <button className="btn-primary" onClick={handleSearch}>
-              🔍 搜索
+          <div className="history-filter-actions">
+            <button className="history-btn-primary" onClick={handleSearch}>
+              搜索
             </button>
-            <button className="btn-secondary" onClick={handleReset}>
-              🔄 重置
+            <button className="history-btn-secondary" onClick={handleReset}>
+              重置
             </button>
           </div>
         </div>
       </div>
 
       {/* 表格区域 */}
-      <div className="table-section">
+      <div className="history-table-panel kd-panel">
         {loading ? (
-          <div className="loading">加载中...</div>
+          <div className="kd-state-card loading">
+            <span className="spinner"></span>
+            <span>加载中…</span>
+          </div>
         ) : (
           <>
-            <table className="reports-table">
+            <table className="history-table">
               <thead>
                 <tr>
                   <th>关键词</th>
@@ -567,22 +667,29 @@ const HistoryReports = () => {
                     <td>{report.news_count}</td>
                     <td>{getModelShortName(report.model_used)}</td>
                     <td>{new Date(report.created_at).toLocaleString('zh-CN')}</td>
-                    <td className="preview-cell">
+                    <td className="history-preview-cell">
                       {truncateContent(report.report_preview)}
                     </td>
-                    <td className="actions-cell">
+                    <td className="history-actions-cell">
                       <button
-                        className="btn-view"
+                        className="history-btn-link"
                         onClick={() => handleViewDetail(report.id)}
                       >
-                        👁️ 查看
+                        查看
                       </button>
                       <button
-                        className="btn-export"
+                        className="history-btn-link primary"
                         onClick={() => handleExportImage(report)}
                         disabled={exportingId === report.id}
                       >
-                        {exportingId === report.id ? '⏳ 生成中...' : '📷 生成图片'}
+                        {exportingId === report.id ? '生成中…' : '生成图片'}
+                      </button>
+                      <button
+                        className="history-btn-link pdf"
+                        onClick={() => handleGeneratePdf(report)}
+                        disabled={pdfExportingId === report.id}
+                      >
+                        {pdfExportingId === report.id ? '生成中…' : '生成PDF'}
                       </button>
                     </td>
                   </tr>
@@ -591,18 +698,19 @@ const HistoryReports = () => {
             </table>
 
             {/* 分页 */}
-            <div className="pagination">
+            <div className="history-pagination">
               <button
+                className="history-page-btn"
                 disabled={pagination.page === 1}
                 onClick={() => setPagination(prev => ({ ...prev, page: prev.page - 1 }))}
               >
                 上一页
               </button>
               <span>
-                第 {pagination.page} / {pagination.totalPages} 页，
-                共 {pagination.total} 条
+                第 {pagination.page} / {pagination.totalPages} 页，共 {pagination.total} 条
               </span>
               <button
+                className="history-page-btn"
                 disabled={pagination.page >= pagination.totalPages}
                 onClick={() => setPagination(prev => ({ ...prev, page: prev.page + 1 }))}
               >
@@ -615,36 +723,45 @@ const HistoryReports = () => {
 
       {/* 详情弹窗 */}
       {showDetailModal && selectedReport && (
-        <div className="modal-overlay" onClick={() => setShowDetailModal(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
+        <div className="history-modal-overlay" onClick={() => setShowDetailModal(false)}>
+          <div className="history-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="history-modal-header">
               <h2>{selectedReport.keyword} - 周报详情</h2>
-              <button className="close-btn" onClick={() => setShowDetailModal(false)}>
-                ✕
+              <button className="history-modal-close" onClick={() => setShowDetailModal(false)}>
+                关闭
               </button>
             </div>
-            <div className="modal-body">
-              <div className="report-meta">
+            <div className="history-modal-body">
+              <div className="history-modal-meta">
                 <p><strong>日期范围:</strong> {selectedReport.start_date} 至 {selectedReport.end_date}</p>
                 <p><strong>新闻数量:</strong> {selectedReport.news_count}</p>
                 <p><strong>模型:</strong> {getModelShortName(selectedReport.model_used)}</p>
                 <p><strong>生成时间:</strong> {new Date(selectedReport.created_at).toLocaleString('zh-CN')}</p>
               </div>
-              <div className="report-content">
+              <div className="history-modal-content">
                 <ReactMarkdown>{selectedReport.report_content}</ReactMarkdown>
               </div>
             </div>
-            <div className="modal-footer">
+            <div className="history-modal-footer">
               <button
-                className="btn-export"
+                className="history-btn-primary"
                 onClick={() => {
                   setShowDetailModal(false);
                   handleExportImage(selectedReport);
                 }}
               >
-                📷 导出图片(带联系人)
+                导出图片(带联系人)
               </button>
-              <button className="btn-secondary" onClick={() => setShowDetailModal(false)}>
+              <button
+                className="history-btn-primary"
+                onClick={() => {
+                  setShowDetailModal(false);
+                  handleGeneratePdf(selectedReport, true);
+                }}
+              >
+                导出PDF(带联系人)
+              </button>
+              <button className="history-btn-secondary" onClick={() => setShowDetailModal(false)}>
                 关闭
               </button>
             </div>
