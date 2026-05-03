@@ -49,8 +49,8 @@ function buildReportPdfHtml({ keyword, startDate, endDate, newsCount, modelName,
         --ink: #1f344c;
         --ink-soft: #54687d;
         --line: rgba(27, 56, 90, 0.14);
-        --accent: #2e79d8;
-        --accent-deep: #123457;
+        --accent: #38a6a5;
+        --accent-deep: #203547;
         --paper: #ffffff;
         --panel: #f4f7fb;
       }
@@ -88,7 +88,7 @@ function buildReportPdfHtml({ keyword, startDate, endDate, newsCount, modelName,
         color: #ffffff;
         background:
           radial-gradient(circle at right top, rgba(123, 191, 255, 0.28), transparent 28%),
-          linear-gradient(135deg, #10263f 0%, #184776 58%, #2b7ce6 100%);
+          linear-gradient(135deg, #203547 0%, #1f5d68 58%, #38a6a5 100%);
       }
 
       .report-cover::after {

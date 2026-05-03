@@ -498,3 +498,202 @@
 ---
 
 *记录时间：2024-07-24 19:00* 
+
+---
+
+## 2026-05-03 - KeyDigest 前端工作台整体重设计
+
+### 🎯 任务目标
+将各业务页面的视觉语言统一为 KeyDigest 控制台风格，沉淀可复用样式与共享组件，避免每页一套割裂样式。
+
+### ✅ 完成的工作
+
+#### 1. 共享视觉基础下沉到 `src/index.css` 与 `src/overrides.css`
+- 在 `index.css` 中沉淀 KeyDigest 设计 token：`--kd-ink`、`--kd-accent`、`--kd-line`、`--kd-radius`、`--kd-shadow*` 等，加上 `.kd-page` / `.kd-page-header` / `.kd-panel` / `.kd-state-card` / `.spinner` 等共享原子类
+- 新增 `src/overrides.css` 作为最后导入的「跨页归一化层」，把各业务页的 page-header、卡片容器、按钮、表单控件统一到同一套深青色渐变 + 强调色方案
+- 新增 `public/keydigest.svg` 站点 logo
+
+#### 2. 全站布局与导航重排
+- `Layout.{jsx,css}` 重写：左侧深色侧边栏 + 顶部业务标题，去掉旧 App.css 的旧布局碎片
+- `FilterBar.{jsx,css}` / `NewsTable.{jsx,css}` 拆出独立样式文件，按需在页面引入
+- `PasswordProtection.css` 风格对齐主站
+
+#### 3. 各业务页对齐控制台风格
+- `ReportGenerator.{jsx,css}` 大幅瘦身（1678 → ~ 当前体积）：抽离重复样式，CSS 体量明显减少；周报生成、模型选择、导出按钮区统一为 `.kd-panel` 卡片
+- `SummaryNews` / `SourceAnalysis` / `QualityAnalysis` / `WordCountStats` / `HistoryReports` / `ScoreEdit` / `PolicyComparison/WeeklyComparison` / `ReportConfig` 全部改为 `.kd-page` 容器 + `.kd-page-header` 头图 + `.kd-panel` 卡片
+- `ScoreEdit.{jsx,css}` 配合改造为分数 chip + 内联改分控件；详情见下一条独立条目
+
+#### 4. 工具与配套
+- 新增 `src/utils/dateRanges.js`、`src/utils/modelOptions.js`，把跨页重复的日期区间和模型下拉配置集中
+- `src/main.jsx` 增加 `overrides.css` 导入顺序，确保归一化层最后生效
+- 新增 `frontend-refactor-test-report.md` 记录回归测试结果
+
+### 🔧 技术实现要点
+- **设计 token 集中**：颜色 / 圆角 / 阴影 / 边框线统一用 CSS 变量，便于以后切主题
+- **`overrides.css` 末位导入**：Vite 把所有 CSS 合并成一份全局样式表，把跨页归一化规则放在最后导入的文件里，可以稳定覆盖各页旧样式而不用强行用 `!important`
+- **页面 wrapper 类作用域**：所有页面 CSS 规则都收敛到 `.score-edit-page` / `.report-generator` / `.weekly-comparison-container` / `.word-count-stats` / `.history-reports-page` / `.config-container` 之下，避免裸类选择器跨页污染（详见 CLAUDE.md「Page-scoped CSS convention」）
+- **共享原子类抽取**：`.kd-state-card`（loading / error / no-data 三态）、`.spinner`、`score-badge.score-N` 这些被多页复用的小组件统一放在共享层
+
+### 📊 影响范围
+- **视觉一致**：6 个主要业务页统一为同一套深青色控制台风格
+- **CSS 体量**：`ReportGenerator.css` 从 1678 行降到约 ~一半，新增 `overrides.css` 249 行作为归一化层
+- **共享原子**：抽出 5+ 个跨页可复用的原子类
+- **可维护性**：后续新增页只需套 `.kd-page` + `.kd-panel` 即可获得统一外观
+
+### 🚀 下一步
+- 跟随回归测试报告 (`frontend-refactor-test-report.md`) 验证回归项
+- 关注后续 bug：跨页 CSS 污染（已发现 ScoreEdit / ReportGenerator 一例，见下一条）
+
+---
+
+## 2026-05-03 - 评分修改页「改分 / 保存」控件溢出修复
+
+### 🎯 任务目标
+`/score-edit` 新闻卡片右上角的「改分 / 保存」控件在窄视口（约 ≤1280px）下会被推出卡片右边界，需修复并彻底解决根因。
+
+### ✅ 完成的工作
+
+#### 1. 根因定位
+- 用 Chrome DevTools MCP 在 1280px 视口复现：`.modify-btn` right=1339.97 vs. 卡片 right=1256，溢出约 84px；宽视口（1814px）下被父容器宽度遮蔽，看不出问题
+- 通过 `document.styleSheets` 枚举命中规则，发现 `src/pages/ReportGenerator.css` 写了**裸类**选择器：
+  ```css
+  .keyword-select, .date-input, .score-select { width: 100%; ... }
+  ```
+- Vite 把所有 CSS 合并成一张全局样式表，这条规则越界把 `ScoreEdit` 内联的 `.score-select` 也撑满了父级 flex，挤出 `.modify-btn`
+
+#### 2. 修复
+**文件：`src/pages/ReportGenerator.css`**
+- 把上面的裸类规则全部加上 `.report-generator` 前缀，限定到 `/report` 页面作用域
+
+**文件：`src/pages/ScoreEdit.css`**
+- 把本页的 `.keyword-select` / `.date-input` / `.score-select` 规则全部加上 `.score-edit-page` 前缀，对称防御
+- `.score-edit-page .score-select` 显式声明 `width: auto`，作为 belt-and-suspenders，无论 CSS 加载顺序如何都不会被撑满
+
+#### 3. 验证
+- 1280px 视口：`.score-select` 实际宽度回到自然 64px，`.modify-btn` right=1235 = 卡片 innerRight 1235，刚好落在卡片内
+- 1814px 视口：`.score-select` 64px，`.modify-btn` right=1706 < innerRight 1707
+- `/report` 页未受影响：`.keyword-select` / `.date-input` / `.score-select` 仍按原 grid 布局填满各自单元格
+
+### 🔧 技术实现要点
+- **Vite 全局 CSS 污染**：所有页面 CSS 都进同一张表，裸类选择器跨页生效。所有页面级规则必须收敛到 wrapper 类下
+- **跨视口复现**：宽视口下父级 flex 容器富裕，遮蔽了子元素超长；定位此类布局 bug 必须切到目标视口验证
+- **特异性 vs. 源序兜底**：scoped 选择器（`.report-generator .score-select` 特异性 0,2,0）压过裸类（0,1,0），不依赖加载顺序；本次同时再加 `width: auto` 防御，保证回归概率为零
+
+### 📊 修复效果
+- **视觉**：所有视口下「改分 / 保存」均位于新闻卡片内
+- **架构**：把跨页 CSS 污染规则从 `ReportGenerator.css` / `ScoreEdit.css` 中清除，并在 `CLAUDE.md` 写入「Page-scoped CSS convention」约定，留给后续维护者参考
+
+### 🚀 下一步
+- 提交本次修改（当前 working tree 仍未提交）
+- 后续若再发现旧页面有裸类规则，按本条同样模式补 wrapper 前缀
+- 抽空清理 `src/overrides.css` 中已经命中不到 DOM 的旧选择器（如 `.score-edit-page .filters-container`、`.score-edit-page .page-header *`，重构后已不存在）
+
+---
+
+*记录时间：2026-05-03*
+
+---
+
+## 2026-05-03 - 周报参数配置页（/config）KD 风格重设计
+
+### 🎯 任务目标
+将 `/config`（周报参数配置）的视觉与交互全面对齐 KeyDigest 控制台风格，替换原先的暗黑赛博主题，使其与 `/word-count`、`/score-edit` 等页保持一致。
+
+### ✅ 完成的工作
+
+#### 1. JSX 重写 (`src/pages/ReportConfig.jsx`)
+- 弃用旧版 `<header>` + `header-bg` + `nav-tab` 等结构，改用 `<div className="config-container kd-page">` + `<header className="kd-page-header config-header">` 标准组合
+- 引入 `kd-page-kicker` / `kd-page-title` / `kd-page-subtitle` 头图三件套，副标题统一描述
+- 抽离 `CONFIG_SECTIONS` / `EMPTY_KEYWORD_FORM` / `EMPTY_REGION_FORM` 常量与 `handleSaveKeywordPrompt` / `handleDeleteKeywordPrompt` / `handleSavePolicyPrompt(type, prompt)` / `handleSaveRegionPrompt` / `handleDeleteRegionPrompt` 命名函数，去掉内联匿名函数
+- 标签页采用 `.config-tab-bar.kd-panel` 容器 + `.config-tab` 按钮组，移除 emoji 装饰
+- 关键词与地区报告分区改为「左侧版本列表 + 右侧版本概览/编辑」两栏栅格 (`.config-keyword-grid` 280px / minmax(0, 1fr))
+- 政策分区为两个独立 `.config-detail-panel.kd-panel` 卡片（周报抽取 / 政策对比），各自带 `data-info` 字数+Token 提示
+- 加载、错误状态全部改用共享的 `.kd-state-card.loading` / `.error-state` + `.spinner` / `.retry-btn`
+- 给 `PasswordProtection` 显式传 `title="管理员验证"`，避免使用默认的 emoji 标题
+
+#### 2. CSS 重写 (`src/pages/ReportConfig.css`)
+- 整文件全部规则收敛在 `.config-container` 作用域下，去除暗黑赛博主题（旧 `linear-gradient(135deg, #0f1419 0%, #1a1f35 100%)`、`#e2e8f0` 文字色等）
+- 全部颜色 / 圆角 / 阴影改用 `--kd-ink` / `--kd-accent` / `--kd-line` / `--kd-radius*` 等 KD 设计 token
+- 新增 `.config-tab` / `.config-keyword-grid` / `.config-keyword-sidebar` / `.config-keyword-item`（含 .active）/ `.config-version-card`（含 .is-default）/ `.config-version-badge` / `.config-form-grid` / `.config-form-textarea(-mono)` / `.config-form-checkbox` / `.config-btn-primary/secondary/ghost/link(.danger)` 等命名空间清晰的页内类
+- `.config-container .config-header-meta .data-info` 与 `.config-container .config-section-meta .data-info` 各自独立样式：前者深色头图上的白底透明胶囊，后者白色面板中的青绿胶囊
+- 响应式：`max-width: 1100px` 折叠两栏栅格、`max-width: 760px` 折叠表单网格
+
+#### 3. `src/overrides.css` 清理
+- 把过去为旧 JSX 写的 `.config-container .config-header` / `.config-container .header-bg` / `.config-container .title-glow` / `.config-container .title-section` / `.config-container .config-navigation` / `.config-container .config-content` / `.config-container .nav-tab(.active)` / `.config-container .keyword-sidebar` / `.config-container .keyword-content` / `.config-container .prompt-version-card` / `.config-container .editor-panel` 等已经命中不到 DOM 的规则删除
+- 把共享 page-header 渐变规则中的 `.config-container .config-header` 选择器拿掉——新 JSX 直接使用 `.kd-page-header`，应交给 `index.css` 的 `.kd-page-header` 渲染（具有更新的 kicker / 标题下划线伪元素）
+
+### 🔧 技术实现要点
+- **彻底替代**：完全弃用旧版本暗黑主题，避免新旧样式混用造成视觉割裂
+- **作用域纪律**：本页所有规则严格收敛在 `.config-container` 下，符合 `CLAUDE.md` Page-scoped CSS convention（防止以后再发生 ScoreEdit 那种跨页污染）
+- **共享组件复用**：状态卡 / 加载圈 / retry 按钮 / 头图标识全部复用既有共享原子，未新增重复样式
+- **共享 page-header 渐变拆解**：旧规则用一个 group 选择器同时给 5 个页面注入 header，但 `/config` 已迁到 `.kd-page-header`，必须从 group 中拿掉，否则旧渐变会以更高特异性覆盖新规则
+
+### 📊 影响范围
+- **视觉一致**：/config 现在与其它业务页同属一套 KD 控制台风格
+- **代码体量**：`ReportConfig.css` 990 行 → 约 580 行（-41%）；`ReportConfig.jsx` ~790 行 → ~880 行（含更多语义结构 + `data-info` 元数据）
+- **DevTools 校验**：1440px 宽视口下三个 Tab（关键词 / 政策 / 地区报告）均正常渲染；1024px 收起到单列；console 0 错误 0 警告
+
+### 🚀 下一步
+- 提交本次修改（jsx + css + overrides 三处变更）
+- 后续若新增 Prompt 类型，沿用 `.config-keyword-grid` + `.config-detail-panel` + `.config-form` 的现成模式即可
+
+---
+
+## 2026-05-03 - 历史周报页（/history）KD 风格细节优化
+
+### 🎯 任务目标
+优化 `/history` 历史周报页，解决选择区域紧凑性、表格宽度、表格字体样式三个细节问题，使其与已重构的 `/config`、`/word-count` 等页保持一致的 KeyDigest 控制台视觉语言。
+
+### ✅ 完成的工作
+
+#### 1. JSX 重写 (`src/pages/HistoryReports.jsx`)
+- 顶部 wrapper 改为 `.history-reports-page kd-page`
+- 旧 `<div className="page-header">` 替换为 `<header className="kd-page-header">`，使用 `kd-page-kicker` / `kd-page-title` / `kd-page-subtitle` 标准三件套
+- 筛选区改用 `.history-filter-bar.kd-panel` + `.history-filter-grid`，标签改为 `11px uppercase` 小字，整体横向紧凑排列
+- 加载状态从纯文本 `加载中...` 改为共享的 `.kd-state-card.loading` + `.spinner`
+- 表格区改为 `.history-table-panel.kd-panel`，表格类名统一为 `.history-table`
+- 操作按钮去除 emoji（👁️📷⏳），改为 `.history-btn-link` 文字链接样式
+- 弹窗全部改为 `.history-modal-*` 命名空间，去除 `✕` emoji 关闭按钮，改用文字 "关闭"
+- 分页改为 `.history-pagination` + `.history-page-btn`
+
+#### 2. CSS 重写 (`src/pages/HistoryReports.css`)
+- 整文件所有规则收敛在 `.history-reports-page` 作用域下，删除全部旧裸类选择器
+- 筛选栏：`.history-filter-grid` 使用 `flex-wrap` + `align-items: flex-end`，`gap: 10px`，输入框紧凑 `padding: 7px 10px; font-size: 13px`
+- 表格：
+  - 表头：`11px uppercase letter-spacing: 0.1em`，`background: var(--kd-panel)`
+  - 正文：`12.5px`，行高 `1.5`
+  - 数字列（新闻数量、生成时间）使用 `font-variant-numeric: tabular-nums`
+  - 列宽重新分配，内容预览列限制 `max-width: 260px`
+  - 斑马纹 + hover 效果统一使用 KD token
+- 操作按钮：`.history-btn-link` 透明背景 + 强调色文字，无多余 padding
+- 分页：紧凑按钮，顶部加 `border-top: 1px solid var(--kd-line)` 与表格自然分隔
+- 弹窗：使用 KD 圆角、阴影、边框线，meta 信息区用 `var(--kd-panel)` 背景
+- 响应式：`960px` 下筛选栏改为两列网格，`760px` 下隐藏部分表格列
+
+#### 3. `src/overrides.css` 清理
+- 将 `.history-reports-page` 从共享 gradient header group 中移除（本页已迁到 `.kd-page-header`）
+- 移除 `.history-reports-page .filter-section/.table-section` 面板归一化规则
+- 移除 `.history-reports-page .btn-primary/.btn-view/.btn-export` 按钮覆盖
+- 移除 `.history-reports-page input/select` 输入框覆盖
+- 移除 `.history-reports-page .reports-table thead/tbody tr:hover` 表格覆盖
+- 移除 `@media` 中的 `.history-reports-page` padding 规则
+
+### 🔧 技术实现要点
+- **作用域纪律**：所有规则严格收敛在 `.history-reports-page` 下，符合 `CLAUDE.md` Page-scoped CSS convention
+- **共享组件复用**：`.kd-page-header`、`.kd-panel`、`.kd-state-card`、`.spinner` 全部复用既有共享原子
+- **compact filter pattern**：flex-wrap + align-items: flex-end 实现单行紧凑筛选，比旧版 label+input 纵向堆叠减少约 40% 高度
+- **tabular-nums**：为新闻数量和生成时间列启用等宽数字，提升扫描效率
+- **overrides.css 减负**：清理 6 处不再命中 DOM 的历史规则，避免 dead CSS 累积
+
+### 📊 影响范围
+- **视觉一致**：/history 现在与 /config、/word-count、/score-edit 等页同属一套 KD 控制台风格
+- **选择区域紧凑度**：filter bar 高度从约 100px 降至约 56px
+- **表格可读性**：字体从 14px 降至 12.5px，表头 uppercase + letter-spacing 提升扫描层级感
+- **控制台 0 错误 0 警告**：DevTools 验证通过（1440px 与 1280px 双视口）
+
+### 🚀 下一步
+- 提交本次修改（jsx + css + overrides + worklog 四处变更）
+
+---
+
+*记录时间：2026-05-03*
