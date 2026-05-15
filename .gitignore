@@ -9,6 +9,7 @@
 
 # Local working directories
 /disc/
+/data/
 
 # Build output
 /dist/

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { KEYWORDS } from '../config/keywords';
+import { useAuth } from '../auth/AuthContext';
 import './FilterBar.css';
 
 function DatePicker({ value, onChange }) {
@@ -129,7 +130,9 @@ function DatePicker({ value, onChange }) {
 }
 
 export default function FilterBar({ filters, onChange, availableRounds = [] }) {
-  const keywords = KEYWORDS;
+  const { allowedKeywords } = useAuth();
+  const keywords = allowedKeywords.length ? allowedKeywords : KEYWORDS;
+  const canShowAllKeywords = keywords.length !== 1;
 
   return (
     <div className="filter-bar">
@@ -139,7 +142,7 @@ export default function FilterBar({ filters, onChange, availableRounds = [] }) {
           value={filters.keyword || ''}
           onChange={e => onChange({ ...filters, keyword: e.target.value })}
         >
-          <option value=''>全部</option>
+          {canShowAllKeywords && <option value=''>全部</option>}
           {keywords.map(k => (
             <option key={k} value={k}>{k}</option>
           ))}

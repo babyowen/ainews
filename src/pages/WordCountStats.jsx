@@ -1,8 +1,11 @@
 import { useState, useEffect } from 'react';
 import './WordCountStats.css';
 import { KEYWORDS, KEYWORD_COLORS } from '../config/keywords';
+import { useAuth } from '../auth/AuthContext';
 
 export default function WordCountStats() {
+  const { allowedKeywords } = useAuth();
+  const visibleKeywords = allowedKeywords.length ? allowedKeywords : KEYWORDS;
   const [statsData, setStatsData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -92,7 +95,7 @@ export default function WordCountStats() {
       keywordStats: {}
     };
 
-    KEYWORDS.forEach(keyword => {
+    visibleKeywords.forEach(keyword => {
       stats.keywordStats[keyword] = {
         newsCount: 0,
         totalWords: 0,
@@ -105,7 +108,9 @@ export default function WordCountStats() {
 
     week.forEach(day => {
       if (day && day.data) {
-        Object.values(day.data).forEach(item => {
+        Object.values(day.data)
+          .filter(item => visibleKeywords.includes(item.keyword))
+          .forEach(item => {
           stats.totalNews += Number(item.newsCount) || 0;
           stats.totalWords += Number(item.totalWords) || 0;
           stats.highScoreNews += Number(item.highScoreCount) || 0;
@@ -144,7 +149,7 @@ export default function WordCountStats() {
   };
 
   const sumDayKey = (day, key) =>
-    KEYWORDS.reduce((sum, keyword) => {
+    visibleKeywords.reduce((sum, keyword) => {
       const data = day?.data?.[keyword];
       return sum + (data ? Number(data[key]) || 0 : 0);
     }, 0);
@@ -213,7 +218,7 @@ export default function WordCountStats() {
           <div className="legend-section">
             <h4>关键词</h4>
             <div className="legend-items">
-              {KEYWORDS.map(keyword => (
+              {visibleKeywords.map(keyword => (
                 <div key={keyword} className="legend-item">
                   <span
                     className="legend-color"
@@ -273,7 +278,7 @@ export default function WordCountStats() {
                       <>
                         <div className="date">{formatDate(day.date)}</div>
                         <div className="day-stats">
-                          {KEYWORDS.map(keyword => {
+                          {visibleKeywords.map(keyword => {
                             const keywordData = day.data[keyword];
                             if (!keywordData) return null;
 
@@ -378,7 +383,7 @@ export default function WordCountStats() {
                     </div>
 
                     <div className="keyword-summary">
-                      {KEYWORDS.map(keyword => {
+                      {visibleKeywords.map(keyword => {
                         const stats = weekStats.keywordStats[keyword];
                         if (stats.newsCount === 0) return null;
 

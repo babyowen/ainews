@@ -4,12 +4,15 @@ import FilterBar, { ScoreFilter } from '../components/FilterBar';
 import NewsTable from '../components/NewsTable';
 import { fetchScoredNews } from '../api/scoredNews';
 import { Loading, Error, Empty } from '../components/Status';
+import { useAuth } from '../auth/AuthContext';
 import dayjs from 'dayjs';
 import './SummaryNews.css';
 
 export default function SummaryNewsPage() {
+  const { allowedKeywords } = useAuth();
+  const defaultKeyword = allowedKeywords.length === 1 ? allowedKeywords[0] : '';
   const [filters, setFilters] = useState({
-    keyword: '',
+    keyword: defaultKeyword,
     date: dayjs().subtract(1, 'day').format('YYYY-MM-DD'),
     rounds: [],
     scores: [3, 4, 5]
@@ -27,6 +30,13 @@ export default function SummaryNewsPage() {
   const numericScores = filters.scores ? filters.scores.filter(s => typeof s === 'number') : [];
   const minScore = numericScores.length ? Math.min(...numericScores) : undefined;
   const maxScore = numericScores.length ? Math.max(...numericScores) : undefined;
+
+  useEffect(() => {
+    if (allowedKeywords.length === 1 && filters.keyword !== allowedKeywords[0]) {
+      setFilters(current => ({ ...current, keyword: allowedKeywords[0] }));
+      setNewsPage(1);
+    }
+  }, [allowedKeywords, filters.keyword]);
 
   useEffect(() => {
     setLoading(true);

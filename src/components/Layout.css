@@ -193,6 +193,55 @@
   overflow-y: auto;
 }
 
+.sidebar-user {
+  display: grid;
+  gap: 10px;
+  margin: 0 12px 14px;
+  padding: 12px;
+  border: 1px solid rgba(139, 216, 214, 0.16);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.sidebar-user-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.sidebar-user-label {
+  color: rgba(186, 240, 238, 0.7);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.sidebar-user-meta strong {
+  color: #f7ffff;
+  font-size: 14px;
+  line-height: 1.2;
+}
+
+.sidebar-logout {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 34px;
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(8, 28, 40, 0.26);
+  color: rgba(237, 247, 248, 0.8);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.sidebar-logout:hover {
+  transform: none;
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+
 .sidebar a,
 .menu-trigger {
   position: relative;
