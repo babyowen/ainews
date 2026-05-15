@@ -8,14 +8,18 @@ import {
   Gauge,
   History,
   Landmark,
+  LogOut,
   Map,
   Menu,
   Newspaper,
   PenLine,
   Scale,
+  ShieldCheck,
   Settings2,
   X
 } from 'lucide-react';
+import { useAuth } from '../auth/AuthContext';
+import { isRouteAllowed } from '../config/userAccess';
 import './Layout.css';
 
 const menuItems = [
@@ -24,7 +28,8 @@ const menuItems = [
   { to: '/score-edit', label: '评分修改', icon: PenLine },
   { to: '/word-count', label: '字数统计', icon: BarChart3 },
   { to: '/config', label: '周报参数', icon: Settings2 },
-  { to: '/history', label: '历史周报', icon: History }
+  { to: '/history', label: '历史周报', icon: History },
+  { to: '/login-stats', label: '登录统计', icon: ShieldCheck }
 ];
 
 const policyItems = [
@@ -48,14 +53,18 @@ function NavIcon({ icon: Icon }) {
 
 export default function Layout({ children }) {
   const { pathname } = useLocation();
-  const [isPolicyOpen, setIsPolicyOpen] = useState(false);
+  const { user, logout } = useAuth();
+  const [isPolicyOpen, setIsPolicyOpen] = useState(user?.username === 'yzgjj');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const username = user?.username;
+  const visibleMenuItems = menuItems.filter(item => isRouteAllowed(username, item.to));
+  const visiblePolicyItems = policyItems.filter(item => isRouteAllowed(username, item.to));
 
   useEffect(() => {
-    if (pathname.startsWith('/policy')) {
+    if (user?.username === 'yzgjj' || pathname.startsWith('/policy')) {
       setIsPolicyOpen(true);
     }
-  }, [pathname]);
+  }, [pathname, user?.username]);
 
   // 路由切换时自动关闭移动端菜单
   useEffect(() => {
@@ -98,14 +107,14 @@ export default function Layout({ children }) {
           </span>
         </h1>
         <nav aria-label="主导航">
-          {menuItems.map(item => (
+          {visibleMenuItems.map(item => (
             <Link key={item.to} className={pathname === item.to ? 'active' : ''} to={item.to} onClick={() => setIsMobileMenuOpen(false)}>
               <NavIcon icon={item.icon} />
               {item.label}
             </Link>
           ))}
 
-          <div className="menu-group">
+          {visiblePolicyItems.length > 0 && <div className="menu-group">
             <button
               type="button"
               className={`menu-trigger ${pathname.startsWith('/policy') ? 'active-group' : ''}`}
@@ -119,15 +128,25 @@ export default function Layout({ children }) {
               <ChevronDown className={`arrow ${isPolicyOpen ? 'open' : ''}`} size={16} />
             </button>
             <div className={`submenu ${isPolicyOpen ? 'open' : ''}`}>
-              {policyItems.map(item => (
+              {visiblePolicyItems.map(item => (
                 <Link key={item.to} className={pathname === item.to ? 'active' : ''} to={item.to} onClick={() => setIsMobileMenuOpen(false)}>
                   <NavIcon icon={item.icon} />
                   {item.label}
                 </Link>
               ))}
             </div>
-          </div>
+          </div>}
         </nav>
+        <div className="sidebar-user">
+          <div className="sidebar-user-meta">
+            <span className="sidebar-user-label">当前用户</span>
+            <strong>{user?.displayName || user?.username}</strong>
+          </div>
+          <button type="button" className="sidebar-logout" onClick={logout}>
+            <LogOut size={16} />
+            退出
+          </button>
+        </div>
       </aside>
       <main className="main-content">{children}</main>
     </div>

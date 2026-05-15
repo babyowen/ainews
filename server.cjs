@@ -22,6 +22,10 @@ const {
   getWeeklyReportModel,
   listWeeklyReportModels,
 } = require('./services/weeklyReportModelConfig.cjs');
+const {
+  appendLoginAudit,
+  readLoginAuditStats,
+} = require('./services/loginAudit.cjs');
 
 const app = express();
 app.use(cors());
@@ -47,6 +51,65 @@ function buildAttachmentDisposition(filename) {
 const REGION_POLICY_REPORT_PROMPTS_PATH = path.join(__dirname, 'config/region-policy-report-prompts.json');
 const REGION_POLICY_REPORT_KEYWORD = '公积金';
 const REGION_POLICY_REPORT_MODEL = 'deepseek-reasoner';
+const LOGIN_AUDIT_PATH = path.join(__dirname, 'data/login-audit.json');
+
+const AUTH_USERS = {
+  admin: {
+    username: 'admin',
+    displayName: 'Admin',
+    role: 'admin',
+    defaultPath: '/summary',
+    passwordEnv: 'KEYDIGEST_ADMIN_PASSWORD',
+    fallbackPasswordEnv: 'VITE_ADMIN_PASSWORD',
+    keywords: ['养老', '公积金', '数字政务', '政府基金', '中国烟草', '江苏省国资委'],
+    routes: [
+      '/summary',
+      '/analysis',
+      '/report',
+      '/score-edit',
+      '/word-count',
+      '/config',
+      '/history',
+      '/login-stats',
+      '/policy/current',
+      '/policy/comparison',
+      '/policy/regions',
+      '/policy/region-report',
+    ],
+  },
+  yzgjj: {
+    username: 'yzgjj',
+    displayName: 'YZGJJ',
+    role: 'restricted',
+    defaultPath: '/summary',
+    passwordEnv: 'KEYDIGEST_YZGJJ_PASSWORD',
+    keywords: ['公积金'],
+    routes: [
+      '/summary',
+      '/report',
+      '/word-count',
+      '/policy/current',
+      '/policy/comparison',
+      '/policy/regions',
+      '/policy/region-report',
+    ],
+  },
+};
+
+function getPublicUserProfile(user) {
+  return {
+    username: user.username,
+    displayName: user.displayName,
+    role: user.role,
+    defaultPath: user.defaultPath,
+    keywords: user.keywords,
+    routes: user.routes,
+  };
+}
+
+function getConfiguredPassword(user) {
+  return process.env[user.passwordEnv] || (user.fallbackPasswordEnv ? process.env[user.fallbackPasswordEnv] : '');
+}
 
 function loadJsonFile(filePath, fallbackValue) {
   if (!fs.existsSync(filePath)) {
@@ -91,6 +154,50 @@ function saveRegionPolicyPromptConfig(config) {
   writeJsonFile(REGION_POLICY_REPORT_PROMPTS_PATH, nextConfig);
   return nextConfig;
 }
+
+app.post('/api/auth/login', (req, res) => {
+  const { username = '', password = '' } = req.body || {};
+  const normalizedUsername = String(username).trim();
+  const user = AUTH_USERS[normalizedUsername];
+
+  if (!user) {
+    return res.status(401).json({ error: '用户名或密码错误' });
+  }
+
+  const configuredPassword = getConfiguredPassword(user);
+  if (!configuredPassword) {
+    return res.status(500).json({
+      error: '用户密码未配置',
+      details: `请在 .env 中配置 ${user.passwordEnv}`,
+    });
+  }
+
+  if (String(password) !== configuredPassword) {
+    return res.status(401).json({ error: '用户名或密码错误' });
+  }
+
+  const profile = getPublicUserProfile(user);
+  try {
+    appendLoginAudit(LOGIN_AUDIT_PATH, {
+      username: user.username,
+      loginAt: new Date().toISOString(),
+      userAgent: req.get('user-agent') || '',
+    });
+  } catch (error) {
+    console.error('写入登录审计失败:', error);
+  }
+
+  res.json({ user: profile });
+});
+
+app.get('/api/auth/login-stats', (req, res) => {
+  try {
+    res.json(readLoginAuditStats(LOGIN_AUDIT_PATH));
+  } catch (error) {
+    console.error('读取登录统计失败:', error);
+    res.status(500).json({ error: '读取登录统计失败', details: error.message });
+  }
+});
 
 function getRegionPromptSummary(prompt) {
   return {

@@ -1,0 +1,101 @@
+.login-stats-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.login-stats-metrics span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border: 1px solid rgba(139, 216, 214, 0.22);
+  border-radius: 999px;
+  background: rgba(7, 24, 36, 0.26);
+  color: rgba(237, 249, 249, 0.78);
+  font-weight: 750;
+}
+
+.login-stats-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.login-stat-card {
+  display: grid;
+  gap: 12px;
+  padding: 18px;
+}
+
+.login-stat-label {
+  margin: 0 0 6px;
+  color: var(--kd-ink-muted);
+  font-size: 12px;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+}
+
+.login-stat-card h2 {
+  margin: 0;
+  color: var(--kd-ink);
+  font-size: 22px;
+}
+
+.login-stat-card strong {
+  color: var(--kd-accent-dark);
+  font-size: 34px;
+  line-height: 1;
+}
+
+.login-stat-card p:last-child {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  color: var(--kd-ink-muted);
+  font-weight: 700;
+}
+
+.login-stats-table {
+  overflow: hidden;
+}
+
+.login-stats-table-wrap {
+  overflow-x: auto;
+}
+
+.login-stats-table table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.login-stats-table th,
+.login-stats-table td {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--kd-line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.login-stats-table th {
+  background: var(--kd-panel);
+  color: var(--kd-ink-muted);
+  font-size: 12px;
+  font-weight: 850;
+  letter-spacing: 0.05em;
+}
+
+.login-stats-table td {
+  color: var(--kd-ink);
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.user-agent-cell {
+  max-width: 520px;
+  color: var(--kd-ink-muted) !important;
+  word-break: break-word;
+}

@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import ErrorBoundary from '../components/ErrorBoundary';
 import html2canvas from 'html2canvas';
 import { KEYWORDS } from '../config/keywords';
+import { useAuth } from '../auth/AuthContext';
 import { finalizeStreamingReport } from '../utils/streamingReport';
 import { getRecentCompleteSaturdayRange } from '../utils/dateRanges';
 import { buildUnifiedWeeklyModelOptions, parseUnifiedWeeklyModelKey } from '../utils/modelOptions';
@@ -11,9 +12,12 @@ import './ReportGenerator.css';
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, BorderStyle, WidthType, Table, TableRow, TableCell, ImageRun, ExternalHyperlink, PageBreak } from 'docx';
 
 const ReportGenerator = () => {
+  const { allowedKeywords } = useAuth();
   // 可选择的关键词列表（集中配置）
-  const availableKeywords = KEYWORDS;
-  const [selectedKeyword, setSelectedKeyword] = useState('公积金'); // 默认选择公积金
+  const availableKeywords = allowedKeywords.length ? allowedKeywords : KEYWORDS;
+  const [selectedKeyword, setSelectedKeyword] = useState(() => (
+    availableKeywords.includes('公积金') ? '公积金' : availableKeywords[0]
+  ));
   
   // 获取模型简称
   const getModelShortName = (modelName) => {
@@ -156,6 +160,12 @@ const ReportGenerator = () => {
     setStartDate(range.startDate);
     setEndDate(range.endDate);
   }, []);
+
+  useEffect(() => {
+    if (availableKeywords.length > 0 && !availableKeywords.includes(selectedKeyword)) {
+      setSelectedKeyword(availableKeywords.includes('公积金') ? '公积金' : availableKeywords[0]);
+    }
+  }, [availableKeywords, selectedKeyword]);
 
   // 自动加载新闻（当日期或关键词准备好时）
   useEffect(() => {
@@ -1676,7 +1686,7 @@ const ReportGenerator = () => {
           <div className="filter-group filter-group-keyword">
             <label className="filter-item">
               <span>关键词</span>
-              <select value={selectedKeyword} onChange={(e) => setSelectedKeyword(e.target.value)} className="keyword-select">
+              <select value={selectedKeyword} onChange={(e) => setSelectedKeyword(e.target.value)} className="keyword-select" disabled={availableKeywords.length === 1}>
                 {availableKeywords.map(keyword => (
                   <option key={keyword} value={keyword}>{keyword}</option>
                 ))}
