@@ -16,6 +16,7 @@ export const USERS = {
       '/config',
       '/history',
       '/login-stats',
+      '/user-management',
       '/policy/current',
       '/policy/comparison',
       '/policy/regions',

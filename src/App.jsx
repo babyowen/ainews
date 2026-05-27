@@ -9,13 +9,13 @@ import WordCountStatsPage from './pages/WordCountStats';
 import HistoryReports from './pages/HistoryReports';
 import LoginPage from './pages/Login';
 import LoginStatsPage from './pages/LoginStats';
+import UserManagementPage from './pages/UserManagement';
 import CurrentPolicyPage from './pages/PolicyComparison/CurrentPolicy';
 import WeeklyComparisonPage from './pages/PolicyComparison/WeeklyComparison';
 import RegionPolicyBrowser from './pages/PolicyComparison/RegionPolicyBrowser';
 import RegionPolicyReportPage from './pages/PolicyComparison/RegionPolicyReport';
 import Layout from './components/Layout';
 import { AuthProvider, useAuth } from './auth/AuthContext';
-import { isRouteAllowed } from './config/userAccess';
 import './App.css'
 
 function ProtectedShell() {
@@ -35,7 +35,7 @@ function ProtectedShell() {
 function ProtectedPage({ routePath, children }) {
   const { user } = useAuth();
 
-  if (!isRouteAllowed(user?.username, routePath)) {
+  if (user?.routes && !user.routes.includes(routePath)) {
     return <Navigate to={user?.defaultPath || '/summary'} replace />;
   }
 
@@ -63,6 +63,7 @@ function App() {
               <Route path="/word-count" element={<ProtectedPage routePath="/word-count"><WordCountStatsPage /></ProtectedPage>} />
               <Route path="/history" element={<ProtectedPage routePath="/history"><HistoryReports /></ProtectedPage>} />
               <Route path="/login-stats" element={<ProtectedPage routePath="/login-stats"><LoginStatsPage /></ProtectedPage>} />
+              <Route path="/user-management" element={<ProtectedPage routePath="/user-management"><UserManagementPage /></ProtectedPage>} />
               <Route path="/policy/current" element={<ProtectedPage routePath="/policy/current"><CurrentPolicyPage /></ProtectedPage>} />
               <Route path="/policy/comparison" element={<ProtectedPage routePath="/policy/comparison"><WeeklyComparisonPage /></ProtectedPage>} />
               <Route path="/policy/regions" element={<ProtectedPage routePath="/policy/regions"><RegionPolicyBrowser /></ProtectedPage>} />

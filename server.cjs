@@ -52,6 +52,22 @@ const REGION_POLICY_REPORT_PROMPTS_PATH = path.join(__dirname, 'config/region-po
 const REGION_POLICY_REPORT_KEYWORD = '公积金';
 const REGION_POLICY_REPORT_MODEL = 'deepseek-reasoner';
 const LOGIN_AUDIT_PATH = path.join(__dirname, 'data/login-audit.json');
+const USERS_CONFIG_PATH = path.join(__dirname, 'config/users.json');
+
+const AVAILABLE_ROUTES = [
+  { path: '/summary', label: '每日新闻', group: 'main' },
+  { path: '/report', label: '周报生成', group: 'main' },
+  { path: '/score-edit', label: '评分修改', group: 'main' },
+  { path: '/word-count', label: '字数统计', group: 'main' },
+  { path: '/config', label: '周报参数', group: 'main' },
+  { path: '/history', label: '历史周报', group: 'main' },
+  { path: '/login-stats', label: '登录统计', group: 'main' },
+  { path: '/user-management', label: '用户管理', group: 'main' },
+  { path: '/policy/current', label: '现行政策编辑', group: 'policy' },
+  { path: '/policy/comparison', label: '周报政策对比', group: 'policy' },
+  { path: '/policy/regions', label: '地域政策浏览', group: 'policy' },
+  { path: '/policy/region-report', label: '地区政策报告', group: 'policy' },
+];
 
 const AUTH_USERS = {
   admin: {
@@ -122,6 +138,26 @@ function writeJsonFile(filePath, data) {
   fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
 }
 
+function loadUsersConfig() {
+  if (fs.existsSync(USERS_CONFIG_PATH)) {
+    return JSON.parse(fs.readFileSync(USERS_CONFIG_PATH, 'utf-8'));
+  }
+  const users = Object.values(AUTH_USERS).map(u => ({
+    username: u.username,
+    displayName: u.displayName,
+    role: u.role,
+    password: getConfiguredPassword(u),
+    keywords: [...u.keywords],
+    routes: [...u.routes],
+  }));
+  writeJsonFile(USERS_CONFIG_PATH, users);
+  return users;
+}
+
+function saveUsersConfig(users) {
+  writeJsonFile(USERS_CONFIG_PATH, users);
+}
+
 function slugifyPromptId(value = '') {
   return String(value)
     .toLowerCase()
@@ -158,25 +194,26 @@ function saveRegionPolicyPromptConfig(config) {
 app.post('/api/auth/login', (req, res) => {
   const { username = '', password = '' } = req.body || {};
   const normalizedUsername = String(username).trim();
-  const user = AUTH_USERS[normalizedUsername];
+
+  const users = loadUsersConfig();
+  const user = users.find(u => u.username === normalizedUsername);
 
   if (!user) {
     return res.status(401).json({ error: '用户名或密码错误' });
   }
 
-  const configuredPassword = getConfiguredPassword(user);
-  if (!configuredPassword) {
-    return res.status(500).json({
-      error: '用户密码未配置',
-      details: `请在 .env 中配置 ${user.passwordEnv}`,
-    });
-  }
-
-  if (String(password) !== configuredPassword) {
+  if (String(password) !== user.password) {
     return res.status(401).json({ error: '用户名或密码错误' });
   }
 
-  const profile = getPublicUserProfile(user);
+  const profile = {
+    username: user.username,
+    displayName: user.displayName,
+    role: user.role,
+    defaultPath: '/summary',
+    keywords: user.keywords,
+    routes: user.routes,
+  };
   try {
     appendLoginAudit(LOGIN_AUDIT_PATH, {
       username: user.username,
@@ -197,6 +234,92 @@ app.get('/api/auth/login-stats', (req, res) => {
     console.error('读取登录统计失败:', error);
     res.status(500).json({ error: '读取登录统计失败', details: error.message });
   }
+});
+
+function sanitizeUser(user) {
+  const { password, ...rest } = user;
+  return { ...rest, password: '' };
+}
+
+app.get('/api/admin/users', async (req, res) => {
+  try {
+    const users = loadUsersConfig();
+    const [rows] = await pool.query('SELECT DISTINCT keyword FROM scored_news WHERE keyword IS NOT NULL AND keyword != ""');
+    res.json({
+      users: users.map(sanitizeUser),
+      allKeywords: rows.map(r => r.keyword),
+      availableRoutes: AVAILABLE_ROUTES,
+    });
+  } catch (error) {
+    console.error('读取用户配置失败:', error);
+    res.status(500).json({ error: '读取用户配置失败', details: error.message });
+  }
+});
+
+app.post('/api/admin/users', (req, res) => {
+  const { username, displayName, password, role, keywords, routes } = req.body || {};
+  if (!username || !password) {
+    return res.status(400).json({ error: '用户名和密码不能为空' });
+  }
+  const users = loadUsersConfig();
+  if (users.find(u => u.username === username)) {
+    return res.status(409).json({ error: '用户名已存在' });
+  }
+  const newUser = {
+    username,
+    displayName: displayName || username,
+    password,
+    role: role || 'restricted',
+    keywords: Array.isArray(keywords) ? keywords : [],
+    routes: Array.isArray(routes) ? routes : [],
+  };
+  if (newUser.role === 'admin') {
+    newUser.routes = AVAILABLE_ROUTES.map(r => r.path);
+  }
+  users.push(newUser);
+  saveUsersConfig(users);
+  res.json({ success: true, user: sanitizeUser(newUser) });
+});
+
+app.put('/api/admin/users/:username', (req, res) => {
+  const { username } = req.params;
+  const { displayName, password, role, keywords, routes } = req.body || {};
+  const users = loadUsersConfig();
+  const idx = users.findIndex(u => u.username === username);
+  if (idx < 0) {
+    return res.status(404).json({ error: '用户不存在' });
+  }
+  if (username === 'admin' && role && role !== 'admin') {
+    return res.status(403).json({ error: 'admin 用户不可降级' });
+  }
+  const user = users[idx];
+  if (displayName !== undefined) user.displayName = displayName;
+  if (password) user.password = password;
+  if (role !== undefined) user.role = role;
+  if (keywords !== undefined) user.keywords = Array.isArray(keywords) ? keywords : [];
+  if (routes !== undefined) {
+    user.routes = Array.isArray(routes) ? routes : [];
+    if (username === 'admin' && !user.routes.includes('/user-management')) {
+      user.routes.push('/user-management');
+    }
+  }
+  saveUsersConfig(users);
+  res.json({ success: true, user: sanitizeUser(user) });
+});
+
+app.delete('/api/admin/users/:username', (req, res) => {
+  const { username } = req.params;
+  if (username === 'admin') {
+    return res.status(403).json({ error: 'admin 用户不可删除' });
+  }
+  const users = loadUsersConfig();
+  const idx = users.findIndex(u => u.username === username);
+  if (idx < 0) {
+    return res.status(404).json({ error: '用户不存在' });
+  }
+  users.splice(idx, 1);
+  saveUsersConfig(users);
+  res.json({ success: true });
 });
 
 function getRegionPromptSummary(prompt) {

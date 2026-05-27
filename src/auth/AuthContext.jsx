@@ -1,5 +1,4 @@
 import { createContext, useContext, useMemo, useState } from 'react';
-import { getAllowedKeywords, getUserProfile } from '../config/userAccess';
 
 const SESSION_KEY = 'keydigest_current_user';
 
@@ -32,7 +31,7 @@ export function AuthProvider({ children }) {
       throw new Error(data.error || data.details || '登录失败');
     }
 
-    const profile = data.user || getUserProfile(username);
+    const profile = data.user;
     sessionStorage.setItem(SESSION_KEY, JSON.stringify(profile));
     setUser(profile);
     return profile;
@@ -44,11 +43,10 @@ export function AuthProvider({ children }) {
   };
 
   const value = useMemo(() => {
-    const username = user?.username;
     return {
       user,
       isAuthenticated: Boolean(user?.username),
-      allowedKeywords: username ? getAllowedKeywords(username) : [],
+      allowedKeywords: user?.keywords || [],
       login,
       logout,
     };

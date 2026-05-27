@@ -13,3 +13,6 @@
 
 # Build output
 /dist/
+
+# User config (contains plaintext passwords)
+/config/users.json

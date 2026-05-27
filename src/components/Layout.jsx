@@ -16,10 +16,10 @@ import {
   Scale,
   ShieldCheck,
   Settings2,
+  Users,
   X
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
-import { isRouteAllowed } from '../config/userAccess';
 import './Layout.css';
 
 const menuItems = [
@@ -29,7 +29,8 @@ const menuItems = [
   { to: '/word-count', label: '字数统计', icon: BarChart3 },
   { to: '/config', label: '周报参数', icon: Settings2 },
   { to: '/history', label: '历史周报', icon: History },
-  { to: '/login-stats', label: '登录统计', icon: ShieldCheck }
+  { to: '/login-stats', label: '登录统计', icon: ShieldCheck },
+  { to: '/user-management', label: '用户管理', icon: Users }
 ];
 
 const policyItems = [
@@ -56,9 +57,8 @@ export default function Layout({ children }) {
   const { user, logout } = useAuth();
   const [isPolicyOpen, setIsPolicyOpen] = useState(user?.username === 'yzgjj');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const username = user?.username;
-  const visibleMenuItems = menuItems.filter(item => isRouteAllowed(username, item.to));
-  const visiblePolicyItems = policyItems.filter(item => isRouteAllowed(username, item.to));
+  const visibleMenuItems = menuItems.filter(item => user?.routes?.includes(item.to));
+  const visiblePolicyItems = policyItems.filter(item => user?.routes?.includes(item.to));
 
   useEffect(() => {
     if (user?.username === 'yzgjj' || pathname.startsWith('/policy')) {
