@@ -3385,10 +3385,10 @@ app.get('/api/word-count-stats', async (req, res) => {
         SUM(CASE WHEN CAST(score AS DECIMAL(3,1)) >= 4.0 THEN 1 ELSE 0 END) as veryHighScoreCount,
         SUM(CASE WHEN CAST(score AS DECIMAL(3,1)) >= 4.0 THEN CHAR_LENGTH(COALESCE(title, '')) + CHAR_LENGTH(COALESCE(content, '')) ELSE 0 END) as veryHighScoreWords,
         SUM(
-          CASE 
-            WHEN TRIM(COALESCE(sourceapi, '')) = '定制爬取'
-            THEN 1 
-            ELSE 0 
+          CASE
+            WHEN TRIM(COALESCE(sourceapi, '')) IN ('定制爬取', '官网抓取')
+            THEN 1
+            ELSE 0
           END
         ) as customGrabCount,
         SUM(
@@ -3407,58 +3407,62 @@ app.get('/api/word-count-stats', async (req, res) => {
       ORDER BY DATE(fetchdate) DESC, keyword
     `, [keywords, startDateStr, getNextDateYmd(endDateStr)]);
     
-    // 针对“江苏省国资委”，按 search_keyword 统计定制爬取与微信公众号明细
+    // 按关键词+日期统计官网抓取与微信公众号明细（所有关键词）
     const [customDetailRows] = await pool.query(`
-      SELECT 
+      SELECT
         DATE(fetchdate) as fetchdate,
+        keyword,
         COALESCE(search_keyword, '') as search_keyword,
         COUNT(*) as count
       FROM scored_news
-      WHERE keyword = '江苏省国资委'
+      WHERE keyword IN (?)
         AND fetchdate >= ?
         AND fetchdate < ?
         AND fetchdate IS NOT NULL
-        AND TRIM(COALESCE(sourceapi, '')) = '定制爬取'
-      GROUP BY DATE(fetchdate), COALESCE(search_keyword, '')
+        AND TRIM(COALESCE(sourceapi, '')) IN ('定制爬取', '官网抓取')
+      GROUP BY DATE(fetchdate), keyword, COALESCE(search_keyword, '')
       ORDER BY DATE(fetchdate) DESC
-    `, [startDateStr, getNextDateYmd(endDateStr)]);
+    `, [keywords, startDateStr, getNextDateYmd(endDateStr)]);
 
     const [wechatDetailRows] = await pool.query(`
-      SELECT 
+      SELECT
         DATE(fetchdate) as fetchdate,
+        keyword,
         COALESCE(search_keyword, '') as search_keyword,
         COUNT(*) as count
       FROM scored_news
-      WHERE keyword = '江苏省国资委'
+      WHERE keyword IN (?)
         AND fetchdate >= ?
         AND fetchdate < ?
         AND fetchdate IS NOT NULL
         AND TRIM(COALESCE(sourceapi, '')) = '极致了api'
-      GROUP BY DATE(fetchdate), COALESCE(search_keyword, '')
+      GROUP BY DATE(fetchdate), keyword, COALESCE(search_keyword, '')
       ORDER BY DATE(fetchdate) DESC
-    `, [startDateStr, getNextDateYmd(endDateStr)]);
+    `, [keywords, startDateStr, getNextDateYmd(endDateStr)]);
 
-    // 合并到返回结果中（仅江苏省国资委）
+    // 合并到返回结果中（所有关键词）
+    // detailsMap: { "keyword::date": { search_keyword: count } }
     const detailsMap = {};
     customDetailRows.forEach(r => {
-      const date = r.fetchdate;
+      const key = r.keyword + '::' + r.fetchdate;
       const sk = r.search_keyword || '未知';
-      if (!detailsMap[date]) detailsMap[date] = {};
-      detailsMap[date][sk] = (detailsMap[date][sk] || 0) + (r.count || 0);
+      if (!detailsMap[key]) detailsMap[key] = {};
+      detailsMap[key][sk] = (detailsMap[key][sk] || 0) + (r.count || 0);
     });
 
     const wechatDetailsMap = {};
     wechatDetailRows.forEach(r => {
-      const date = r.fetchdate;
+      const key = r.keyword + '::' + r.fetchdate;
       const sk = r.search_keyword || '未知';
-      if (!wechatDetailsMap[date]) wechatDetailsMap[date] = {};
-      wechatDetailsMap[date][sk] = (wechatDetailsMap[date][sk] || 0) + (r.count || 0);
+      if (!wechatDetailsMap[key]) wechatDetailsMap[key] = {};
+      wechatDetailsMap[key][sk] = (wechatDetailsMap[key][sk] || 0) + (r.count || 0);
     });
 
     statsRows.forEach(row => {
-      if (row.keyword === '江苏省国资委') {
-        row.customGrabDetails = detailsMap[row.fetchdate] || {};
-        row.wechatDetails = wechatDetailsMap[row.fetchdate] || {};
+      const key = row.keyword + '::' + row.fetchdate;
+      if (detailsMap[key] || wechatDetailsMap[key]) {
+        row.customGrabDetails = detailsMap[key] || {};
+        row.wechatDetails = wechatDetailsMap[key] || {};
       }
     });
 
