@@ -6,6 +6,7 @@ import {
   FileClock,
   FileText,
   Gauge,
+  Globe,
   History,
   Landmark,
   LogOut,
@@ -24,6 +25,7 @@ import './Layout.css';
 
 const menuItems = [
   { to: '/summary', label: '每日新闻', icon: Newspaper },
+  { to: '/analysis', label: '来源分析', icon: Globe },
   { to: '/report', label: '周报生成', icon: FileText },
   { to: '/score-edit', label: '评分修改', icon: PenLine },
   { to: '/word-count', label: '字数统计', icon: BarChart3 },
