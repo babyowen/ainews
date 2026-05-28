@@ -92,8 +92,7 @@ export default function SourceAnalysisPage() {
 
   // --- Chart 1: Source bar chart (top 20 by count, colored by avg_score) ---
   const sourceBarOption = useMemo(() => {
-    const top = sortedSourceAgg.slice(0, 20);
-    const names = top.map(s => websiteMap[s.source] || s.source);
+    const top = sortedSourceAgg.slice(0, 20).reverse();
     return {
       tooltip: {
         trigger: 'axis',
@@ -109,13 +108,13 @@ export default function SourceAnalysisPage() {
       },
       grid: { left: 120, right: 30, top: 20, bottom: 40 },
       xAxis: { type: 'value', name: '新闻数' },
-      yAxis: { type: 'category', data: names.reverse(), axisLabel: { fontSize: 11 } },
+      yAxis: { type: 'category', data: top.map(s => websiteMap[s.source] || s.source), axisLabel: { fontSize: 11 } },
       series: [{
         type: 'bar',
-        data: top.map(s => s.total).reverse(),
+        data: top.map(s => s.total),
         itemStyle: {
           color: (params) => {
-            const s = top[top.length - 1 - params.dataIndex];
+            const s = top[params.dataIndex];
             if (!s) return '#999';
             if (s.avg_score >= 3.5) return '#27ae60';
             if (s.avg_score >= 2.5) return '#f39c12';
@@ -218,8 +217,7 @@ export default function SourceAnalysisPage() {
 
   // --- Chart 4: Score distribution stacked bar per source (top 10) ---
   const scoreDistOption = useMemo(() => {
-    const top = sortedSourceAgg.slice(0, 10);
-    const sources = top.map(s => websiteMap[s.source] || s.source).reverse();
+    const top = sortedSourceAgg.slice(0, 10).reverse();
     const scores = [0, 1, 2, 3, 4, 5];
     const series = scores.map(score => ({
       name: `${score}分`,
@@ -227,14 +225,14 @@ export default function SourceAnalysisPage() {
       stack: 'total',
       barMaxWidth: 24,
       itemStyle: { color: SCORE_COLORS[score] },
-      data: top.map(s => s.scoreDist[score] || 0).reverse(),
+      data: top.map(s => s.scoreDist[score] || 0),
     }));
     return {
       tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
       legend: { data: scores.map(s => `${s}分`), bottom: 0, textStyle: { fontSize: 10 } },
       grid: { left: 120, right: 20, top: 20, bottom: 40 },
       xAxis: { type: 'value', name: '新闻数' },
-      yAxis: { type: 'category', data: sources, axisLabel: { fontSize: 11 } },
+      yAxis: { type: 'category', data: top.map(s => websiteMap[s.source] || s.source), axisLabel: { fontSize: 11 } },
       series,
     };
   }, [sortedSourceAgg, websiteMap]);
