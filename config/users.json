@@ -1,0 +1,65 @@
+[
+  {
+    "username": "admin",
+    "displayName": "Admin",
+    "role": "admin",
+    "password": "citic3104",
+    "keywords": [
+      "养老",
+      "公积金",
+      "数字政务",
+      "政府基金",
+      "中国烟草",
+      "零基预算"
+    ],
+    "routes": [
+      "/summary",
+      "/analysis",
+      "/report",
+      "/score-edit",
+      "/word-count",
+      "/config",
+      "/history",
+      "/login-stats",
+      "/user-management",
+      "/policy/current",
+      "/policy/comparison",
+      "/policy/regions",
+      "/policy/region-report"
+    ]
+  },
+  {
+    "username": "yzgjj",
+    "displayName": "YZGJJ",
+    "role": "restricted",
+    "password": "yzgjj",
+    "keywords": [
+      "公积金",
+      "养老"
+    ],
+    "routes": [
+      "/summary",
+      "/analysis",
+      "/report",
+      "/word-count",
+      "/policy/current",
+      "/policy/comparison",
+      "/policy/regions",
+      "/policy/region-report"
+    ]
+  },
+  {
+    "username": "test",
+    "displayName": "test",
+    "password": "test",
+    "role": "restricted",
+    "keywords": [
+      "国家数据局",
+      "高考",
+      "热刺"
+    ],
+    "routes": [
+      "/summary"
+    ]
+  }
+]
