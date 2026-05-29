@@ -601,40 +601,70 @@ app.get('/api/news-source-stats', async (req, res) => {
 
 // 来源质量分析（带内存缓存）
 const sourceQualityCache = { data: null, ts: 0 };
-const SOURCE_QUALITY_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+const SOURCE_QUALITY_CACHE_TTL = 60 * 60 * 1000; // 1 hour — data updates daily
 
 app.get('/api/source-quality-analysis', async (req, res) => {
   try {
+    const { keywords, startDate, endDate } = req.query;
+    const cacheKey = `${keywords || 'all'}|${startDate || ''}|${endDate || ''}`;
     const now = Date.now();
-    if (sourceQualityCache.data && (now - sourceQualityCache.ts) < SOURCE_QUALITY_CACHE_TTL) {
-      return res.json({ ...sourceQualityCache.data, cached: true });
+
+    if (sourceQualityCache.data && sourceQualityCache.data[cacheKey] && (now - sourceQualityCache.data[cacheKey].ts) < SOURCE_QUALITY_CACHE_TTL) {
+      return res.json({ ...sourceQualityCache.data[cacheKey].payload, cached: true });
     }
 
-    // Aggregate by keyword + source: count, avg score, score distribution
-    const [rows] = await pool.query(`
-      SELECT
+    // Build WHERE clause
+    const conditions = [
+      "keyword IS NOT NULL AND keyword != ''",
+      "source IS NOT NULL AND source != ''",
+      "score IS NOT NULL AND score != ''",
+    ];
+    const params = [];
+
+    if (keywords) {
+      const kwList = keywords.split(',').filter(Boolean);
+      if (kwList.length > 0) {
+        conditions.push(`keyword IN (${kwList.map(() => '?').join(',')})`);
+        params.push(...kwList);
+      }
+    }
+    if (startDate) {
+      conditions.push('fetchdate >= ?');
+      params.push(startDate);
+    }
+    if (endDate) {
+      conditions.push('fetchdate < ?');
+      params.push(getNextDateYmd(endDate));
+    }
+
+    const where = conditions.join(' AND ');
+
+    // Aggregate by keyword + source
+    const [rows] = await pool.query(
+      `SELECT
         keyword,
         source,
         COUNT(*) AS total,
-        ROUND(AVG(score), 2) AS avg_score,
-        SUM(CASE WHEN score >= 4 THEN 1 ELSE 0 END) AS high_count,
-        SUM(CASE WHEN score <= 1 THEN 1 ELSE 0 END) AS low_count
+        ROUND(AVG(CAST(score AS DECIMAL(3,1))), 2) AS avg_score,
+        SUM(CASE WHEN CAST(score AS DECIMAL(3,1)) >= 4 THEN 1 ELSE 0 END) AS high_count,
+        SUM(CASE WHEN CAST(score AS DECIMAL(3,1)) <= 1 THEN 1 ELSE 0 END) AS low_count
       FROM scored_news
-      WHERE keyword IS NOT NULL AND keyword != '' AND source IS NOT NULL AND source != ''
+      WHERE ${where}
       GROUP BY keyword, source
-      ORDER BY keyword, total DESC
-    `);
+      ORDER BY keyword, total DESC`,
+      params
+    );
 
     // Score distribution per keyword+source
-    const [scoreRows] = await pool.query(`
-      SELECT keyword, source, score, COUNT(*) AS count
+    const [scoreRows] = await pool.query(
+      `SELECT keyword, source, score, COUNT(*) AS count
       FROM scored_news
-      WHERE keyword IS NOT NULL AND keyword != '' AND source IS NOT NULL AND source != ''
+      WHERE ${where}
       GROUP BY keyword, source, score
-      ORDER BY keyword, source, score
-    `);
+      ORDER BY keyword, source, score`,
+      [...params]
+    );
 
-    // Build score distribution map
     const scoreMap = {};
     for (const r of scoreRows) {
       const key = `${r.keyword}||${r.source}`;
@@ -642,16 +672,17 @@ app.get('/api/source-quality-analysis', async (req, res) => {
       scoreMap[key][r.score] = r.count;
     }
 
-    // Attach score distribution to each row
     const result = rows.map(r => ({
       ...r,
       score_dist: scoreMap[`${r.keyword}||${r.source}`] || {}
     }));
 
-    const data = { rows: result, generatedAt: new Date().toISOString() };
-    sourceQualityCache.data = data;
-    sourceQualityCache.ts = now;
-    res.json({ ...data, cached: false });
+    const payload = { rows: result, generatedAt: new Date().toISOString() };
+
+    if (!sourceQualityCache.data) sourceQualityCache.data = {};
+    sourceQualityCache.data[cacheKey] = { payload, ts: now };
+
+    res.json({ ...payload, cached: false });
   } catch (err) {
     console.error('source-quality-analysis error:', err);
     res.status(500).json({ error: 'Database error' });

@@ -3,6 +3,7 @@ import { useAuth } from '../auth/AuthContext';
 import { fetchSourceQualityAnalysis } from '../api/sourceQualityAnalysis';
 import { fetchNewsWebsites } from '../api/newsWebsites';
 import ReactECharts from 'echarts-for-react';
+import dayjs from 'dayjs';
 import { Loading, Error, Empty } from '../components/Status';
 import './SourceAnalysis.css';
 
@@ -17,18 +18,27 @@ export default function SourceAnalysisPage() {
   const [selectedKeyword, setSelectedKeyword] = useState('all');
   const [sortBy, setSortBy] = useState('total');
   const [sortOrder, setSortOrder] = useState('desc');
+  const [dateRange, setDateRange] = useState([
+    dayjs().subtract(30, 'day').format('YYYY-MM-DD'),
+    dayjs().format('YYYY-MM-DD'),
+  ]);
 
   useEffect(() => {
     fetchNewsWebsites().then(setWebsites);
   }, []);
 
+  // Fetch data with server-side keyword & date filtering
   useEffect(() => {
     setLoading(true);
     setError(false);
-    fetchSourceQualityAnalysis()
+    fetchSourceQualityAnalysis({
+      keywords: allowedKeywords?.length ? allowedKeywords : undefined,
+      startDate: dateRange[0],
+      endDate: dateRange[1],
+    })
       .then(d => { setData(d); setLoading(false); })
       .catch(() => { setError(true); setLoading(false); });
-  }, []);
+  }, [allowedKeywords, dateRange]);
 
   const websiteMap = useMemo(() => {
     const m = {};
@@ -36,25 +46,17 @@ export default function SourceAnalysisPage() {
     return m;
   }, [websites]);
 
-  // Filter by allowed keywords
+  // Filter by selected keyword (UI-level only, data already server-filtered)
   const filtered = useMemo(() => {
     if (!data?.rows) return [];
-    let rows = data.rows;
-    if (allowedKeywords?.length) {
-      rows = rows.filter(r => allowedKeywords.includes(r.keyword));
-    }
-    if (selectedKeyword !== 'all') {
-      rows = rows.filter(r => r.keyword === selectedKeyword);
-    }
-    return rows;
-  }, [data, allowedKeywords, selectedKeyword]);
+    if (selectedKeyword === 'all') return data.rows;
+    return data.rows.filter(r => r.keyword === selectedKeyword);
+  }, [data, selectedKeyword]);
 
   const keywords = useMemo(() => {
     if (!data?.rows) return [];
-    let rows = data.rows;
-    if (allowedKeywords?.length) rows = rows.filter(r => allowedKeywords.includes(r.keyword));
-    return [...new Set(rows.map(r => r.keyword))];
-  }, [data, allowedKeywords]);
+    return [...new Set(data.rows.map(r => r.keyword))];
+  }, [data]);
 
   // Aggregate by source across selected keyword(s)
   const sourceAgg = useMemo(() => {
@@ -178,13 +180,13 @@ export default function SourceAnalysisPage() {
     const kws = selectedKeyword === 'all' ? keywords : [selectedKeyword];
     const children = kws.map(kw => {
       const sources = filtered.filter(r => r.keyword === kw);
-      const totalForKw = sources.reduce((sum, r) => sum + r.total, 0);
+      const totalForKw = sources.reduce((sum, r) => sum + Number(r.total), 0);
       return {
         name: kw,
         value: totalForKw,
         children: sources.slice(0, 10).map(s => ({
           name: websiteMap[s.source] || s.source,
-          value: s.total,
+          value: Number(s.total),
           avgScore: s.avg_score,
         }))
       };
@@ -276,10 +278,17 @@ export default function SourceAnalysisPage() {
         </div>
       </header>
 
-      {/* Keyword selector */}
+      {/* Filters */}
       <section className="source-filter-panel kd-panel">
-        <h2 className="kd-panel-title">关键词选择</h2>
+        <h2 className="kd-panel-title">筛选条件</h2>
         <div className="filter-row">
+          <label>时间范围</label>
+          <input type="date" value={dateRange[0]} onChange={e => setDateRange(d => [e.target.value, d[1]])} />
+          <span>至</span>
+          <input type="date" value={dateRange[1]} onChange={e => setDateRange(d => [d[0], e.target.value])} />
+        </div>
+        <div className="filter-row">
+          <label>关键词</label>
           <div className="keyword-tabs">
             <button
               className={`kw-tab ${selectedKeyword === 'all' ? 'active' : ''}`}
