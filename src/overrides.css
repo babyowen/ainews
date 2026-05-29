@@ -1,6 +1,7 @@
 /* Final scoped visual pass. Imported last to normalize legacy page CSS. */
 .score-edit-page,
 .word-count-stats,
+.source-analysis-page,
 .weekly-comparison-container,
 .report-generator {
   max-width: 1440px;

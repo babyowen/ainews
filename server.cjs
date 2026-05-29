@@ -56,6 +56,7 @@ const USERS_CONFIG_PATH = path.join(__dirname, 'config/users.json');
 
 const AVAILABLE_ROUTES = [
   { path: '/summary', label: '每日新闻', group: 'main' },
+  { path: '/analysis', label: '来源分析', group: 'main' },
   { path: '/report', label: '周报生成', group: 'main' },
   { path: '/score-edit', label: '评分修改', group: 'main' },
   { path: '/word-count', label: '字数统计', group: 'main' },
@@ -103,6 +104,7 @@ const AUTH_USERS = {
     keywords: ['公积金'],
     routes: [
       '/summary',
+      '/analysis',
       '/report',
       '/word-count',
       '/policy/current',
@@ -141,7 +143,22 @@ function writeJsonFile(filePath, data) {
 
 function loadUsersConfig() {
   if (fs.existsSync(USERS_CONFIG_PATH)) {
-    return JSON.parse(fs.readFileSync(USERS_CONFIG_PATH, 'utf-8'));
+    const users = JSON.parse(fs.readFileSync(USERS_CONFIG_PATH, 'utf-8'));
+    // Lightweight migration: ensure built-in users have routes from AUTH_USERS
+    let changed = false;
+    for (const u of users) {
+      const builtin = AUTH_USERS[u.username];
+      if (!builtin) continue;
+      if (!Array.isArray(u.routes)) { u.routes = []; changed = true; }
+      for (const route of builtin.routes) {
+        if (!u.routes.includes(route)) {
+          u.routes.push(route);
+          changed = true;
+        }
+      }
+    }
+    if (changed) writeJsonFile(USERS_CONFIG_PATH, users);
+    return users;
   }
   const users = Object.values(AUTH_USERS).map(u => ({
     username: u.username,
@@ -595,6 +612,96 @@ app.get('/api/news-source-stats', async (req, res) => {
   params.push(Number(pageSize), (Number(page) - 1) * Number(pageSize));
   const [rows] = await pool.query(sql, params);
   res.json(rows);
+});
+
+// 来源质量分析（带内存缓存）
+const sourceQualityCache = { data: null, ts: 0 };
+const SOURCE_QUALITY_CACHE_TTL = 60 * 60 * 1000; // 1 hour — data updates daily
+
+app.get('/api/source-quality-analysis', async (req, res) => {
+  try {
+    const { keywords, startDate, endDate } = req.query;
+    const cacheKey = `${keywords || 'all'}|${startDate || ''}|${endDate || ''}`;
+    const now = Date.now();
+
+    if (sourceQualityCache.data && sourceQualityCache.data[cacheKey] && (now - sourceQualityCache.data[cacheKey].ts) < SOURCE_QUALITY_CACHE_TTL) {
+      return res.json({ ...sourceQualityCache.data[cacheKey].payload, cached: true });
+    }
+
+    // Build WHERE clause
+    const conditions = [
+      "keyword IS NOT NULL AND keyword != ''",
+      "source IS NOT NULL AND source != ''",
+      "score IS NOT NULL AND score != ''",
+    ];
+    const params = [];
+
+    if (keywords) {
+      const kwList = keywords.split(',').filter(Boolean);
+      if (kwList.length > 0) {
+        conditions.push(`keyword IN (${kwList.map(() => '?').join(',')})`);
+        params.push(...kwList);
+      }
+    }
+    if (startDate) {
+      conditions.push('fetchdate >= ?');
+      params.push(startDate);
+    }
+    if (endDate) {
+      conditions.push('fetchdate < ?');
+      params.push(getNextDateYmd(endDate));
+    }
+
+    const where = conditions.join(' AND ');
+
+    // Aggregate by keyword + source
+    const [rows] = await pool.query(
+      `SELECT
+        keyword,
+        source,
+        COUNT(*) AS total,
+        ROUND(AVG(CAST(score AS DECIMAL(3,1))), 2) AS avg_score,
+        SUM(CASE WHEN CAST(score AS DECIMAL(3,1)) >= 4 THEN 1 ELSE 0 END) AS high_count,
+        SUM(CASE WHEN CAST(score AS DECIMAL(3,1)) <= 1 THEN 1 ELSE 0 END) AS low_count
+      FROM scored_news
+      WHERE ${where}
+      GROUP BY keyword, source
+      ORDER BY keyword, total DESC`,
+      params
+    );
+
+    // Score distribution per keyword+source
+    const [scoreRows] = await pool.query(
+      `SELECT keyword, source, score, COUNT(*) AS count
+      FROM scored_news
+      WHERE ${where}
+      GROUP BY keyword, source, score
+      ORDER BY keyword, source, score`,
+      [...params]
+    );
+
+    const scoreMap = {};
+    for (const r of scoreRows) {
+      const key = `${r.keyword}||${r.source}`;
+      if (!scoreMap[key]) scoreMap[key] = {};
+      scoreMap[key][r.score] = r.count;
+    }
+
+    const result = rows.map(r => ({
+      ...r,
+      score_dist: scoreMap[`${r.keyword}||${r.source}`] || {}
+    }));
+
+    const payload = { rows: result, generatedAt: new Date().toISOString() };
+
+    if (!sourceQualityCache.data) sourceQualityCache.data = {};
+    sourceQualityCache.data[cacheKey] = { payload, ts: now };
+
+    res.json({ ...payload, cached: false });
+  } catch (err) {
+    console.error('source-quality-analysis error:', err);
+    res.status(500).json({ error: 'Database error' });
+  }
 });
 
 // 网站信息
@@ -3385,10 +3492,10 @@ app.get('/api/word-count-stats', async (req, res) => {
         SUM(CASE WHEN CAST(score AS DECIMAL(3,1)) >= 4.0 THEN 1 ELSE 0 END) as veryHighScoreCount,
         SUM(CASE WHEN CAST(score AS DECIMAL(3,1)) >= 4.0 THEN CHAR_LENGTH(COALESCE(title, '')) + CHAR_LENGTH(COALESCE(content, '')) ELSE 0 END) as veryHighScoreWords,
         SUM(
-          CASE 
-            WHEN TRIM(COALESCE(sourceapi, '')) = '定制爬取'
-            THEN 1 
-            ELSE 0 
+          CASE
+            WHEN TRIM(COALESCE(sourceapi, '')) IN ('定制爬取', '官网抓取')
+            THEN 1
+            ELSE 0
           END
         ) as customGrabCount,
         SUM(
@@ -3407,58 +3514,62 @@ app.get('/api/word-count-stats', async (req, res) => {
       ORDER BY DATE(fetchdate) DESC, keyword
     `, [keywords, startDateStr, getNextDateYmd(endDateStr)]);
     
-    // 针对“江苏省国资委”，按 search_keyword 统计定制爬取与微信公众号明细
+    // 按关键词+日期统计官网抓取与微信公众号明细（所有关键词）
     const [customDetailRows] = await pool.query(`
-      SELECT 
+      SELECT
         DATE(fetchdate) as fetchdate,
+        keyword,
         COALESCE(search_keyword, '') as search_keyword,
         COUNT(*) as count
       FROM scored_news
-      WHERE keyword = '江苏省国资委'
+      WHERE keyword IN (?)
         AND fetchdate >= ?
         AND fetchdate < ?
         AND fetchdate IS NOT NULL
-        AND TRIM(COALESCE(sourceapi, '')) = '定制爬取'
-      GROUP BY DATE(fetchdate), COALESCE(search_keyword, '')
+        AND TRIM(COALESCE(sourceapi, '')) IN ('定制爬取', '官网抓取')
+      GROUP BY DATE(fetchdate), keyword, COALESCE(search_keyword, '')
       ORDER BY DATE(fetchdate) DESC
-    `, [startDateStr, getNextDateYmd(endDateStr)]);
+    `, [keywords, startDateStr, getNextDateYmd(endDateStr)]);
 
     const [wechatDetailRows] = await pool.query(`
-      SELECT 
+      SELECT
         DATE(fetchdate) as fetchdate,
+        keyword,
         COALESCE(search_keyword, '') as search_keyword,
         COUNT(*) as count
       FROM scored_news
-      WHERE keyword = '江苏省国资委'
+      WHERE keyword IN (?)
         AND fetchdate >= ?
         AND fetchdate < ?
         AND fetchdate IS NOT NULL
         AND TRIM(COALESCE(sourceapi, '')) = '极致了api'
-      GROUP BY DATE(fetchdate), COALESCE(search_keyword, '')
+      GROUP BY DATE(fetchdate), keyword, COALESCE(search_keyword, '')
       ORDER BY DATE(fetchdate) DESC
-    `, [startDateStr, getNextDateYmd(endDateStr)]);
+    `, [keywords, startDateStr, getNextDateYmd(endDateStr)]);
 
-    // 合并到返回结果中（仅江苏省国资委）
+    // 合并到返回结果中（所有关键词）
+    // detailsMap: { "keyword::date": { search_keyword: count } }
     const detailsMap = {};
     customDetailRows.forEach(r => {
-      const date = r.fetchdate;
+      const key = r.keyword + '::' + r.fetchdate;
       const sk = r.search_keyword || '未知';
-      if (!detailsMap[date]) detailsMap[date] = {};
-      detailsMap[date][sk] = (detailsMap[date][sk] || 0) + (r.count || 0);
+      if (!detailsMap[key]) detailsMap[key] = {};
+      detailsMap[key][sk] = (detailsMap[key][sk] || 0) + (r.count || 0);
     });
 
     const wechatDetailsMap = {};
     wechatDetailRows.forEach(r => {
-      const date = r.fetchdate;
+      const key = r.keyword + '::' + r.fetchdate;
       const sk = r.search_keyword || '未知';
-      if (!wechatDetailsMap[date]) wechatDetailsMap[date] = {};
-      wechatDetailsMap[date][sk] = (wechatDetailsMap[date][sk] || 0) + (r.count || 0);
+      if (!wechatDetailsMap[key]) wechatDetailsMap[key] = {};
+      wechatDetailsMap[key][sk] = (wechatDetailsMap[key][sk] || 0) + (r.count || 0);
     });
 
     statsRows.forEach(row => {
-      if (row.keyword === '江苏省国资委') {
-        row.customGrabDetails = detailsMap[row.fetchdate] || {};
-        row.wechatDetails = wechatDetailsMap[row.fetchdate] || {};
+      const key = row.keyword + '::' + row.fetchdate;
+      if (detailsMap[key] || wechatDetailsMap[key]) {
+        row.customGrabDetails = detailsMap[key] || {};
+        row.wechatDetails = wechatDetailsMap[key] || {};
       }
     });
 

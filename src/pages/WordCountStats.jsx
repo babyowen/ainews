@@ -310,7 +310,7 @@ export default function WordCountStats() {
                                   <span className="wcs-score-pill score-4">4+</span>
                                   {formatNumber(keywordData.veryHighScoreCount)}条 · {formatWordCount(keywordData.veryHighScoreWords)}
                                 </div>
-                                {keyword === '江苏省国资委' && sourceKeys.length > 0 && (
+                                {sourceKeys.length > 0 && (
                                   <div className="source-details">
                                     {sourceKeys.map(sk => {
                                       const customCount = Number((keywordData.customGrabDetails || {})[sk]) || 0;

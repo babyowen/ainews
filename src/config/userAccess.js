@@ -31,6 +31,7 @@ export const USERS = {
     keywords: ['公积金'],
     routes: [
       '/summary',
+      '/analysis',
       '/report',
       '/word-count',
       '/policy/current',
