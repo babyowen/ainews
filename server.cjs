@@ -143,7 +143,21 @@ function writeJsonFile(filePath, data) {
 
 function loadUsersConfig() {
   if (fs.existsSync(USERS_CONFIG_PATH)) {
-    return JSON.parse(fs.readFileSync(USERS_CONFIG_PATH, 'utf-8'));
+    const users = JSON.parse(fs.readFileSync(USERS_CONFIG_PATH, 'utf-8'));
+    // Lightweight migration: ensure built-in users have routes from AUTH_USERS
+    let changed = false;
+    for (const u of users) {
+      const builtin = AUTH_USERS[u.username];
+      if (!builtin) continue;
+      for (const route of builtin.routes) {
+        if (!u.routes.includes(route)) {
+          u.routes.push(route);
+          changed = true;
+        }
+      }
+    }
+    if (changed) writeJsonFile(USERS_CONFIG_PATH, users);
+    return users;
   }
   const users = Object.values(AUTH_USERS).map(u => ({
     username: u.username,

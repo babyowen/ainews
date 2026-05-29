@@ -20,6 +20,38 @@
   margin-bottom: 16px;
 }
 
+.filter-row {
+  display: flex;
+  align-items: center;
+  margin-bottom: 12px;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.filter-row label {
+  color: var(--kd-ink-muted);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  min-width: 56px;
+}
+
+.filter-row span {
+  color: var(--kd-ink-soft);
+  font-size: 14px;
+}
+
+.filter-row input[type="date"] {
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--kd-line);
+  border-radius: var(--kd-radius);
+  background: #fff;
+  color: var(--kd-ink);
+  font-size: 14px;
+  font-family: inherit;
+}
+
 .keyword-tabs {
   display: flex;
   flex-wrap: wrap;
