@@ -149,6 +149,7 @@ function loadUsersConfig() {
     for (const u of users) {
       const builtin = AUTH_USERS[u.username];
       if (!builtin) continue;
+      if (!Array.isArray(u.routes)) { u.routes = []; changed = true; }
       for (const route of builtin.routes) {
         if (!u.routes.includes(route)) {
           u.routes.push(route);
