@@ -215,6 +215,56 @@ const ReportGenerator = () => {
     loadWeeklyReportModels();
   }, []);
 
+  // 前端本地拼装 debug 信息，在点击"生成周报"时立即显示
+  const buildLocalDebugInfo = (modelName) => {
+    const selectedPrompt = promptOptions.find(p => p.id === selectedPromptId);
+    if (!selectedPrompt?.systemPrompt) return null;
+
+    const systemPrompt = selectedPrompt.systemPrompt;
+    const userPromptTemplate = selectedPrompt.userPrompt || '';
+
+    // 拼装新闻内容（与后端逻辑一致）
+    const newsContent = selectedNews.map((news, index) => {
+      const text = summaryVersion === 'short'
+        ? (news.short_summary || news.content || '内容不详')
+        : (news.content || news.short_summary || '内容不详');
+      return `新闻${index + 1}标题:${news.title}\n新闻${index + 1}内容:${text}`;
+    }).join('\n\n');
+
+    const qianzaiNewsContent = selectedNews.map((news, index) => {
+      const text = summaryVersion === 'short'
+        ? (news.short_summary || news.content || '内容不详')
+        : (news.content || news.short_summary || '内容不详');
+      return `这是我的潜在客户<${news.search_keyword || '未知客户'}>，以下是我搜索到的新闻<${text}>`;
+    }).join('\n\n');
+
+    const finalUserPrompt = userPromptTemplate
+      .replace('{keyword}', selectedKeyword)
+      .replace('{startDate}', startDate)
+      .replace('{endDate}', endDate)
+      .replace('{news}', newsContent)
+      .replace('{qianzai_news}', qianzaiNewsContent)
+      .replace('{usertopic}', userPrompt || '无特别要求');
+
+    const totalContent = systemPrompt + finalUserPrompt;
+    const estimateTokens = (text) => {
+      if (!text) return 0;
+      const chineseChars = (text.match(/[一-鿿]/g) || []).length;
+      const englishChars = (text.match(/[a-zA-Z]/g) || []).length;
+      const otherChars = text.length - chineseChars - englishChars;
+      return Math.ceil(chineseChars * 0.6 + englishChars * 0.3 + otherChars * 0.5);
+    };
+
+    return {
+      systemPrompt,
+      userPrompt: finalUserPrompt,
+      newsCount: selectedNews.length,
+      model: modelName,
+      totalChars: totalContent.length,
+      estimatedTokens: estimateTokens(totalContent)
+    };
+  };
+
   // 查询新闻
   const handleSearchNews = async () => {
     if (!startDate || !endDate) {
@@ -223,6 +273,8 @@ const ReportGenerator = () => {
     }
 
     setShowReport(false); // 在请求开始时清空旧报告，避免异步响应覆盖后续生成的报告显隐状态
+    setDebugInfo(null);
+    setShowModelMessage(false);
     setIsLoadingNews(true);
     try {
       let apiUrl;
@@ -298,7 +350,8 @@ const ReportGenerator = () => {
     setStreamingContent('');
     setStreamingReasoning('');
     setStreamingStatus('🔧 准备开始修改周报...');
-    
+    setDebugInfo(null);
+    setShowModelMessage(false);
     try {
       const response = await fetch('/api/modify-report', {
         method: 'POST',
@@ -889,7 +942,16 @@ const ReportGenerator = () => {
     setStreamingContent('');
     setStreamingReasoning('');
     setStreamingStatus('🚀 准备开始生成周报...');
-    setCurrentModel(selectedModel?.label || 'DeepSeek V4 Flash');
+    const modelName = selectedModel?.label || 'DeepSeek V4 Flash';
+    setCurrentModel(modelName);
+    setDebugInfo(null);
+    setShowModelMessage(false);
+    // 立即拼装模型消息并显示
+    const localDebug = buildLocalDebugInfo(modelName);
+    if (localDebug) {
+      setDebugInfo(localDebug);
+      setShowModelMessage(true);
+    }
 
     try {
       const response = await fetch('/api/generate-report', {
@@ -997,10 +1059,21 @@ const ReportGenerator = () => {
     setStreamingContent('');
     setStreamingReasoning('');
     setStreamingStatus('🔄 重新开始生成周报...');
+    setDebugInfo(null);
+    setShowModelMessage(false);
+    let retryModelName = 'DeepSeek R1';
     if (isKimiRetry) {
       setCurrentModel('KIMI K2');
+      retryModelName = 'KIMI K2';
     } else if (retryModel?.label) {
       setCurrentModel(retryModel.label);
+      retryModelName = retryModel.label;
+    }
+    // 立即拼装模型消息并显示
+    const localDebug = buildLocalDebugInfo(retryModelName);
+    if (localDebug) {
+      setDebugInfo(localDebug);
+      setShowModelMessage(true);
     }
 
     try {
@@ -1109,6 +1182,14 @@ const ReportGenerator = () => {
     setStreamingReasoning('');
     setStreamingStatus('🚀 准备开始生成周报...');
     setCurrentModel('KIMI K2');
+    setDebugInfo(null);
+    setShowModelMessage(false);
+    // 立即拼装模型消息并显示
+    const localDebug = buildLocalDebugInfo('KIMI K2');
+    if (localDebug) {
+      setDebugInfo(localDebug);
+      setShowModelMessage(true);
+    }
 
     try {
       const response = await fetch('/api/generate-kimi-report', {
