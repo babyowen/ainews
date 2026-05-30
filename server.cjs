@@ -384,7 +384,7 @@ app.get('/api/keyword-prompts', async (req, res) => {
       return res.json([]);
     }
     const prompts = json.keywords[keyword].prompts || [];
-    const result = prompts.map(p => ({ id: p.id, name: p.name, description: p.description, isDefault: !!p.isDefault }));
+    const result = prompts.map(p => ({ id: p.id, name: p.name, description: p.description, isDefault: !!p.isDefault, systemPrompt: p.systemPrompt || '', userPrompt: p.userPrompt || '' }));
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: 'Failed to load keyword prompts', details: err.message });
@@ -1033,10 +1033,11 @@ app.post('/api/modify-report', async (req, res) => {
     
     if (stream) {
       // 设置流式响应头
-      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
-      
+      res.flushHeaders();
+
       // 发送初始调试信息
       const debugInfo = {
         systemPrompt: modifySystemPrompt,
@@ -1367,10 +1368,11 @@ app.post('/api/generate-report', async (req, res) => {
     
     if (stream) {
       // 设置流式响应头
-      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
-      
+      res.flushHeaders();
+
       // 发送初始调试信息
       const debugInfo = {
         systemPrompt,
@@ -1663,10 +1665,11 @@ app.post('/api/generate-siliconflow-report', async (req, res) => {
     
     if (stream) {
       // 设置流式响应头
-      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
-      
+      res.flushHeaders();
+
       // 发送初始调试信息
       const debugInfo = {
         systemPrompt,
@@ -1966,10 +1969,11 @@ app.post('/api/generate-kimi-report', async (req, res) => {
     
     if (stream) {
       // 设置流式响应头
-      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
-      
+      res.flushHeaders();
+
       // 发送初始调试信息
       const debugInfo = {
         systemPrompt,
