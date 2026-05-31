@@ -2,12 +2,12 @@ import { Link, useLocation } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import {
   BarChart3,
+  CalendarClock,
   ChevronDown,
   FileClock,
   FileText,
   Gauge,
   Globe,
-  History,
   Landmark,
   LogOut,
   Map,
@@ -30,7 +30,7 @@ const menuItems = [
   { to: '/score-edit', label: '评分修改', icon: PenLine },
   { to: '/word-count', label: '字数统计', icon: BarChart3 },
   { to: '/config', label: '周报参数', icon: Settings2 },
-  { to: '/history', label: '历史周报', icon: History },
+  { to: '/auto-report', label: '自动周报', icon: CalendarClock },
   { to: '/login-stats', label: '登录统计', icon: ShieldCheck },
   { to: '/user-management', label: '用户管理', icon: Users }
 ];

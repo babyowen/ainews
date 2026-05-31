@@ -7,6 +7,7 @@ import QualityAnalysisPage from './pages/QualityAnalysis';
 import ScoreEditPage from './pages/ScoreEdit';
 import WordCountStatsPage from './pages/WordCountStats';
 import HistoryReports from './pages/HistoryReports';
+import AutoReportPage from './pages/AutoReportConfig';
 import LoginPage from './pages/Login';
 import LoginStatsPage from './pages/LoginStats';
 import UserManagementPage from './pages/UserManagement';
@@ -62,6 +63,7 @@ function App() {
               <Route path="/score-edit" element={<ProtectedPage routePath="/score-edit"><ScoreEditPage /></ProtectedPage>} />
               <Route path="/word-count" element={<ProtectedPage routePath="/word-count"><WordCountStatsPage /></ProtectedPage>} />
               <Route path="/history" element={<ProtectedPage routePath="/history"><HistoryReports /></ProtectedPage>} />
+              <Route path="/auto-report" element={<ProtectedPage routePath="/auto-report"><AutoReportPage /></ProtectedPage>} />
               <Route path="/login-stats" element={<ProtectedPage routePath="/login-stats"><LoginStatsPage /></ProtectedPage>} />
               <Route path="/user-management" element={<ProtectedPage routePath="/user-management"><UserManagementPage /></ProtectedPage>} />
               <Route path="/policy/current" element={<ProtectedPage routePath="/policy/current"><CurrentPolicyPage /></ProtectedPage>} />

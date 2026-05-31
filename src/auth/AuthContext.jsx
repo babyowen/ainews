@@ -1,6 +1,7 @@
 import { createContext, useContext, useMemo, useState } from 'react';
 
 const SESSION_KEY = 'keydigest_current_user';
+const TOKEN_KEY = 'keydigest_auth_token';
 
 const AuthContext = createContext(null);
 
@@ -33,12 +34,16 @@ export function AuthProvider({ children }) {
 
     const profile = data.user;
     sessionStorage.setItem(SESSION_KEY, JSON.stringify(profile));
+    if (data.token) {
+      sessionStorage.setItem(TOKEN_KEY, data.token);
+    }
     setUser(profile);
     return profile;
   };
 
   const logout = () => {
     sessionStorage.removeItem(SESSION_KEY);
+    sessionStorage.removeItem(TOKEN_KEY);
     setUser(null);
   };
 
@@ -47,6 +52,11 @@ export function AuthProvider({ children }) {
       user,
       isAuthenticated: Boolean(user?.username),
       allowedKeywords: user?.keywords || [],
+      authToken: sessionStorage.getItem(TOKEN_KEY) || '',
+      authHeaders: () => {
+        const token = sessionStorage.getItem(TOKEN_KEY);
+        return token ? { Authorization: `Bearer ${token}` } : {};
+      },
       login,
       logout,
     };
