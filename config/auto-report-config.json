@@ -1,0 +1,10 @@
+{
+  "enabled": false,
+  "defaults": {
+    "modelKey": "deepseek-v4-flash",
+    "promptId": "",
+    "minScore": 3,
+    "summaryVersion": "short"
+  },
+  "keywords": {}
+}

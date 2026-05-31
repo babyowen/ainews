@@ -8,6 +8,8 @@ KeyDigest is an AI-powered keyword news analysis system. It aggregates news by k
 
 The app now has lightweight multi-user access for internal use. `admin` keeps full access, while `yzgjj` is restricted in the frontend to the `公积金` keyword and the selected daily/news/report/word-count/policy menu set. This is a UI-level permission model, not server-side data isolation.
 
+`/auto-report` adds admin-configured automatic weekly reports. The cron runs every Sunday at 05:00 Asia/Shanghai, summarizes the previous Sunday through Saturday by `scored_news.fetchdate`, writes logs to `auto_report_log`, and stores downloadable contact-info PDFs under `data/auto-report-pdfs`.
+
 ## Common Commands
 
 ```bash
@@ -34,6 +36,9 @@ npm run preview
 
 # Install Playwright browser for server-side PDF rendering
 npm run pdf:install-browser
+
+# Focused automatic weekly report tests
+node --test test/auto-report-service.test.cjs
 ```
 
 ## Architecture
@@ -76,7 +81,8 @@ Frontend (React + Vite)  ←→  Backend (Express + MySQL)
 5. **Keyword-specific prompts**: `config/keyword-prompts.json` allows overriding default prompts per keyword. The config UI at `/config` manages these.
 6. **Region policy reports**: A newer workflow (`/policy/regions`, `/policy/region-report`) uses `config/region-policy-report-prompts.json` for region-specific policy analysis with separate single-region and multi-region prompt templates.
 7. **Lightweight multi-user access**: `POST /api/auth/login` validates fixed usernames against `.env` passwords, the frontend stores the returned profile in `sessionStorage`, and `src/config/userAccess.js` controls visible routes and allowed keywords. Successful logins are appended to `data/login-audit.json` through `services/loginAudit.cjs`; `/login-stats` is admin-only in the frontend.
-8. **Page-scoped CSS convention**: Vite merges every `import './X.css'` into a single global stylesheet, so bare class selectors in `src/pages/*.css` leak across pages. Each page has a wrapper class (`.score-edit-page`, `.report-generator`, `.weekly-comparison-container`, `.word-count-stats`, `.history-reports-page`, `.config-container`, `.region-policy-browser`, `.region-report-page`, `.current-policy-page`) and page-level rules must be scoped under it. Truly shared utilities (`.kd-page`, `.kd-panel`, `.kd-state-card`, score badges) live in `src/index.css` and `src/overrides.css`; `src/overrides.css` is imported last and performs the final scoped visual normalization across pages.
+8. **Automatic weekly reports**: `node-cron` schedules `services/autoReportService.cjs` at `0 5 * * 0` in `Asia/Shanghai`. Admin config is stored in `config/auto-report-config.json`; the service uses `config/weekly-report-models.json`, keyword-specific prompts, server-side report PDF rendering, and `auto_report_log` for run/download audit data.
+9. **Page-scoped CSS convention**: Vite merges every `import './X.css'` into a single global stylesheet, so bare class selectors in `src/pages/*.css` leak across pages. Each page has a wrapper class (`.score-edit-page`, `.report-generator`, `.weekly-comparison-container`, `.word-count-stats`, `.history-reports-page`, `.config-container`, `.auto-report-config`, `.region-policy-browser`, `.region-report-page`, `.current-policy-page`) and page-level rules must be scoped under it. Truly shared utilities (`.kd-page`, `.kd-panel`, `.kd-state-card`, score badges) live in `src/index.css` and `src/overrides.css`; `src/overrides.css` is imported last and performs the final scoped visual normalization across pages.
 
 ### Database Schema
 
@@ -87,7 +93,8 @@ Core tables in MySQL:
 - **`news_source_stats`**: Daily source counts per keyword.
 - **`news_websites`**: Source website metadata.
 - **`policy_versions`**: Policy comparison snapshots (region policy feature).
-- **`reports_history`**: Saved report history with metadata.
+- **`weekly_reports`**: Saved weekly report history with metadata; used by manual report generation, automatic weekly reports, `/api/reports/history`, and policy comparison.
+- **`auto_report_log`**: Automatic weekly report run log with keyword, date range, run parameters, source/news counts, PDF status/path, and error details.
 
 ### Environment Variables
 
@@ -104,9 +111,12 @@ GOOGLE_SEARCH_ENGINE_ID
 VITE_ADMIN_PASSWORD
 KEYDIGEST_ADMIN_PASSWORD
 KEYDIGEST_YZGJJ_PASSWORD
+KEYDIGEST_SESSION_SECRET
 ```
 
 `VITE_ADMIN_PASSWORD` is still used by the legacy score-edit password guard. Full-site login uses `KEYDIGEST_ADMIN_PASSWORD` and `KEYDIGEST_YZGJJ_PASSWORD`; the backend falls back from `KEYDIGEST_ADMIN_PASSWORD` to `VITE_ADMIN_PASSWORD` for admin if the new variable is absent.
+
+`KEYDIGEST_SESSION_SECRET` signs Bearer tokens. If absent, the backend falls back to `DB_PASS`, then `KEYDIGEST_ADMIN_PASSWORD`, then a local default.
 
 ### API Endpoints (Selected)
 
@@ -119,6 +129,12 @@ KEYDIGEST_YZGJJ_PASSWORD
 - `POST /api/modify-report` — two-round report refinement
 - `POST /api/reports/export-pdf` — server-side PDF export
 - `GET/POST /api/config/keyword-prompts` — keyword prompt CRUD
+- `GET /api/weekly-report/models` — weekly report model list from `config/weekly-report-models.json`
+- `GET/POST /api/config/auto-report` — admin automatic weekly report config
+- `GET /api/auto-report/status` — admin automatic weekly report schedule/runtime status
+- `POST /api/auto-report/trigger` — admin manual automatic-report cycle trigger
+- `GET /api/auto-report/history` — automatic weekly report logs filtered by user keyword access
+- `GET /api/auto-report/download/:logId` — automatic weekly report PDF download filtered by keyword access
 - `GET/POST /api/config/region-policy-report-prompts` — region policy prompt CRUD
 - `GET/POST /api/policy/*` — policy comparison and region report workflows
 - `POST /api/google-search` — Google Custom Search proxy
@@ -136,7 +152,8 @@ Frontend routes (`src/App.jsx`):
 - `/quality` — quality analysis
 - `/score-edit` — admin score editing (password protected)
 - `/word-count` — word count statistics
-- `/history` — saved report history
+- `/history` — saved report history route kept for direct/internal use; hidden from the sidebar menu
+- `/auto-report` — automatic weekly report config for admin and download logs for users
 - `/login-stats` — admin-only successful login statistics
 - `/policy/current`, `/policy/comparison`, `/policy/regions`, `/policy/region-report` — policy comparison workflow
 
@@ -147,12 +164,18 @@ Frontend route visibility is filtered by `src/config/userAccess.js`. `yzgjj` see
 - `server.cjs` — all backend routes and DB logic
 - `services/LLMService.js` — LLM abstraction layer
 - `services/loginAudit.cjs` — JSON-backed successful login audit helpers
+- `services/weeklyReportModelConfig.cjs` — DeepSeek V4 weekly report model config helpers
+- `services/autoReportService.cjs` — automatic weekly report cycle, logging, LLM call, and PDF generation
 - `src/auth/AuthContext.jsx` — frontend session user context
 - `src/config/userAccess.js` — frontend user route and keyword permissions
+- `src/api/autoReport.js` — frontend automatic weekly report API wrapper
+- `src/pages/AutoReportConfig.jsx` — automatic weekly report admin/user page
 - `server/pdf/renderReportPdf.cjs` — Playwright report PDF renderer
 - `server/pdf/renderPolicyComparisonPdf.cjs` — policy comparison PDF renderer
 - `server/pdf/renderRegionPolicyReportPdf.cjs` — region policy PDF renderer
 - `config/llm-config.json` — model endpoints and settings
+- `config/weekly-report-models.json` — weekly report model choices used by manual and automatic reports
+- `config/auto-report-config.json` — automatic weekly report runtime configuration
 - `config/prompts.md` — system/user/modify prompt templates
 - `config/keyword-prompts.json` — keyword-specific prompt overrides
 - `config/region-policy-report-prompts.json` — region policy prompt configs

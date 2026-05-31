@@ -4,6 +4,8 @@ const fs = require('fs');
 const mysql = require('mysql2/promise');
 const cors = require('cors');
 const path = require('path');
+const crypto = require('crypto');
+const cron = require('node-cron');
 const {
   buildReportPdfFilename,
   PdfRendererUnavailableError,
@@ -22,6 +24,13 @@ const {
   getWeeklyReportModel,
   listWeeklyReportModels,
 } = require('./services/weeklyReportModelConfig.cjs');
+const {
+  DEFAULT_AUTO_REPORT_CONFIG,
+  canUserAccessAutoReport,
+  createAutoReportService,
+  normalizeAutoReportConfig,
+  sanitizeAutoReportRecord,
+} = require('./services/autoReportService.cjs');
 const {
   appendLoginAudit,
   readLoginAuditStats,
@@ -53,6 +62,9 @@ const REGION_POLICY_REPORT_KEYWORD = '公积金';
 const REGION_POLICY_REPORT_MODEL = 'deepseek-reasoner';
 const LOGIN_AUDIT_PATH = path.join(__dirname, 'data/login-audit.json');
 const USERS_CONFIG_PATH = path.join(__dirname, 'config/users.json');
+const AUTO_REPORT_CONFIG_PATH = path.join(__dirname, 'config/auto-report-config.json');
+const AUTO_REPORT_PDF_DIR = path.join(__dirname, 'data/auto-report-pdfs');
+const AUTO_REPORT_ROUTE = '/auto-report';
 
 const AVAILABLE_ROUTES = [
   { path: '/summary', label: '每日新闻', group: 'main' },
@@ -62,6 +74,7 @@ const AVAILABLE_ROUTES = [
   { path: '/word-count', label: '字数统计', group: 'main' },
   { path: '/config', label: '周报参数', group: 'main' },
   { path: '/history', label: '历史周报', group: 'main' },
+  { path: AUTO_REPORT_ROUTE, label: '自动周报', group: 'main' },
   { path: '/login-stats', label: '登录统计', group: 'main' },
   { path: '/user-management', label: '用户管理', group: 'main' },
   { path: '/policy/current', label: '现行政策编辑', group: 'policy' },
@@ -87,6 +100,7 @@ const AUTH_USERS = {
       '/word-count',
       '/config',
       '/history',
+      AUTO_REPORT_ROUTE,
       '/login-stats',
       '/user-management',
       '/policy/current',
@@ -107,6 +121,7 @@ const AUTH_USERS = {
       '/analysis',
       '/report',
       '/word-count',
+      AUTO_REPORT_ROUTE,
       '/policy/current',
       '/policy/comparison',
       '/policy/regions',
@@ -139,6 +154,42 @@ function loadJsonFile(filePath, fallbackValue) {
 
 function writeJsonFile(filePath, data) {
   fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+}
+
+function getSessionSecret() {
+  return process.env.KEYDIGEST_SESSION_SECRET || process.env.DB_PASS || process.env.KEYDIGEST_ADMIN_PASSWORD || 'keydigest-local-session';
+}
+
+function signSessionPayload(payload) {
+  return crypto
+    .createHmac('sha256', getSessionSecret())
+    .update(payload)
+    .digest('base64url');
+}
+
+function createSessionToken(username) {
+  const payload = Buffer.from(JSON.stringify({
+    username,
+    issuedAt: new Date().toISOString(),
+  })).toString('base64url');
+  return `${payload}.${signSessionPayload(payload)}`;
+}
+
+function getUserFromRequest(req) {
+  const header = req.get('authorization') || '';
+  const token = header.startsWith('Bearer ') ? header.slice(7) : '';
+  if (!token || !token.includes('.')) return null;
+
+  const [payload, signature] = token.split('.');
+  if (!payload || !signature || signature !== signSessionPayload(payload)) return null;
+
+  try {
+    const parsed = JSON.parse(Buffer.from(payload, 'base64url').toString('utf-8'));
+    const users = loadUsersConfig();
+    return users.find(user => user.username === parsed.username) || null;
+  } catch {
+    return null;
+  }
 }
 
 function loadUsersConfig() {
@@ -174,6 +225,66 @@ function loadUsersConfig() {
 
 function saveUsersConfig(users) {
   writeJsonFile(USERS_CONFIG_PATH, users);
+}
+
+function readAutoReportConfig() {
+  return normalizeAutoReportConfig(loadJsonFile(AUTO_REPORT_CONFIG_PATH, DEFAULT_AUTO_REPORT_CONFIG));
+}
+
+function saveAutoReportConfig(config) {
+  const normalized = normalizeAutoReportConfig(config);
+  writeJsonFile(AUTO_REPORT_CONFIG_PATH, normalized);
+  return normalized;
+}
+
+function resolveAutoReportPdfPath(pdfPath) {
+  const resolvedBase = path.resolve(AUTO_REPORT_PDF_DIR);
+  const resolvedFile = path.resolve(pdfPath || '');
+  if (resolvedFile !== resolvedBase && !resolvedFile.startsWith(`${resolvedBase}${path.sep}`)) {
+    return null;
+  }
+  return resolvedFile;
+}
+
+const autoReportService = createAutoReportService({
+  pool,
+  configPath: AUTO_REPORT_CONFIG_PATH,
+  outputDir: AUTO_REPORT_PDF_DIR,
+  getWeeklyReportModel,
+  buildChatPayload: buildDeepSeekChatPayload,
+  renderPdf: renderReportPdf,
+  buildPdfFilename: buildReportPdfFilename,
+});
+
+let autoReportCronTask = null;
+let autoReportRunning = false;
+let autoReportLastRun = null;
+
+function startAutoReportCron() {
+  if (autoReportCronTask) {
+    autoReportCronTask.stop();
+    autoReportCronTask = null;
+  }
+
+  autoReportCronTask = cron.schedule('0 5 * * 0', async () => {
+    if (autoReportRunning) {
+      console.warn('自动周报任务仍在运行，本次调度跳过');
+      return;
+    }
+    autoReportRunning = true;
+    try {
+      autoReportLastRun = await autoReportService.runAutoReportCycle({ triggerType: 'cron' });
+      console.log('自动周报任务完成:', autoReportLastRun.status);
+    } catch (error) {
+      autoReportLastRun = { status: 'error', error: error.message, runAt: new Date().toISOString() };
+      console.error('自动周报任务失败:', error);
+    } finally {
+      autoReportRunning = false;
+    }
+  }, {
+    scheduled: true,
+    timezone: 'Asia/Shanghai',
+  });
 }
 
 function slugifyPromptId(value = '') {
@@ -242,7 +353,7 @@ app.post('/api/auth/login', (req, res) => {
     console.error('写入登录审计失败:', error);
   }
 
-  res.json({ user: profile });
+  res.json({ user: profile, token: createSessionToken(user.username) });
 });
 
 app.get('/api/auth/login-stats', (req, res) => {
@@ -1276,6 +1387,169 @@ app.get('/api/policy/models', (req, res) => {
   } catch (err) {
     console.error('Get policy models error:', err);
     res.status(500).json({ error: 'Failed to load policy models', details: err.message });
+  }
+});
+
+function requireAdminRequest(req, res) {
+  const user = getUserFromRequest(req);
+  if (!user) {
+    res.status(401).json({ error: '未登录或登录已失效' });
+    return null;
+  }
+  if (user.role !== 'admin') {
+    res.status(403).json({ error: '仅 admin 可操作自动周报配置' });
+    return null;
+  }
+  return user;
+}
+
+app.get('/api/config/auto-report', (req, res) => {
+  if (!requireAdminRequest(req, res)) return;
+  try {
+    res.json(readAutoReportConfig());
+  } catch (error) {
+    console.error('读取自动周报配置失败:', error);
+    res.status(500).json({ error: '读取自动周报配置失败', details: error.message });
+  }
+});
+
+app.post('/api/config/auto-report', (req, res) => {
+  if (!requireAdminRequest(req, res)) return;
+  try {
+    const saved = saveAutoReportConfig(req.body || {});
+    res.json({ success: true, config: saved });
+  } catch (error) {
+    console.error('保存自动周报配置失败:', error);
+    res.status(500).json({ error: '保存自动周报配置失败', details: error.message });
+  }
+});
+
+app.get('/api/auto-report/status', (req, res) => {
+  if (!requireAdminRequest(req, res)) return;
+  try {
+    const config = readAutoReportConfig();
+    res.json({
+      enabled: config.enabled,
+      running: autoReportRunning,
+      schedule: {
+        cron: '0 5 * * 0',
+        timezone: 'Asia/Shanghai',
+        description: '每周日上午 5:00 自动运行',
+      },
+      lastRun: autoReportLastRun,
+    });
+  } catch (error) {
+    res.status(500).json({ error: '读取自动周报状态失败', details: error.message });
+  }
+});
+
+app.post('/api/auto-report/trigger', async (req, res) => {
+  if (!requireAdminRequest(req, res)) return;
+  if (autoReportRunning) {
+    return res.status(409).json({ error: '自动周报任务正在运行' });
+  }
+  autoReportRunning = true;
+  try {
+    const result = await autoReportService.runAutoReportCycle({ triggerType: 'manual' });
+    autoReportLastRun = result;
+    res.json(result);
+  } catch (error) {
+    console.error('手动触发自动周报失败:', error);
+    res.status(500).json({ error: '手动触发自动周报失败', details: error.message });
+  } finally {
+    autoReportRunning = false;
+  }
+});
+
+app.get('/api/auto-report/history', async (req, res) => {
+  const user = getUserFromRequest(req);
+  if (!user) return res.status(401).json({ error: '未登录或登录已失效' });
+
+  try {
+    const { page = 1, limit = 20, keyword = '' } = req.query;
+    const pageNum = Math.max(1, Number.parseInt(page, 10) || 1);
+    const limitNum = Math.min(100, Math.max(1, Number.parseInt(limit, 10) || 20));
+    const conditions = [];
+    const params = [];
+
+    if (keyword) {
+      conditions.push('keyword = ?');
+      params.push(keyword);
+    }
+
+    if (user.role !== 'admin') {
+      const allowedKeywords = Array.isArray(user.keywords) ? user.keywords : [];
+      if (allowedKeywords.length === 0) {
+        return res.json({ data: [], pagination: { page: pageNum, limit: limitNum, total: 0, totalPages: 0 } });
+      }
+      conditions.push(`keyword IN (${allowedKeywords.map(() => '?').join(',')})`);
+      params.push(...allowedKeywords);
+    }
+
+    const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    const [countRows] = await pool.query(`SELECT COUNT(*) AS total FROM auto_report_log ${whereClause}`, params);
+    const total = countRows[0]?.total || 0;
+    const offset = (pageNum - 1) * limitNum;
+    const [rows] = await pool.query(
+      `SELECT id, run_at, trigger_type, week_start, week_end, keyword, status, report_id, news_count, model_used,
+              error_message, duration_ms, pdf_status, pdf_path, pdf_filename, pdf_error_message,
+              model_key, prompt_id, prompt_name, min_score, summary_version, source_word_count, prompt_char_count,
+              created_at
+       FROM auto_report_log
+       ${whereClause}
+       ORDER BY run_at DESC, id DESC
+       LIMIT ? OFFSET ?`,
+      [...params, limitNum, offset]
+    );
+
+    res.json({
+      data: rows.map(sanitizeAutoReportRecord),
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total,
+        totalPages: Math.ceil(total / limitNum),
+      },
+    });
+  } catch (error) {
+    console.error('读取自动周报历史失败:', error);
+    res.status(500).json({ error: '读取自动周报历史失败', details: error.message });
+  }
+});
+
+app.get('/api/auto-report/download/:logId', async (req, res) => {
+  const user = getUserFromRequest(req);
+  if (!user) return res.status(401).json({ error: '未登录或登录已失效' });
+
+  try {
+    const [rows] = await pool.query(
+      `SELECT id, keyword, pdf_status, pdf_path, pdf_filename
+       FROM auto_report_log
+       WHERE id = ?`,
+      [req.params.logId]
+    );
+    const record = rows[0];
+    if (!record) return res.status(404).json({ error: '自动周报记录不存在' });
+    if (!canUserAccessAutoReport(user, record)) {
+      return res.status(403).json({ error: '无权下载该关键词自动周报' });
+    }
+    const resolvedPdfPath = resolveAutoReportPdfPath(record.pdf_path);
+    if (!resolvedPdfPath) {
+      return res.status(403).json({ error: '非法文件路径' });
+    }
+    if (record.pdf_status !== 'success' || !fs.existsSync(resolvedPdfPath)) {
+      return res.status(404).json({ error: 'PDF 文件不存在或尚未生成成功' });
+    }
+
+    const filename = record.pdf_filename || path.basename(resolvedPdfPath);
+    const stat = fs.statSync(resolvedPdfPath);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Length', stat.size);
+    res.setHeader('Content-Disposition', buildAttachmentDisposition(filename));
+    fs.createReadStream(resolvedPdfPath).pipe(res);
+  } catch (error) {
+    console.error('下载自动周报 PDF 失败:', error);
+    res.status(500).json({ error: '下载自动周报 PDF 失败', details: error.message });
   }
 });
 
@@ -4898,4 +5172,12 @@ app.get('*', (req, res) => {
 const port = process.env.API_PORT || 3000;
 app.listen(port, () => {
   console.log(`API server running at http://localhost:${port}`);
+  autoReportService.ensureLogTable()
+    .then(() => {
+      startAutoReportCron();
+      console.log('自动周报调度已注册: Asia/Shanghai 每周日 05:00');
+    })
+    .catch(error => {
+      console.error('初始化自动周报失败:', error);
+    });
 });

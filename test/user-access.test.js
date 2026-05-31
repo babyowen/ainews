@@ -14,6 +14,7 @@ test('admin keeps full access and receives login stats route', () => {
   assert.equal(profile.defaultPath, '/summary');
   assert.equal(getAllowedKeywords('admin').includes('公积金'), true);
   assert.equal(getAllowedRoutes('admin').includes('/config'), true);
+  assert.equal(getAllowedRoutes('admin').includes('/auto-report'), true);
   assert.equal(getAllowedRoutes('admin').includes('/login-stats'), true);
   assert.equal(isRouteAllowed('admin', '/score-edit'), true);
 });
@@ -23,6 +24,7 @@ test('yzgjj is limited to housing fund keyword and selected routes', () => {
   assert.equal(isRouteAllowed('yzgjj', '/summary'), true);
   assert.equal(isRouteAllowed('yzgjj', '/report'), true);
   assert.equal(isRouteAllowed('yzgjj', '/word-count'), true);
+  assert.equal(isRouteAllowed('yzgjj', '/auto-report'), true);
   assert.equal(isRouteAllowed('yzgjj', '/policy/current'), true);
   assert.equal(isRouteAllowed('yzgjj', '/policy/comparison'), true);
   assert.equal(isRouteAllowed('yzgjj', '/policy/regions'), true);
