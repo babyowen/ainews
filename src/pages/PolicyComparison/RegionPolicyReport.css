@@ -348,66 +348,50 @@
   gap: 10px;
 }
 
+.rr-action-stack button {
+  width: 100%;
+}
+
+.rr-flow-number,
+.rr-step-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.rr-flow-number {
+  background: var(--kd-accent);
+  color: #fff;
+}
+
+.rr-generate-btn .rr-step-badge {
+  background: rgba(255, 255, 255, 0.28);
+  color: #fff;
+}
+
+.rr-secondary-btn .rr-step-badge {
+  background: var(--kd-accent);
+  color: #fff;
+}
+
 .rr-workflow-panel {
-  position: sticky;
-  bottom: 16px;
   background: var(--kd-surface);
-  border-color: var(--kd-line);
+  border: 1px solid var(--kd-line);
   box-shadow: var(--kd-shadow);
 }
 
-.rr-workflow-steps {
-  display: grid;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-
-.rr-workflow-step {
-  display: grid;
-  grid-template-columns: 28px 1fr;
-  gap: 10px;
-  align-items: start;
-  padding: 10px 12px;
-  border-radius: var(--kd-radius);
-  background: var(--kd-panel);
-  border: 1px solid var(--kd-line);
-}
-
-.rr-workflow-step.ready {
-  background: var(--kd-accent-soft);
-  border-color: rgba(56, 166, 165, 0.2);
-}
-
-.rr-workflow-step strong {
-  display: block;
-  color: var(--kd-ink);
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.rr-workflow-step p,
 .rr-workflow-hint {
   margin: 4px 0 0;
   color: var(--kd-ink-muted);
   font-size: 12px;
   line-height: 1.5;
-}
-
-.rr-step-index {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 999px;
-  background: var(--kd-ink-soft);
-  color: #fff;
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.rr-workflow-step.ready .rr-step-index {
-  background: var(--kd-accent);
 }
 
 .rr-primary-btn,
@@ -500,11 +484,6 @@
 .rr-danger-btn:disabled {
   opacity: 0.55;
   cursor: not-allowed;
-}
-
-.rr-preview-btn {
-  width: 100%;
-  margin-top: 8px;
 }
 
 .rr-modal-overlay {
