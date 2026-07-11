@@ -675,6 +675,60 @@ const RegionPolicyReport = () => {
             </div>
           </section>
 
+          <section className="rr-panel rr-workflow-panel">
+            <div className="rr-panel-title">
+              <Sparkles size={16} />
+              <span>生成流程</span>
+            </div>
+            <div className="rr-workflow-steps">
+              <div className={`rr-workflow-step ${canPreview ? 'ready' : ''}`}>
+                <span className="rr-step-index">1</span>
+                <div>
+                  <strong>先加载预览</strong>
+                  <p>确认地区、时间和自动过滤结果。</p>
+                </div>
+              </div>
+              <div className={`rr-workflow-step ${previewData ? 'ready' : ''}`}>
+                <span className="rr-step-index">2</span>
+                <div>
+                  <strong>再生成报告</strong>
+                  <p>使用当前 Prompt 与人工勾选结果生成最终报告。</p>
+                </div>
+              </div>
+            </div>
+            <div className="rr-action-stack">
+              <button
+                type="button"
+                className={previewData ? 'rr-secondary-btn' : 'rr-generate-btn'}
+                onClick={handlePreview}
+                disabled={previewLoading}
+              >
+                <span className="rr-step-badge">1</span>
+                {previewLoading ? <Loader2 size={16} className="spin" /> : <RefreshCcw size={16} />}
+                <span>{previewLoading ? '加载预览中...' : (previewData ? '重新加载预览' : '加载新闻预览')}</span>
+              </button>
+              <button
+                type="button"
+                className={previewData ? 'rr-generate-btn' : 'rr-secondary-btn'}
+                onClick={handleGenerate}
+                disabled={!canGenerate}
+              >
+                <span className="rr-step-badge">2</span>
+                {generating ? <Loader2 size={18} className="spin" /> : <Sparkles size={18} />}
+                <span>{generating ? '正在生成地区政策报告...' : '生成地区政策报告'}</span>
+              </button>
+            </div>
+            <p className="rr-workflow-hint">
+              {!previewData
+                ? (canPreview
+                    ? '请先加载新闻预览，确认将纳入分析的新闻。'
+                    : '请先选择日期和地区。')
+                : (effectiveFilteredNewsCount > 0
+                    ? `已加载 ${effectiveFilteredNewsCount} 条可纳入分析的新闻，确认无误后生成报告。`
+                    : '当前筛选条件下没有可纳入分析的新闻，请调整日期或地区后重新加载。')}
+            </p>
+          </section>
+
           <section className="rr-panel">
             <div className="rr-panel-title">
               <MapPinned size={16} />
@@ -751,60 +805,6 @@ const RegionPolicyReport = () => {
               </div>
             </section>
           )}
-
-          <section className="rr-panel rr-workflow-panel">
-            <div className="rr-panel-title">
-              <Sparkles size={16} />
-              <span>生成流程</span>
-            </div>
-            <div className="rr-workflow-steps">
-              <div className={`rr-workflow-step ${canPreview ? 'ready' : ''}`}>
-                <span className="rr-step-index">1</span>
-                <div>
-                  <strong>先加载预览</strong>
-                  <p>确认地区、时间和自动过滤结果。</p>
-                </div>
-              </div>
-              <div className={`rr-workflow-step ${previewData ? 'ready' : ''}`}>
-                <span className="rr-step-index">2</span>
-                <div>
-                  <strong>再生成报告</strong>
-                  <p>使用当前 Prompt 与人工勾选结果生成最终报告。</p>
-                </div>
-              </div>
-            </div>
-            <div className="rr-action-stack">
-              <button
-                type="button"
-                className={previewData ? 'rr-secondary-btn' : 'rr-generate-btn'}
-                onClick={handlePreview}
-                disabled={previewLoading}
-              >
-                <span className="rr-step-badge">1</span>
-                {previewLoading ? <Loader2 size={16} className="spin" /> : <RefreshCcw size={16} />}
-                <span>{previewLoading ? '加载预览中...' : (previewData ? '重新加载预览' : '加载新闻预览')}</span>
-              </button>
-              <button
-                type="button"
-                className={previewData ? 'rr-generate-btn' : 'rr-secondary-btn'}
-                onClick={handleGenerate}
-                disabled={!canGenerate}
-              >
-                <span className="rr-step-badge">2</span>
-                {generating ? <Loader2 size={18} className="spin" /> : <Sparkles size={18} />}
-                <span>{generating ? '正在生成地区政策报告...' : '生成地区政策报告'}</span>
-              </button>
-            </div>
-            <p className="rr-workflow-hint">
-              {!previewData
-                ? (canPreview
-                    ? '请先加载新闻预览，确认将纳入分析的新闻。'
-                    : '请先选择日期和地区。')
-                : (effectiveFilteredNewsCount > 0
-                    ? `已加载 ${effectiveFilteredNewsCount} 条可纳入分析的新闻，确认无误后生成报告。`
-                    : '当前筛选条件下没有可纳入分析的新闻，请调整日期或地区后重新加载。')}
-            </p>
-          </section>
         </aside>
 
         <main className="rr-main">
