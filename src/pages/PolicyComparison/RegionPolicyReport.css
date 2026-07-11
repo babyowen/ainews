@@ -348,11 +348,36 @@
   gap: 10px;
 }
 
+.rr-action-stack button {
+  width: 100%;
+}
+
+.rr-step-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.rr-generate-btn .rr-step-badge {
+  background: rgba(255, 255, 255, 0.28);
+  color: #fff;
+}
+
+.rr-secondary-btn .rr-step-badge {
+  background: var(--kd-accent);
+  color: #fff;
+}
+
 .rr-workflow-panel {
-  position: sticky;
-  bottom: 16px;
   background: var(--kd-surface);
-  border-color: var(--kd-line);
+  border: 1px solid var(--kd-line);
   box-shadow: var(--kd-shadow);
 }
 
@@ -500,11 +525,6 @@
 .rr-danger-btn:disabled {
   opacity: 0.55;
   cursor: not-allowed;
-}
-
-.rr-preview-btn {
-  width: 100%;
-  margin-top: 8px;
 }
 
 .rr-modal-overlay {

@@ -773,23 +773,36 @@ const RegionPolicyReport = () => {
                 </div>
               </div>
             </div>
-            <button
-              type="button"
-              className="rr-generate-btn"
-              onClick={handleGenerate}
-              disabled={!canGenerate}
-            >
-              {generating ? <Loader2 size={18} className="spin" /> : <Sparkles size={18} />}
-              <span>{generating ? '正在生成地区政策报告...' : '生成地区政策报告'}</span>
-            </button>
-            <button type="button" className="rr-secondary-btn rr-preview-btn" onClick={handlePreview} disabled={previewLoading}>
-              {previewLoading ? <Loader2 size={16} className="spin" /> : <RefreshCcw size={16} />}
-              <span>{previewLoading ? '加载预览中...' : '加载新闻预览'}</span>
-            </button>
+            <div className="rr-action-stack">
+              <button
+                type="button"
+                className={previewData ? 'rr-secondary-btn' : 'rr-generate-btn'}
+                onClick={handlePreview}
+                disabled={previewLoading}
+              >
+                <span className="rr-step-badge">1</span>
+                {previewLoading ? <Loader2 size={16} className="spin" /> : <RefreshCcw size={16} />}
+                <span>{previewLoading ? '加载预览中...' : (previewData ? '重新加载预览' : '加载新闻预览')}</span>
+              </button>
+              <button
+                type="button"
+                className={previewData ? 'rr-generate-btn' : 'rr-secondary-btn'}
+                onClick={handleGenerate}
+                disabled={!canGenerate}
+              >
+                <span className="rr-step-badge">2</span>
+                {generating ? <Loader2 size={18} className="spin" /> : <Sparkles size={18} />}
+                <span>{generating ? '正在生成地区政策报告...' : '生成地区政策报告'}</span>
+              </button>
+            </div>
             <p className="rr-workflow-hint">
               {!previewData
-                ? '建议先点击“加载新闻预览”，检查哪些新闻被纳入分析。'
-                : `当前可纳入 ${effectiveFilteredNewsCount} 条新闻，确认无误后点击上方主按钮生成报告。`}
+                ? (canPreview
+                    ? '请先加载新闻预览，确认将纳入分析的新闻。'
+                    : '请先选择日期和地区。')
+                : (effectiveFilteredNewsCount > 0
+                    ? `已加载 ${effectiveFilteredNewsCount} 条可纳入分析的新闻，确认无误后生成报告。`
+                    : '当前筛选条件下没有可纳入分析的新闻，请调整日期或地区后重新加载。')}
             </p>
           </section>
         </aside>
@@ -898,6 +911,7 @@ const RegionPolicyReport = () => {
                   onClick={handleExportPdf}
                   disabled={!canExportPdf}
                 >
+                  <span className="rr-step-badge">3</span>
                   {exporting ? <Loader2 size={16} className="spin" /> : <FileDown size={16} />}
                   <span>{exporting ? '导出中...' : '生成 PDF'}</span>
                 </button>
