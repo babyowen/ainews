@@ -654,7 +654,7 @@ const RegionPolicyReport = () => {
             <div className="rr-panel-title">
               <span className="rr-flow-number">1</span>
               <Calendar size={16} />
-              <span>请筛选</span>
+              <span>请选择起始日期</span>
             </div>
             <div className="rr-date-grid">
               <label>
