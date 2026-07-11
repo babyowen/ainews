@@ -652,12 +652,13 @@ const RegionPolicyReport = () => {
         <aside className="rr-sidebar">
           <section className="rr-panel">
             <div className="rr-panel-title">
+              <span className="rr-flow-number">1</span>
               <Calendar size={16} />
-              <span>筛选条件</span>
+              <span>请筛选</span>
             </div>
             <div className="rr-date-grid">
               <label>
-                <span>开始日期</span>
+                <span>起始日期</span>
                 <input
                   type="date"
                   value={startDate}
@@ -675,26 +676,36 @@ const RegionPolicyReport = () => {
             </div>
           </section>
 
+          <section className="rr-panel">
+            <div className="rr-panel-title">
+              <span className="rr-flow-number">2</span>
+              <MapPinned size={16} />
+              <span>请选择地区</span>
+            </div>
+            <div className="rr-selected-tags">
+              {selectedRegions.length > 0 ? selectedRegions.map((item) => (
+                <button
+                  key={buildSelectionKey(item)}
+                  type="button"
+                  className="rr-tag"
+                  onClick={() => toggleSelection(item)}
+                >
+                  {item.label}
+                </button>
+              )) : <span className="rr-placeholder">请选择地区，可多选</span>}
+            </div>
+            <div className="rr-tree-shell">
+              {renderRegionTree()}
+            </div>
+            <button type="button" className="rr-link-btn" onClick={clearSelections}>
+              清空已选地区
+            </button>
+          </section>
+
           <section className="rr-panel rr-workflow-panel">
             <div className="rr-panel-title">
               <Sparkles size={16} />
               <span>生成流程</span>
-            </div>
-            <div className="rr-workflow-steps">
-              <div className={`rr-workflow-step ${canPreview ? 'ready' : ''}`}>
-                <span className="rr-step-index">1</span>
-                <div>
-                  <strong>先加载预览</strong>
-                  <p>确认地区、时间和自动过滤结果。</p>
-                </div>
-              </div>
-              <div className={`rr-workflow-step ${previewData ? 'ready' : ''}`}>
-                <span className="rr-step-index">2</span>
-                <div>
-                  <strong>再生成报告</strong>
-                  <p>使用当前 Prompt 与人工勾选结果生成最终报告。</p>
-                </div>
-              </div>
             </div>
             <div className="rr-action-stack">
               <button
@@ -703,7 +714,7 @@ const RegionPolicyReport = () => {
                 onClick={handlePreview}
                 disabled={previewLoading}
               >
-                <span className="rr-step-badge">1</span>
+                <span className="rr-step-badge">3</span>
                 {previewLoading ? <Loader2 size={16} className="spin" /> : <RefreshCcw size={16} />}
                 <span>{previewLoading ? '加载预览中...' : (previewData ? '重新加载预览' : '加载新闻预览')}</span>
               </button>
@@ -713,7 +724,7 @@ const RegionPolicyReport = () => {
                 onClick={handleGenerate}
                 disabled={!canGenerate}
               >
-                <span className="rr-step-badge">2</span>
+                <span className="rr-step-badge">4</span>
                 {generating ? <Loader2 size={18} className="spin" /> : <Sparkles size={18} />}
                 <span>{generating ? '正在生成地区政策报告...' : '生成地区政策报告'}</span>
               </button>
@@ -727,31 +738,6 @@ const RegionPolicyReport = () => {
                     ? `已加载 ${effectiveFilteredNewsCount} 条可纳入分析的新闻，确认无误后生成报告。`
                     : '当前筛选条件下没有可纳入分析的新闻，请调整日期或地区后重新加载。')}
             </p>
-          </section>
-
-          <section className="rr-panel">
-            <div className="rr-panel-title">
-              <MapPinned size={16} />
-              <span>地区多选</span>
-            </div>
-            <div className="rr-selected-tags">
-              {selectedRegions.length > 0 ? selectedRegions.map((item) => (
-                <button
-                  key={buildSelectionKey(item)}
-                  type="button"
-                  className="rr-tag"
-                  onClick={() => toggleSelection(item)}
-                >
-                  {item.label}
-                </button>
-              )) : <span className="rr-placeholder">尚未选择地区</span>}
-            </div>
-            <div className="rr-tree-shell">
-              {renderRegionTree()}
-            </div>
-            <button type="button" className="rr-link-btn" onClick={clearSelections}>
-              清空已选地区
-            </button>
           </section>
 
           <section className="rr-panel">
@@ -911,7 +897,7 @@ const RegionPolicyReport = () => {
                   onClick={handleExportPdf}
                   disabled={!canExportPdf}
                 >
-                  <span className="rr-step-badge">3</span>
+                  <span className="rr-step-badge">5</span>
                   {exporting ? <Loader2 size={16} className="spin" /> : <FileDown size={16} />}
                   <span>{exporting ? '导出中...' : '生成 PDF'}</span>
                 </button>
