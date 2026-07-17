@@ -1,10 +1,18 @@
 {
-  "enabled": false,
+  "enabled": true,
   "defaults": {
     "modelKey": "deepseek-v4-flash",
     "promptId": "",
     "minScore": 3,
     "summaryVersion": "short"
   },
-  "keywords": {}
+  "keywords": {
+    "烟草服务银行": {
+      "enabled": true,
+      "modelKey": "",
+      "promptId": "default",
+      "minScore": 4,
+      "summaryVersion": "short"
+    }
+  }
 }
