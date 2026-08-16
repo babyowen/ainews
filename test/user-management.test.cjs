@@ -5,17 +5,31 @@ const path = require('node:path');
 const test = require('node:test');
 
 const USERS_CONFIG_PATH = path.join(__dirname, '..', 'config', 'users.json');
+const RUNTIME_USERS_PATH = path.join(__dirname, '..', 'config', 'runtime', 'users.json');
 const BASE_URL = 'http://127.0.0.1:3456';
 
 let originalConfig;
+let originalRuntimeConfig;
 let serverProc;
 
 function backupConfig() {
   originalConfig = fs.readFileSync(USERS_CONFIG_PATH, 'utf-8');
+  originalRuntimeConfig = fs.existsSync(RUNTIME_USERS_PATH) ? fs.readFileSync(RUNTIME_USERS_PATH, 'utf-8') : null;
 }
 
 function restoreConfig() {
   fs.writeFileSync(USERS_CONFIG_PATH, originalConfig, 'utf-8');
+  if (originalRuntimeConfig === null) {
+    if (fs.existsSync(RUNTIME_USERS_PATH)) fs.unlinkSync(RUNTIME_USERS_PATH);
+  } else {
+    fs.writeFileSync(RUNTIME_USERS_PATH, originalRuntimeConfig, 'utf-8');
+  }
+}
+
+// 生效配置 = config/runtime/users.json（若存在）整文件覆盖 config/users.json
+function readEffectiveUsers() {
+  const filePath = fs.existsSync(RUNTIME_USERS_PATH) ? RUNTIME_USERS_PATH : USERS_CONFIG_PATH;
+  return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
 }
 
 function request(method, urlPath, body) {
@@ -97,8 +111,8 @@ test('POST /api/admin/users creates a new user', async () => {
   assert.equal(res.body.success, true);
   assert.equal(res.body.user.username, 'autotest');
   assert.equal(res.body.user.password, '');
-  // 验证已写入配置
-  const config = JSON.parse(fs.readFileSync(USERS_CONFIG_PATH, 'utf-8'));
+  // 验证已写入生效配置（运行时层）
+  const config = readEffectiveUsers();
   const created = config.find(u => u.username === 'autotest');
   assert.ok(created);
   assert.deepEqual(created.keywords, ['公积金']);
@@ -161,8 +175,8 @@ test('DELETE /api/admin/users/:username deletes a non-admin user', async () => {
   const res = await request('DELETE', '/api/admin/users/autotest');
   assert.equal(res.status, 200);
   assert.equal(res.body.success, true);
-  // 确认已从配置中移除
-  const config = JSON.parse(fs.readFileSync(USERS_CONFIG_PATH, 'utf-8'));
+  // 确认已从生效配置中移除
+  const config = readEffectiveUsers();
   assert.ok(!config.find(u => u.username === 'autotest'));
 });
 

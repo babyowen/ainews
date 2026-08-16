@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { extractSection: sharedExtractSection } = require('./promptStore.cjs');
 
 const DEFAULT_AUTO_REPORT_CONFIG = {
   enabled: false,
@@ -98,9 +99,9 @@ function getAutoReportWeekRange(referenceDate = new Date(), timeZone = 'Asia/Sha
 }
 
 function extractPromptSection(content, title) {
-  const regex = new RegExp(`## ${title}\\s*\\n\\s*\`\`\`\\s*\\n([\\s\\S]*?)\\n\\s*\`\`\``, 'i');
-  const match = content.match(regex);
-  return match ? match[1].trim() : '';
+  // 复用 promptStore 的统一解析实现（与全项目其他解析点保持一致）
+  const value = sharedExtractSection(content, title);
+  return value === null ? '' : value.trim();
 }
 
 function loadPromptPair({ keyword, promptId, promptConfigPath, fallbackPromptsPath }) {
@@ -206,6 +207,8 @@ function createAutoReportService(options) {
     pool,
     config,
     configPath,
+    loadConfig,
+    promptStore,
     promptConfigPath = path.join(__dirname, '../config/keyword-prompts.json'),
     fallbackPromptsPath = path.join(__dirname, '../config/prompts.md'),
     outputDir = path.join(__dirname, '../data/auto-report-pdfs'),
@@ -220,9 +223,36 @@ function createAutoReportService(options) {
   if (!pool) throw new Error('pool is required');
 
   function readConfig() {
+    if (typeof loadConfig === 'function') return buildAutoReportConfig(loadConfig());
     if (config) return buildAutoReportConfig(config);
     if (!configPath || !fs.existsSync(configPath)) return buildAutoReportConfig(null);
     return buildAutoReportConfig(JSON.parse(fs.readFileSync(configPath, 'utf-8')));
+  }
+
+  // 优先走 promptStore（默认层+运行时层合并后的生效配置）；未注入时退回旧的文件路径模式（测试兼容）
+  function resolvePromptPair(keyword, promptId) {
+    if (promptStore) {
+      const selected = promptStore.findKeywordPrompt(keyword, promptId);
+      if (selected?.systemPrompt && selected?.userPrompt) {
+        return {
+          promptId: selected.id,
+          promptName: selected.name || selected.id,
+          systemPrompt: selected.systemPrompt,
+          userPromptTemplate: selected.userPrompt,
+        };
+      }
+      const weekly = promptStore.getWeeklyPrompts();
+      if (!weekly.systemPrompt || !weekly.userPrompt) {
+        throw new Error('Fallback prompt file is not readable');
+      }
+      return {
+        promptId: '',
+        promptName: '默认 Prompt',
+        systemPrompt: weekly.systemPrompt,
+        userPromptTemplate: weekly.userPrompt,
+      };
+    }
+    return loadPromptPair({ keyword, promptId, promptConfigPath, fallbackPromptsPath });
   }
 
   async function ensureLogTable() {
@@ -371,7 +401,7 @@ function createAutoReportService(options) {
     }
 
     const modelConfig = getWeeklyReportModel(modelKey);
-    const promptPair = loadPromptPair({ keyword, promptId, promptConfigPath, fallbackPromptsPath });
+    const promptPair = resolvePromptPair(keyword, promptId);
     const userPrompt = buildFinalUserPrompt({
       template: promptPair.userPromptTemplate,
       keyword,
