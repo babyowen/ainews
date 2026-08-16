@@ -25,21 +25,25 @@ STAMP="$(date +%Y%m%d-%H%M%S)"
 OUT="release-keydigest-${STAMP}.tar.gz"
 TMP="${OUT}.building"
 
-# 准备 config-baseline：默认层的干净副本（不含 runtime / 备份 / .DS_Store）
+# 准备 config-baseline：默认层的干净副本（不含 runtime / 备份 / .DS_Store / 运行时政策快照）
 STAGING="$(mktemp -d)"
 trap 'rm -rf "$STAGING"' EXIT
 cp -R config "$STAGING/config-baseline"
 rm -rf "$STAGING/config-baseline/runtime"
 find "$STAGING/config-baseline" -name '*.DS_Store' -delete
 rm -f "$STAGING/config-baseline/"*备份* "$STAGING/config-baseline/"*_备份*
+rm -f "$STAGING/config-baseline/policies/"policy_2*
 
 echo "==> 打包 ${OUT}（临时文件 ${TMP}，校验通过后改名）"
 # 注意：bsdtar/GNU tar 的 --exclude 必须放在文件列表之前，否则会被当作文件名（macOS bsdtar 实测）
+# config/policies/policy_2*.json 为运行时生成的政策快照（/api/policy/save 写入，
+# 且读取按 mtime 选最新），打进包会在解压时刷新 mtime、干扰生产最新版选择——排除。
 tar -czf "$TMP" \
   --exclude='config/runtime' \
   --exclude='config/*备份*' \
   --exclude='config/*_备份*' \
   --exclude='config/.DS_Store' \
+  --exclude='config/policies/policy_2*' \
   -C "$STAGING" config-baseline \
   -C "$PWD" \
   server.cjs \
@@ -56,6 +60,11 @@ tar -czf "$TMP" \
 echo "==> 校验包内容"
 if tar -tzf "$TMP" | grep -q '^config/runtime'; then
   echo "❌ 校验失败：包内包含 config/runtime，禁止发布" >&2
+  rm -f "$TMP"
+  exit 1
+fi
+if tar -tzf "$TMP" | grep -q '^config/policies/policy_2'; then
+  echo "❌ 校验失败：包内包含运行时政策快照 config/policies/policy_2*，禁止发布" >&2
   rm -f "$TMP"
   exit 1
 fi

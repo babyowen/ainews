@@ -191,6 +191,8 @@ const ReportConfig = () => {
         }
         setSelectedKeyword(body.keyword);
         fetchKeywordConfig();
+        // 保存返回值不含 source 字段，重拉当前关键词列表避免「已自定义」徽标丢失/状态过期
+        setVersionsTick((t) => t + 1);
       }
     } finally {
       setSaving(false);
@@ -368,6 +370,7 @@ const ReportConfig = () => {
       fetchKeywordConfig();
       fetchRegionPromptConfig();
       fetchConfigData();
+      setVersionsTick((t) => t + 1);
     } catch (e) {
       setRuntimeMessage('导入失败: ' + e.message);
     } finally {
@@ -393,6 +396,7 @@ const ReportConfig = () => {
       fetchKeywordConfig();
       fetchRegionPromptConfig();
       fetchConfigData();
+      setVersionsTick((t) => t + 1);
     } catch (e) {
       setRuntimeMessage('恢复默认失败: ' + e.message);
     } finally {

@@ -1,6 +1,8 @@
 // 一次性冒烟验证（issue #22）：真实拉起 server，验证双层存储核心行为
+// 非破坏性：若本地已存在 config/runtime/，会先备份、结束后原样恢复
 import { spawn } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -9,6 +11,7 @@ const ROOT = path.join(__dirname, '..');
 const BASE = 'http://127.0.0.1:3457';
 const KEYWORD_FILE = path.join(ROOT, 'config/keyword-prompts.json');
 const RUNTIME_DIR = path.join(ROOT, 'config/runtime');
+const RUNTIME_BACKUP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'smoke-runtime-backup-'));
 
 const results = [];
 const check = (name, ok, detail = '') => {
@@ -31,6 +34,14 @@ async function api(method, urlPath, body, token) {
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// 备份本地已有 runtime 层（冒烟会创建/删除 runtime 文件，必须可完整还原）
+let hadRuntimeBefore = false;
+if (fs.existsSync(RUNTIME_DIR)) {
+  hadRuntimeBefore = true;
+  fs.cpSync(RUNTIME_DIR, RUNTIME_BACKUP_DIR, { recursive: true });
+  console.log('ℹ️ 检测到本地 config/runtime/，已备份，冒烟结束后恢复');
+}
 
 process.env.API_PORT = '3457';
 const server = spawn(process.execPath, [path.join(ROOT, 'server.cjs')], {
@@ -132,12 +143,13 @@ try {
   check('GET /api/llm/models 可用（模块 bug 已修）', models.status === 200 && Array.isArray(models.data));
 } finally {
   server.kill('SIGKILL');
-  // 清理冒烟可能残留的 runtime 目录（本次冒烟已 reset，正常应为空）
-  if (fs.existsSync(RUNTIME_DIR)) {
-    const leftover = fs.readdirSync(RUNTIME_DIR).filter((f) => f !== '.DS_Store');
-    if (leftover.length === 0) fs.rmSync(RUNTIME_DIR, { recursive: true });
-    else console.log('⚠️ runtime 目录有残留文件（人工检查）:', leftover.join(', '));
+  // 还原本地 runtime 层到冒烟前状态
+  fs.rmSync(RUNTIME_DIR, { recursive: true, force: true });
+  if (hadRuntimeBefore) {
+    fs.cpSync(RUNTIME_BACKUP_DIR, RUNTIME_DIR, { recursive: true });
+    console.log('ℹ️ 已恢复冒烟前的本地 config/runtime/');
   }
+  fs.rmSync(RUNTIME_BACKUP_DIR, { recursive: true, force: true });
 }
 
 const failed = results.filter((r) => !r.ok);

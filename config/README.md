@@ -10,6 +10,7 @@
 | `region-policy-report-prompts.json` | 地区政策报告模板 | 同上 |
 | `auto-report-config.json` / `llm-config.json` / `users.json` | 运行时可变配置 | 字段级/整文件与默认层合并 |
 | `weekly-report-models.json` | 周报/政策/改稿模型端点（含 deepseek-reasoner） | 仅随代码更新 |
+| `policies/` | 政策知识库与版本快照：`policy_<时间戳>.json` 由 `/api/policy/save` 运行时写入（按 mtime 选最新，**部署包已排除**，不在双层体系内） | 运行时累积 |
 | `runtime/` | **运行时层**：生产端经管理界面保存的自定义（gitignore，部署永不覆盖） | 自动维护 |
 
 - 读取 = 默认层 + 运行时层合并；保存只写 `runtime/`（仅存与默认层的差异）。
