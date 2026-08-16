@@ -1,10 +1,46 @@
 {
-  "enabled": false,
+  "enabled": true,
   "defaults": {
     "modelKey": "deepseek-v4-flash",
     "promptId": "",
     "minScore": 3,
     "summaryVersion": "short"
   },
-  "keywords": {}
+  "keywords": {
+    "养老": {
+      "enabled": true,
+      "modelKey": "deepseek-v4-pro",
+      "promptId": "prompt-1760599514629",
+      "minScore": 4,
+      "summaryVersion": "short"
+    },
+    "公积金": {
+      "enabled": true,
+      "modelKey": "deepseek-v4-pro",
+      "promptId": "prompt-1760599287921",
+      "minScore": 4,
+      "summaryVersion": "short"
+    },
+    "数字政务": {
+      "enabled": true,
+      "modelKey": "deepseek-v4-pro",
+      "promptId": "prompt-1760599706160",
+      "minScore": 4,
+      "summaryVersion": "short"
+    },
+    "政府基金": {
+      "enabled": true,
+      "modelKey": "deepseek-v4-pro",
+      "promptId": "prompt-1760598932288",
+      "minScore": 4,
+      "summaryVersion": "short"
+    },
+    "中国烟草": {
+      "enabled": true,
+      "modelKey": "deepseek-v4-pro",
+      "promptId": "启动v1-202511151621",
+      "minScore": 4,
+      "summaryVersion": "short"
+    }
+  }
 }
