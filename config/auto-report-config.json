@@ -41,6 +41,13 @@
       "promptId": "启动v1-202511151621",
       "minScore": 4,
       "summaryVersion": "short"
+    },
+    "烟草服务银行": {
+      "enabled": true,
+      "modelKey": "",
+      "promptId": "default",
+      "minScore": 4,
+      "summaryVersion": "short"
     }
   }
 }
