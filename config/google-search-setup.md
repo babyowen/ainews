@@ -70,7 +70,7 @@ GOOGLE_SEARCH_ENGINE_ID=your_custom_search_engine_id_here
 
 ```bash
 # 在项目根目录运行
-node config/test-google-api.js
+node config/check-google-api.js
 ```
 
 该脚本会：

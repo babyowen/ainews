@@ -5,7 +5,7 @@
  * 
  * 使用方法:
  * 1. 确保项目根目录有.env文件，包含GOOGLE_API_KEY和GOOGLE_SEARCH_ENGINE_ID
- * 2. 在项目根目录运行: node config/test-google-api.js
+ * 2. 在项目根目录运行: node config/check-google-api.js
  */
 
 require('dotenv').config();

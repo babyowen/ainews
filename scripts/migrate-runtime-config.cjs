@@ -45,7 +45,7 @@ const stripVolatile = (entry) => {
 };
 
 function parseArgs(argv) {
-  const args = { from: '', baseline: '', dryRun: false, force: false };
+  const args = { from: '', baseline: '', noBaseline: false, dryRun: false, force: false };
   for (let i = 2; i < argv.length; i += 1) {
     if (argv[i] === '--from') {
       args.from = argv[i + 1] || '';
@@ -53,6 +53,8 @@ function parseArgs(argv) {
     } else if (argv[i] === '--baseline') {
       args.baseline = argv[i + 1] || '';
       i += 1;
+    } else if (argv[i] === '--no-baseline') {
+      args.noBaseline = true;
     } else if (argv[i] === '--dry-run') {
       args.dryRun = true;
     } else if (argv[i] === '--force') {
@@ -178,6 +180,112 @@ function threeWayShallow({ snapshot, baseline, newDefault, deepKeys }) {
   return Object.keys(out).length ? out : null;
 }
 
+// ---------- 基线发现 ----------
+// 基线必须是「生产当前正在运行的版本的出厂默认层」。
+// 部署包自带 config-baseline-<版本标识>/（= 本包默认层快照）与 RELEASE_VERSION（= 本包标识）。
+// 迁移时排除与本包标识相同的基线目录（那是自身快照，不是旧基线），
+// 剩余目录中最新一个即「上一版基线」——目录名含唯一标识，解压永远不会覆盖旧基线。
+
+const MANAGED_NAMES = Object.keys(MANAGED_FILES);
+
+function readOptionalText(filePath) {
+  try {
+    return fs.readFileSync(filePath, 'utf-8');
+  } catch {
+    return undefined;
+  }
+}
+
+// 规范化比较：JSON 按键序深比较，文本按 trim 比较
+function managedContentEqual(textA, textB, name) {
+  if (textA === undefined && textB === undefined) return true;
+  if (textA === undefined || textB === undefined) return false;
+  if (MANAGED_FILES[name].type !== 'json') return textA.trim() === textB.trim();
+  let a;
+  let b;
+  try {
+    a = JSON.parse(textA);
+    b = JSON.parse(textB);
+  } catch {
+    return textA.trim() === textB.trim();
+  }
+  const canonical = (value) => {
+    if (Array.isArray(value)) return JSON.stringify(value.map(canonical));
+    if (value && typeof value === 'object') {
+      return JSON.stringify(
+        Object.keys(value)
+          .sort()
+          .reduce((acc, key) => ({ ...acc, [key]: canonical(value[key]) }), {})
+      );
+    }
+    return JSON.stringify(value ?? null);
+  };
+  return canonical(a) === canonical(b);
+}
+
+// 兜底识别：候选基线的全部受管文件与当前默认层完全一致 → 是自身快照而非旧基线
+function isSelfSnapshot(baselineDir, configDir) {
+  return MANAGED_NAMES.every((name) =>
+    managedContentEqual(readOptionalText(path.join(baselineDir, name)), readOptionalText(path.join(configDir, name)), name)
+  );
+}
+
+function resolveBaseline({ projectRoot, configDir, explicit, noBaseline }) {
+  if (explicit) {
+    const dir = path.resolve(explicit);
+    if (!fs.existsSync(dir)) throw new Error(`--baseline 目录不存在: ${dir}`);
+    if (isSelfSnapshot(dir, configDir)) {
+      return {
+        dir: null,
+        reason: `指定的基线 ${explicit} 与当前默认层内容完全一致（疑似新包自身快照而非旧基线），已拒绝使用`,
+      };
+    }
+    return { dir, reason: `使用显式指定的基线 ${explicit}` };
+  }
+  if (noBaseline) {
+    return { dir: null, reason: '已通过 --no-baseline 显式禁用基线' };
+  }
+
+  const releaseId = (readOptionalText(path.join(projectRoot, 'RELEASE_VERSION')) || '').trim() || null;
+  let candidates = [];
+  try {
+    candidates = fs
+      .readdirSync(projectRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && /^config-baseline(-.+)?$/.test(entry.name))
+      .map((entry) => {
+        const full = path.join(projectRoot, entry.name);
+        const id = entry.name === 'config-baseline' ? null : entry.name.slice('config-baseline-'.length);
+        return { dir: full, name: entry.name, id, mtime: fs.statSync(full).mtimeMs };
+      });
+  } catch {
+    candidates = [];
+  }
+
+  const usable = candidates.filter((c) => !(releaseId && c.id === releaseId));
+  if (!usable.length) {
+    return {
+      dir: null,
+      reason: releaseId
+        ? `服务器上没有「当前版本(${releaseId})之外」的基线目录——首次迁移或旧基线缺失`
+        : '未找到 RELEASE_VERSION 与任何旧基线目录——首次迁移',
+    };
+  }
+
+  usable.sort((a, b) => b.mtime - a.mtime);
+  const chosen = usable[0];
+  if (isSelfSnapshot(chosen.dir, configDir)) {
+    return {
+      dir: null,
+      reason: `候选基线 ${chosen.name} 与当前默认层内容完全一致（是新包自带快照而非旧基线），已拒绝使用`,
+    };
+  }
+  const skipped = candidates.length - usable.length;
+  return {
+    dir: chosen.dir,
+    reason: `自动拾取基线 ${chosen.name}${releaseId ? `（当前版本 ${releaseId} 的自带快照已排除${skipped ? `，共排除 ${skipped} 个` : ''}）` : ''}`,
+  };
+}
+
 // ---------- 主流程 ----------
 
 function migrateRuntimeConfig({ configDir, fromDir, baselineDir, dryRun = false, force = false }) {
@@ -195,7 +303,7 @@ function migrateRuntimeConfig({ configDir, fromDir, baselineDir, dryRun = false,
     results.push({
       name: '(模式)',
       action: 'warning',
-      reason: '未提供 --baseline（旧默认层目录），降级为两方比较且不写墓碑：新版新增条目不会误删，但未修改条目会被旧版本固定',
+      reason: '未获得有效基线（旧默认层），降级为两方比较且不写墓碑：新版新增条目不会误删，但未修改条目会被旧版本固定',
     });
   }
 
@@ -300,7 +408,7 @@ function hasErrors(results) {
 function main() {
   const args = parseArgs(process.argv);
   if (!args.from) {
-    console.error('用法: node scripts/migrate-runtime-config.cjs --from <生产配置快照目录> [--baseline <旧默认层目录>] [--dry-run] [--force]');
+    console.error('用法: node scripts/migrate-runtime-config.cjs --from <生产配置快照目录> [--baseline <旧默认层目录>] [--no-baseline] [--dry-run] [--force]');
     process.exit(1);
   }
   const fromDir = path.resolve(args.from);
@@ -309,14 +417,19 @@ function main() {
     process.exit(1);
   }
 
-  const configDir = path.join(__dirname, '..', 'config');
-  // baseline 默认取上次部署包自带的 config-baseline/（与项目根同级解压后的位置）
-  const defaultBaseline = path.join(__dirname, '..', 'config-baseline');
-  const baselineDir = args.baseline ? path.resolve(args.baseline) : fs.existsSync(defaultBaseline) ? defaultBaseline : null;
+  const projectRoot = path.join(__dirname, '..');
+  const configDir = path.join(projectRoot, 'config');
+  const { dir: baselineDir, reason: baselineReason } = resolveBaseline({
+    projectRoot,
+    configDir,
+    explicit: args.baseline,
+    noBaseline: args.noBaseline,
+  });
 
   const results = migrateRuntimeConfig({ configDir, fromDir, baselineDir, dryRun: args.dryRun, force: args.force });
 
   console.log(args.dryRun ? '== DRY RUN：仅预览，不写入 ==' : '== 迁移执行 ==');
+  console.log(`🔍 基线：${baselineDir ? baselineReason : `无（${baselineReason}）→ 降级为两方比较且不写墓碑`}`);
   for (const r of results) {
     const tag = {
       written: '✅ 已写入运行时层',
@@ -342,4 +455,12 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { migrateRuntimeConfig, hasErrors, threeWayIdList, threeWayShallow, parseArgs };
+module.exports = {
+  migrateRuntimeConfig,
+  hasErrors,
+  threeWayIdList,
+  threeWayShallow,
+  parseArgs,
+  resolveBaseline,
+  isSelfSnapshot,
+};

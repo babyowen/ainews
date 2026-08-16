@@ -6,7 +6,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const { migrateRuntimeConfig, hasErrors } = require('../scripts/migrate-runtime-config.cjs');
+const { migrateRuntimeConfig, hasErrors, resolveBaseline } = require('../scripts/migrate-runtime-config.cjs');
 const { createConfigStore } = require('../services/configStore.cjs');
 
 function mkdtemp(prefix) {
@@ -117,7 +117,7 @@ test('migrate 无 baseline 降级：不写墓碑（不误杀新版新增条目�
   const { configDir, fromDir } = buildScenario();
   const results = migrateRuntimeConfig({ configDir, fromDir }); // 不传 baselineDir
 
-  assert.ok(results.some((r) => r.action === 'warning' && /baseline/.test(r.reason)));
+  assert.ok(results.some((r) => r.action === 'warning' && /基线/.test(r.reason)));
   assert.equal(hasErrors(results), false);
 
   const store = createConfigStore({ configDir });
@@ -153,4 +153,107 @@ test('migrate 防覆盖保护与 dry-run', () => {
   // --force 重写
   const forced = migrateRuntimeConfig({ configDir, fromDir, baselineDir, force: true });
   assert.equal(forced.find((r) => r.name === 'keyword-prompts.json').action, 'written');
+});
+
+// ===== 基线发现机制（第三轮 review 的 P1：包自带 baseline 不能当旧基线用）=====
+
+function buildBaselineScenario() {
+  const projectRoot = mkdtemp('migrate-root-');
+  const configDir = path.join(projectRoot, 'config');
+  fs.mkdirSync(configDir, { recursive: true });
+
+  const oldDefault = { keywords: { 养老: { prompts: [{ id: 'default', name: '默认', description: 'd', systemPrompt: '旧默认', userPrompt: 'u', isDefault: true, updatedAt: '2025-01-01T00:00:00.000Z' }] } }, metadata: { version: '1.0.0' } };
+  const newDefault = { ...oldDefault, keywords: { ...oldDefault.keywords, 烟草服务银行: { prompts: [{ id: 'default', name: '烟草', description: 'd', systemPrompt: '新关键词', userPrompt: 'u', isDefault: true, updatedAt: '2026-07-17T00:00:00.000Z' }] } } };
+
+  fs.writeFileSync(path.join(configDir, 'keyword-prompts.json'), JSON.stringify(newDefault));
+
+  // 旧基线目录（上一版默认层）与新包自带快照（= 当前默认层）
+  const oldBaseDir = path.join(projectRoot, 'config-baseline-oldsha-20260601');
+  const selfBaseDir = path.join(projectRoot, 'config-baseline-newsha-20260816');
+  fs.mkdirSync(oldBaseDir, { recursive: true });
+  fs.mkdirSync(selfBaseDir, { recursive: true });
+  fs.writeFileSync(path.join(oldBaseDir, 'keyword-prompts.json'), JSON.stringify(oldDefault));
+  fs.writeFileSync(path.join(selfBaseDir, 'keyword-prompts.json'), JSON.stringify(newDefault));
+  fs.writeFileSync(path.join(projectRoot, 'RELEASE_VERSION'), 'newsha-20260816\n');
+
+  // 控制 mtime：旧基线更早，自建场景里即使顺序写入也要稳定
+  const past = new Date(Date.now() - 86400000);
+  fs.utimesSync(oldBaseDir, past, past);
+  fs.utimesSync(selfBaseDir, new Date(), new Date());
+
+  return { projectRoot, configDir, oldDefault, newDefault, oldBaseDir, selfBaseDir };
+}
+
+test('基线发现：排除本包自带快照，自动拾取上一版基线', () => {
+  const { projectRoot, configDir, oldBaseDir } = buildBaselineScenario();
+  const resolved = resolveBaseline({ projectRoot, configDir, explicit: '', noBaseline: false });
+  assert.equal(resolved.dir, oldBaseDir);
+  assert.match(resolved.reason, /newsha-20260816/);
+});
+
+test('基线发现：仅有本包自带快照（首次迁移）→ 拒用并降级，不误当旧基线', () => {
+  const { projectRoot, configDir, selfBaseDir } = buildBaselineScenario();
+  fs.rmSync(path.join(projectRoot, 'config-baseline-oldsha-20260601'), { recursive: true });
+  // 场景 A：靠 RELEASE_VERSION 排除自身快照
+  const resolvedA = resolveBaseline({ projectRoot, configDir, explicit: '', noBaseline: false });
+  assert.equal(resolvedA.dir, null);
+  assert.match(resolvedA.reason, /首次迁移|自身快照|之外/);
+
+  // 场景 B：即使没有 RELEASE_VERSION（旧包），内容级兜底也要识别自身快照
+  fs.rmSync(path.join(projectRoot, 'RELEASE_VERSION'));
+  fs.mkdirSync(path.join(projectRoot, 'config-baseline-oldsha-20260601'), { recursive: true }); // 恢复旧基线供对照
+  const resolvedB = resolveBaseline({ projectRoot, configDir, explicit: '', noBaseline: false });
+  // 剩两个目录且无 RELEASE_VERSION：若最新的是自身快照，内容兜底应拒用并回退到更旧的真基线或 null
+  assert.ok(resolvedB.dir === null || resolvedB.dir === path.join(projectRoot, 'config-baseline-oldsha-20260601'));
+});
+
+test('基线发现：显式指定的基线若是自身快照 → 拒绝使用', () => {
+  const { projectRoot, configDir, selfBaseDir } = buildBaselineScenario();
+  const resolved = resolveBaseline({ projectRoot, configDir, explicit: selfBaseDir, noBaseline: false });
+  assert.equal(resolved.dir, null);
+  assert.match(resolved.reason, /完全一致/);
+});
+
+test('端到端：仅剩本包自带快照时迁移不产生墓碑，新版新增关键词正常出现（AI1 场景）', () => {
+  const { projectRoot, configDir, oldDefault, newDefault, selfBaseDir } = buildBaselineScenario();
+  fs.rmSync(path.join(projectRoot, 'config-baseline-oldsha-20260601'), { recursive: true });
+
+  // 生产快照 = 旧默认 + 一条手改 prompt（不含新版新增的烟草服务银行）
+  const snapshot = JSON.parse(JSON.stringify(oldDefault));
+  snapshot.keywords.养老.prompts[0].systemPrompt = '生产手改';
+  const fromDir = mkdtemp('migrate-e2e-');
+  fs.writeFileSync(path.join(fromDir, 'keyword-prompts.json'), JSON.stringify(snapshot));
+
+  const { dir: baselineDir } = resolveBaseline({ projectRoot, configDir, explicit: '', noBaseline: false });
+  assert.equal(baselineDir, null, '自带快照不得被当作基线');
+
+  const results = migrateRuntimeConfig({ configDir, fromDir, baselineDir });
+  assert.equal(hasErrors(results), false);
+  const effective = createConfigStore({ configDir }).readEffectiveJson('keyword-prompts.json');
+
+  // 新版新增关键词必须可见（不得被墓碑）
+  assert.ok(effective.keywords.烟草服务银行, '烟草服务银行必须出现');
+  // 生产手改必须保留
+  assert.equal(effective.keywords.养老.prompts[0].systemPrompt, '生产手改');
+  const runtimeRaw = JSON.parse(fs.readFileSync(path.join(configDir, 'runtime', 'keyword-prompts.json'), 'utf-8'));
+  assert.deepEqual(runtimeRaw.metadata.deletedIds || [], []);
+});
+
+test('端到端：有正确旧基线时，三方比较完整生效（生产 lag 多版本同理）', () => {
+  const { projectRoot, configDir, oldDefault, oldBaseDir } = buildBaselineScenario();
+
+  const snapshot = JSON.parse(JSON.stringify(oldDefault));
+  snapshot.keywords.养老.prompts[0].systemPrompt = '生产手改';
+  const fromDir = mkdtemp('migrate-e2e2-');
+  fs.writeFileSync(path.join(fromDir, 'keyword-prompts.json'), JSON.stringify(snapshot));
+
+  const { dir: baselineDir } = resolveBaseline({ projectRoot, configDir, explicit: '', noBaseline: false });
+  assert.equal(baselineDir, oldBaseDir);
+
+  const results = migrateRuntimeConfig({ configDir, fromDir, baselineDir });
+  assert.equal(hasErrors(results), false);
+  const effective = createConfigStore({ configDir }).readEffectiveJson('keyword-prompts.json');
+  assert.ok(effective.keywords.烟草服务银行, '新版新增关键词出现');
+  assert.equal(effective.keywords.养老.prompts[0].systemPrompt, '生产手改', '生产手改保留');
+  assert.equal(effective.keywords.养老.prompts[0].source, 'runtime');
 });

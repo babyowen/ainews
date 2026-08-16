@@ -40,8 +40,8 @@ npm run pdf:install-browser
 # Focused automatic weekly report tests
 node --test test/auto-report-service.test.cjs
 
-# Backend test suite (config dual-layer store, prompt store, migration, etc.)
-node --test test/config-store.test.cjs test/prompt-store.test.cjs test/migrate-runtime-config.test.cjs
+# Full backend test suite (config dual-layer store, prompt store, migration, etc.)
+npm test   # = node --test test/（根目录裸跑 node --test 亦可，历史遗留的 config/test-*.js 已改名避免误识别）
 
 # Build a production release tarball (excludes config/runtime/, see docs/deployment.md)
 bash scripts/pack-release.sh
