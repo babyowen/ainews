@@ -28,6 +28,16 @@
       },
       "reasoning_effort": "high",
       "description": "1M上下文，质量优先，适合复杂周报分析"
+    },
+    "deepseek-reasoner": {
+      "label": "DeepSeek Reasoner (R1)",
+      "provider": "deepseek",
+      "model": "deepseek-reasoner",
+      "apiKey": "DEEPSEEK_API_KEY",
+      "endpoint": "https://api.deepseek.com/chat/completions",
+      "contextWindow": 64000,
+      "maxOutputTokens": 8192,
+      "description": "原 modify-report / 地区政策报告默认模型，模型与端点原为代码硬编码，现收进配置"
     }
   }
 }

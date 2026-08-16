@@ -72,7 +72,7 @@ function buildAttachmentDisposition(filename) {
 }
 
 const REGION_POLICY_REPORT_KEYWORD = '公积金';
-const REGION_POLICY_REPORT_MODEL_KEY = 'deepseek-reasoner';
+const LEGACY_DEEPSEEK_MODEL_KEY = 'deepseek-reasoner';
 const LOGIN_AUDIT_PATH = path.join(__dirname, 'data/login-audit.json');
 const AUTO_REPORT_PDF_DIR = path.join(__dirname, 'data/auto-report-pdfs');
 const AUTO_REPORT_ROUTE = '/auto-report';
@@ -1098,16 +1098,17 @@ app.post('/api/modify-report', async (req, res) => {
       res.write(`data: ${JSON.stringify({ type: 'status', message: '🔗 正在连接DeepSeek R1...' })}\n\n`);
       console.log('DeepSeek API Request - Token estimate:', estimateTokens(totalContent));
 
-      // 调用DeepSeek API with stream
+      // 调用DeepSeek API with stream（模型与端点来自配置，不再硬编码）
       console.log('Calling DeepSeek API...');
-      const response = await fetch('https://api.deepseek.com/chat/completions', {
+      const modifyModelConfig = getWeeklyReportModel(LEGACY_DEEPSEEK_MODEL_KEY);
+      const response = await fetch(modifyModelConfig.endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}`
+          'Authorization': `Bearer ${process.env[modifyModelConfig.apiKey]}`
         },
         body: JSON.stringify({
-          model: 'deepseek-reasoner',
+          model: modifyModelConfig.model,
           messages: [
             {
               role: 'system',
@@ -1170,14 +1171,15 @@ app.post('/api/modify-report', async (req, res) => {
       }
     } else {
       // 非流式模式，保持原有逻辑
-      const response = await fetch('https://api.deepseek.com/chat/completions', {
+      const modifyModelConfig = getWeeklyReportModel(LEGACY_DEEPSEEK_MODEL_KEY);
+      const response = await fetch(modifyModelConfig.endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}`
+          'Authorization': `Bearer ${process.env[modifyModelConfig.apiKey]}`
         },
         body: JSON.stringify({
-          model: 'deepseek-reasoner',
+          model: modifyModelConfig.model,
           messages: [
             {
               role: 'system',
@@ -2488,6 +2490,69 @@ app.get('/api/policy/region-report/prompts', async (req, res) => {
   }
 });
 
+// ============ 运行时配置管理（issue #22：默认层/运行时层） ============
+
+// 查看哪些配置文件被生产端自定义（运行时层覆盖状态）
+app.get('/api/config/runtime-status', async (req, res) => {
+  if (!requireAdminRequest(req, res)) return;
+  try {
+    res.json({ runtimeDir: configStore.runtimeDir, files: configStore.runtimeStatus() });
+  } catch (error) {
+    console.error('获取运行时配置状态失败:', error);
+    res.status(500).json({ error: '获取运行时配置状态失败', details: error.message });
+  }
+});
+
+// 导出生产端自定义 prompt 包（仅含运行时层覆盖，用于备份/迁移）
+app.get('/api/config/prompt-export', async (req, res) => {
+  if (!requireAdminRequest(req, res)) return;
+  try {
+    const bundle = configStore.exportBundle();
+    res.setHeader('Content-Disposition', buildAttachmentDisposition(`prompt-runtime-bundle-${new Date().toISOString().slice(0, 10)}.json`));
+    res.json(bundle);
+  } catch (error) {
+    console.error('导出 prompt 包失败:', error);
+    res.status(500).json({ error: '导出 prompt 包失败', details: error.message });
+  }
+});
+
+// 导入 prompt 包（写入运行时层；dryRun 只返回将导入的文件清单）
+app.post('/api/config/prompt-import', async (req, res) => {
+  if (!requireAdminRequest(req, res)) return;
+  try {
+    const bundle = req.body;
+    const dryRun = req.query.dryRun === '1' || req.query.dryRun === 'true';
+    if (dryRun) {
+      return res.json({ success: true, dryRun: true, files: Object.keys((bundle && bundle.files) || {}) });
+    }
+    const imported = configStore.importBundle(bundle);
+    res.json({ success: true, imported });
+  } catch (error) {
+    console.error('导入 prompt 包失败:', error);
+    res.status(500).json({ error: '导入 prompt 包失败', details: error.message });
+  }
+});
+
+// 恢复默认：删除指定文件的运行时层覆盖（{ file } 或 { files: [...] }）
+app.post('/api/config/reset-default', async (req, res) => {
+  if (!requireAdminRequest(req, res)) return;
+  try {
+    const { file, files } = req.body || {};
+    const targets = Array.isArray(files) && files.length ? files : [file];
+    const reset = [];
+    for (const name of targets) {
+      if (configStore.isOverridden(name)) {
+        configStore.clearRuntime(name);
+        reset.push(name);
+      }
+    }
+    res.json({ success: true, reset });
+  } catch (error) {
+    console.error('恢复默认配置失败:', error);
+    res.status(500).json({ error: '恢复默认配置失败', details: error.message });
+  }
+});
+
 // ============ 扬州公积金政策管理 API ============
 
 // 获取所有政策版本列表
@@ -2993,9 +3058,9 @@ app.post('/api/policy/compare', async (req, res) => {
 // 获取所有可用模型
 app.get('/api/llm/models', async (req, res) => {
   try {
-    const LLMService = require('./services/llmService');
+    const LLMService = require('./services/llmService.cjs');
     const llmService = new LLMService();
-    
+
     const models = llmService.getAvailableModels();
     res.json(models);
   } catch (err) {
@@ -3007,9 +3072,9 @@ app.get('/api/llm/models', async (req, res) => {
 // 获取当前活跃模型
 app.get('/api/llm/active-model', async (req, res) => {
   try {
-    const LLMService = require('./services/llmService');
+    const LLMService = require('./services/llmService.cjs');
     const llmService = new LLMService();
-    
+
     const activeModel = llmService.getActiveModelConfig();
     res.json(activeModel);
   } catch (err) {
@@ -3018,22 +3083,22 @@ app.get('/api/llm/active-model', async (req, res) => {
   }
 });
 
-// 切换模型
+// 切换模型（仅写运行时层 activeModel 覆盖）
 app.post('/api/llm/switch-model', async (req, res) => {
   const { modelKey } = req.body;
-  
+
   if (!modelKey) {
     return res.status(400).json({ error: 'modelKey is required' });
   }
-  
+
   try {
-    const LLMService = require('./services/llmService');
+    const LLMService = require('./services/llmService.cjs');
     const llmService = new LLMService();
-    
+
     const newActiveModel = llmService.switchModel(modelKey);
-    res.json({ 
+    res.json({
       message: `Successfully switched to model: ${modelKey}`,
-      activeModel: newActiveModel 
+      activeModel: newActiveModel
     });
   } catch (err) {
     console.error('Switch model error:', err);
@@ -3041,36 +3106,8 @@ app.post('/api/llm/switch-model', async (req, res) => {
   }
 });
 
-// 获取自定义Prompt选项
-app.get('/api/llm/custom-prompts', async (req, res) => {
-  try {
-    const LLMService = require('./services/llmService');
-    const llmService = new LLMService();
-    
-    const customPrompts = llmService.getCustomPrompts();
-    res.json(customPrompts);
-  } catch (err) {
-    console.error('Get custom prompts error:', err);
-    res.status(500).json({ error: 'Failed to get custom prompts', details: err.message });
-  }
-});
-
-// 重新加载配置
-app.post('/api/llm/reload-config', async (req, res) => {
-  try {
-    const LLMService = require('./services/llmService');
-    const llmService = new LLMService();
-    
-    const config = llmService.reloadConfig();
-    res.json({ 
-      message: 'Configuration reloaded successfully',
-      activeModel: config.activeModel
-    });
-  } catch (err) {
-    console.error('Reload config error:', err);
-    res.status(500).json({ error: 'Failed to reload configuration', details: err.message });
-  }
-});
+// 说明：/api/llm/custom-prompts（调用了不存在的 getCustomPrompts，恒 500）与
+// /api/llm/reload-config（空操作；所有配置均为每请求现读）已随 issue #22 重构移除。
 
 // 质量分析API - 获取各轮次总结数据
 app.get('/api/quality-analysis', async (req, res) => {
@@ -4615,14 +4652,15 @@ app.post('/api/policy/region-report/generate', async (req, res) => {
       regionBlocks,
     });
 
-    const deepseekResponse = await fetch('https://api.deepseek.com/chat/completions', {
+    const regionModelConfig = getWeeklyReportModel(LEGACY_DEEPSEEK_MODEL_KEY);
+    const deepseekResponse = await fetch(regionModelConfig.endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${process.env.DEEPSEEK_API_KEY}`,
+        Authorization: `Bearer ${process.env[regionModelConfig.apiKey]}`,
       },
       body: JSON.stringify({
-        model: REGION_POLICY_REPORT_MODEL,
+        model: regionModelConfig.model,
         messages: [
           { role: 'system', content: selectedPrompt.systemPrompt },
           { role: 'user', content: finalUserPrompt },
@@ -4672,7 +4710,7 @@ app.post('/api/policy/region-report/generate', async (req, res) => {
         excludedNewsCount,
         promptVersion: selectedPrompt.name,
         promptId: selectedPrompt.id,
-        modelName: REGION_POLICY_REPORT_MODEL,
+        modelName: regionModelConfig.model,
       },
     });
   } catch (error) {

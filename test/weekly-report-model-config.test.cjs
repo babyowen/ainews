@@ -5,7 +5,7 @@ const test = require('node:test');
 
 const rootDir = path.resolve(__dirname, '..');
 
-test('weekly report model config is separate and contains DeepSeek V4 models only as model metadata', () => {
+test('weekly report model config is separate and contains DeepSeek models only as model metadata', () => {
   const configPath = path.join(rootDir, 'config/weekly-report-models.json');
   const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
 
@@ -14,14 +14,18 @@ test('weekly report model config is separate and contains DeepSeek V4 models onl
   assert.equal(config.models['deepseek-v4-pro'].model, 'deepseek-v4-pro');
   assert.equal(config.models['deepseek-v4-flash'].endpoint, 'https://api.deepseek.com/chat/completions');
   assert.equal(config.models['deepseek-v4-pro'].endpoint, 'https://api.deepseek.com/chat/completions');
+  // deepseek-reasoner：原 modify-report / 地区报告硬编码模型收进配置（issue #22）
+  assert.equal(config.models['deepseek-reasoner'].model, 'deepseek-reasoner');
+  assert.equal(config.models['deepseek-reasoner'].endpoint, 'https://api.deepseek.com/chat/completions');
 
   for (const modelConfig of Object.values(config.models)) {
     assert.equal(modelConfig.apiKey, 'DEEPSEEK_API_KEY');
-    assert.equal(modelConfig.contextWindow, 1000000);
     assert.equal(Object.hasOwn(modelConfig, 'systemPrompt'), false);
     assert.equal(Object.hasOwn(modelConfig, 'userPrompt'), false);
     assert.equal(Object.hasOwn(modelConfig, 'prompts'), false);
   }
+  assert.equal(config.models['deepseek-v4-flash'].contextWindow, 1000000);
+  assert.equal(config.models['deepseek-v4-pro'].contextWindow, 1000000);
 });
 
 test('weekly report model resolver defaults to DeepSeek V4 Pro and rejects unknown keys', () => {
@@ -32,7 +36,7 @@ test('weekly report model resolver defaults to DeepSeek V4 Pro and rejects unkno
   assert.equal(defaultModel.model, 'deepseek-v4-pro');
 
   const publicModels = listWeeklyReportModels();
-  assert.deepEqual(publicModels.map((model) => model.key), ['deepseek-v4-flash', 'deepseek-v4-pro']);
+  assert.deepEqual(publicModels.map((model) => model.key), ['deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-reasoner']);
   assert.equal(publicModels.some((model) => Object.hasOwn(model, 'apiKey')), false);
 
   assert.throws(() => getWeeklyReportModel('unknown-model'), /Unknown weekly report model/);
