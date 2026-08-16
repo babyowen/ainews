@@ -350,6 +350,7 @@ function sanitizeUser(user) {
 }
 
 app.get('/api/admin/users', async (req, res) => {
+  if (!requireAdminRequest(req, res)) return;
   try {
     const users = loadUsersConfig();
     const [rows] = await pool.query('SELECT DISTINCT keyword FROM scored_news WHERE keyword IS NOT NULL AND keyword != ""');
@@ -365,6 +366,7 @@ app.get('/api/admin/users', async (req, res) => {
 });
 
 app.post('/api/admin/users', (req, res) => {
+  if (!requireAdminRequest(req, res)) return;
   const { username, displayName, password, role, keywords, routes } = req.body || {};
   if (!username || !password) {
     return res.status(400).json({ error: '用户名和密码不能为空' });
@@ -390,6 +392,7 @@ app.post('/api/admin/users', (req, res) => {
 });
 
 app.put('/api/admin/users/:username', (req, res) => {
+  if (!requireAdminRequest(req, res)) return;
   const { username } = req.params;
   const { displayName, password, role, keywords, routes } = req.body || {};
   const users = loadUsersConfig();
@@ -416,6 +419,7 @@ app.put('/api/admin/users/:username', (req, res) => {
 });
 
 app.delete('/api/admin/users/:username', (req, res) => {
+  if (!requireAdminRequest(req, res)) return;
   const { username } = req.params;
   if (username === 'admin') {
     return res.status(403).json({ error: 'admin 用户不可删除' });
@@ -2533,11 +2537,23 @@ app.post('/api/config/prompt-import', async (req, res) => {
   }
 });
 
-// 恢复默认：删除指定文件的运行时层覆盖（{ file } 或 { files: [...] }）
+// 恢复默认：{ file } 整文件恢复；或条目级 { file, keyword, promptId } / { file, promptId }
 app.post('/api/config/reset-default', async (req, res) => {
   if (!requireAdminRequest(req, res)) return;
   try {
-    const { file, files } = req.body || {};
+    const { file, files, keyword, promptId } = req.body || {};
+
+    // 条目级：只清除该条目的运行时层覆盖/墓碑，不影响其他生产定制
+    if (file === 'keyword-prompts.json' && keyword && promptId) {
+      const removed = promptStore.resetKeywordPrompt(keyword, promptId);
+      return res.json({ success: true, reset: removed ? [`${keyword}::${promptId}`] : [] });
+    }
+    if (file === 'region-policy-report-prompts.json' && promptId) {
+      const removed = promptStore.resetRegionPrompt(promptId);
+      return res.json({ success: true, reset: removed ? [promptId] : [] });
+    }
+
+    // 文件级：删除整个运行时层覆盖
     const targets = Array.isArray(files) && files.length ? files : [file];
     const reset = [];
     for (const name of targets) {
@@ -3083,8 +3099,9 @@ app.get('/api/llm/active-model', async (req, res) => {
   }
 });
 
-// 切换模型（仅写运行时层 activeModel 覆盖）
+// 切换模型（仅写运行时层 activeModel 覆盖；需 admin）
 app.post('/api/llm/switch-model', async (req, res) => {
+  if (!requireAdminRequest(req, res)) return;
   const { modelKey } = req.body;
 
   if (!modelKey) {

@@ -1,9 +1,11 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Users as UsersIcon, Plus, Trash2, Save, ShieldCheck, KeyRound } from 'lucide-react';
 import { Empty, Error, Loading } from '../components/Status';
+import { useAuth } from '../auth/AuthContext';
 import './UserManagement.css';
 
 export default function UserManagementPage() {
+  const { authHeaders } = useAuth();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -26,7 +28,7 @@ export default function UserManagementPage() {
     setLoading(true);
     setError(false);
     try {
-      const res = await fetch('/api/admin/users');
+      const res = await fetch('/api/admin/users', { headers: { ...authHeaders() } });
       if (!res.ok) throw new Error();
       setData(await res.json());
     } catch {
@@ -34,7 +36,7 @@ export default function UserManagementPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [authHeaders]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -106,7 +108,7 @@ export default function UserManagementPage() {
         : { displayName: form.displayName, password: form.password || undefined, role: form.role, keywords: form.keywords, routes: form.routes };
       const res = await fetch(url, {
         method,
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify(body),
       });
       const result = await res.json();
@@ -118,7 +120,7 @@ export default function UserManagementPage() {
       await loadData();
       if (isNew) {
         setIsNew(false);
-        const idx = (await fetch('/api/admin/users').then(r => r.json())).users.length - 1;
+        const idx = (await fetch('/api/admin/users', { headers: { ...authHeaders() } }).then(r => r.json())).users.length - 1;
         setSelectedIdx(idx);
         selectUser(idx);
       }
@@ -134,7 +136,7 @@ export default function UserManagementPage() {
     if (!window.confirm(`确定删除用户 "${form.displayName || form.username}"？`)) return;
     setDeleting(true);
     try {
-      const res = await fetch(`/api/admin/users/${form.username}`, { method: 'DELETE' });
+      const res = await fetch(`/api/admin/users/${form.username}`, { method: 'DELETE', headers: { ...authHeaders() } });
       const result = await res.json();
       if (!res.ok) {
         flash(result.error || '删除失败', 'error');

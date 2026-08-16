@@ -66,6 +66,14 @@ try {
   });
   check('无鉴权保存被拒绝 (401)', noAuth.status === 401, `status=${noAuth.status}`);
 
+  // 3b. 用户管理与模型切换接口同样拒绝匿名访问
+  const anonUserPost = await api('POST', '/api/admin/users', { username: 'hacker', password: 'x', role: 'admin' });
+  check('匿名创建用户被拒绝 (401)', anonUserPost.status === 401, `status=${anonUserPost.status}`);
+  const anonUserDelete = await api('DELETE', '/api/admin/users/yzgjj');
+  check('匿名删除用户被拒绝 (401)', anonUserDelete.status === 401, `status=${anonUserDelete.status}`);
+  const anonSwitch = await api('POST', '/api/llm/switch-model', { modelKey: 'kimi-k2' });
+  check('匿名切换模型被拒绝 (401)', anonSwitch.status === 401, `status=${anonSwitch.status}`);
+
   // 4. admin 登录 → 带 token 保存 → 写 runtime、默认层不动
   const before = fs.readFileSync(KEYWORD_FILE, 'utf-8');
   const login = await api('POST', '/api/auth/login', { username: 'admin', password: 'citic3104' });
@@ -98,6 +106,23 @@ try {
   const reset = await api('POST', '/api/config/reset-default', { file: 'keyword-prompts.json' }, login.data.token);
   check('恢复默认成功', reset.status === 200 && reset.data.reset.includes('keyword-prompts.json'));
   check('恢复后 runtime 覆盖清除', !fs.existsSync(runtimeFile));
+
+  // 6b. 条目级恢复默认：保存两条 → 条目级恢复一条 → 另一条仍在 runtime
+  const saveA = await api('POST', '/api/config/keyword-prompts', {
+    keyword: '冒烟测试', name: '条目A', description: 'd', systemPrompt: 'A', userPrompt: 'A',
+  }, login.data.token);
+  const saveB = await api('POST', '/api/config/keyword-prompts', {
+    keyword: '冒烟测试', name: '条目B', description: 'd', systemPrompt: 'B', userPrompt: 'B',
+  }, login.data.token);
+  const entryReset = await api('POST', '/api/config/reset-default', {
+    file: 'keyword-prompts.json', keyword: '冒烟测试', promptId: saveA.data.prompt.id,
+  }, login.data.token);
+  check('条目级恢复成功', entryReset.status === 200 && entryReset.data.reset.length === 1);
+  const afterEntryReset = await api('GET', '/api/keyword-prompts?keyword=冒烟测试');
+  const remainIds = afterEntryReset.data.map((p) => p.id);
+  check('条目级恢复只影响目标条目', remainIds.includes(saveB.data.prompt.id) && !remainIds.includes(saveA.data.prompt.id), remainIds.join(','));
+  // 清理冒烟数据
+  await api('POST', '/api/config/reset-default', { file: 'keyword-prompts.json' }, login.data.token);
 
   const afterReset = await api('GET', '/api/keyword-prompts?keyword=冒烟测试');
   check('恢复后新增条目消失（回到出厂默认）', afterReset.status === 200 && afterReset.data.length === 0);

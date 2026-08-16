@@ -170,3 +170,46 @@ test('promptStore: 地区报告 prompt 保存与最后一个版本保护', () =>
   assert.equal(store.getRegionPromptSummaries().length, 1);
   assert.throws(() => store.deleteRegionPrompt('single-region-default'), /至少保留一个/);
 });
+
+test('promptStore: 条目级恢复默认（只清该条目覆盖/墓碑，不影响其他定制）', () => {
+  const { dir, store } = makeStoreWithDefaults();
+  const defaultRaw = fs.readFileSync(path.join(dir, 'keyword-prompts.json'), 'utf-8');
+
+  // 同时制造：一条运行时覆盖 + 一条墓碑（删除默认条目 default）
+  store.saveKeywordPrompt({ keyword: '养老', name: '生产版本', description: 'd', systemPrompt: '生产system', userPrompt: '生产user', isDefault: false });
+  store.deleteKeywordPrompt('养老', 'default');
+  let listed = store.listKeywordPrompts('养老');
+  assert.equal(listed.length, 1); // 仅剩生产版本
+  assert.equal(listed[0].source, 'runtime');
+
+  // 条目级恢复墓碑：default 条目回归默认层
+  assert.deepEqual(store.resetKeywordPrompt('养老', 'default'), { keyword: '养老', promptId: 'default' });
+  listed = store.listKeywordPrompts('养老');
+  assert.equal(listed.length, 2);
+  assert.equal(listed.find((p) => p.id === 'default').source, 'default');
+
+  // 条目级恢复覆盖：生产版本条目的覆盖被清除（回到不存在的默认状态 → 消失）
+  const prodId = listed.find((p) => p.source === 'runtime').id;
+  assert.ok(store.resetKeywordPrompt('养老', prodId));
+  listed = store.listKeywordPrompts('养老');
+  assert.equal(listed.length, 1);
+  assert.equal(listed[0].source, 'default');
+  // 运行时层被清空 → 文件移除，默认层文件始终未动
+  assert.equal(fs.existsSync(path.join(dir, 'runtime', 'keyword-prompts.json')), false);
+  assert.equal(fs.readFileSync(path.join(dir, 'keyword-prompts.json'), 'utf-8'), defaultRaw);
+
+  // 没有运行时层时条目级恢复返回 null
+  assert.equal(store.resetKeywordPrompt('养老', 'default'), null);
+});
+
+test('promptStore: 地区报告条目级恢复默认', () => {
+  const { dir, store } = makeStoreWithDefaults();
+  const saved = store.saveRegionPrompt({ name: '生产版', description: 'd', systemPrompt: 's2', userPromptSingle: 'u2', userPromptMulti: 'm2', isDefault: false });
+  assert.equal(store.getRegionPromptSummaries().find((p) => p.id === saved.id).source, 'runtime');
+
+  assert.deepEqual(store.resetRegionPrompt(saved.id), { promptId: saved.id });
+  const summaries = store.getRegionPromptSummaries();
+  assert.equal(summaries.length, 1);
+  assert.equal(summaries.every((p) => p.source === 'default'), true);
+  assert.equal(fs.existsSync(path.join(dir, 'runtime', 'region-policy-report-prompts.json')), false);
+});

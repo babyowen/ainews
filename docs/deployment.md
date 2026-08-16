@@ -13,26 +13,33 @@
 
 ## 一、首次升级到双层架构（一次性迁移）
 
-> 前置：新版本代码已构建（`bash scripts/pack-release.sh` 会产出 `release-keydigest-<时间>.tar.gz`）。
+> 前置：新版本代码已构建（`bash scripts/pack-release.sh` 会产出 `release-keydigest-<时间>.tar.gz`，**用实际文件名操作，不要用 `*.tar.gz` 通配符**——目录里若有多个包会导致解压命令解析错误）。
 
-1. **备份生产配置**（在服务器项目目录执行）：
+1. **停止服务**（避免迁移窗口期内进程读到「新默认层 + 未迁移 runtime」的混合状态）：
    ```bash
-   cp -r config config-backup-$(date +%Y%m%d)
+   pm2 stop keydigest
    ```
-2. **部署新包**：解压覆盖项目目录。`config/` 默认层会被仓库版本覆盖——安全，因为第 1 步已有备份；`config/runtime/` 此时尚不存在，不受影响。
+2. **备份生产配置**（带时分秒防止同日重复备份嵌套；目录已存在则报错停止，勿覆盖旧备份）：
    ```bash
-   tar -xzf release-keydigest-*.tar.gz -C /www/.../keydigest/
+   cp -r config "config-backup-$(date +%Y%m%d-%H%M%S)"
    ```
-3. **执行迁移脚本**：对比旧快照与仓库默认层，只把差异写入 `config/runtime/`：
+3. **部署新包**（用第 0 步产出的实际文件名）：解压覆盖项目目录。`config/` 默认层会被仓库版本覆盖——安全，因为第 2 步已有备份；`config/runtime/` 不在包内，不受影响。
+   ```bash
+   tar -xzf release-keydigest-<实际文件名>.tar.gz -C <服务器项目目录>
+   ```
+4. **执行迁移脚本**（三方比较：生产快照 + 旧默认层基线 + 新默认层）：
    ```bash
    node scripts/migrate-runtime-config.cjs --from config-backup-<日期> --dry-run   # 先预览
    node scripts/migrate-runtime-config.cjs --from config-backup-<日期>             # 实际写入
    ```
-   - 与默认层相同的文件不产生覆盖；生产端删除过的默认条目会记录墓碑。
+   - 基线（baseline）默认取部署包自带的 `config-baseline/` 目录；也可用 `--baseline <目录>` 指定旧版本的纯默认层（如从旧 tag 提取）。
+   - 只迁移「生产相对旧默认层的真实修改」：生产改过的固定为生产版本；生产没动的自动采用新默认（含开发端改良）；新版新增的条目正常出现（不会误判为生产删除）；生产删除且新版仍内置的条目记墓碑。
+   - **若没有 baseline**（旧版本部署包未携带 `config-baseline/`），脚本自动降级为两方比较且**不写墓碑**（保证不误杀新版新增条目），但未修改条目会被旧版本固定，之后可在 `/config` 按条目「恢复默认」。
+   - 任何文件解析错误 → 脚本以**非零退出码**结束并提示勿重启上线，修好后重跑即可（幂等）。
    - 若某文件的运行时层已存在（迁移后又人工改过），脚本会跳过以防覆盖，确认后可加 `--force`。
-4. **重启并核对**：
+5. **重启并核对**：
    ```bash
-   pm2 restart keydigest
+   pm2 start keydigest   # 之前是 stop 的用 start；restart 亦可
    ```
    登录 admin → `/config` → 「运行时配置」tab：被自定义的文件应显示「运行时已自定义」徽标；到「关键词 Prompt」等 tab 核对生产端各版本 prompt 内容无丢失。
 
@@ -58,8 +65,9 @@ bash scripts/pack-release.sh --no-build   # 跳过前端构建（dist/ 已是最
 
 包内容与安全保证：
 
-- 只包含：`server.cjs`、`services/`、`server/`（PDF 渲染）、`scripts/`（含迁移脚本）、`dist/`（前端构建产物）、`config/` **默认层**、`package.json`、`package-lock.json`、`keydigest_start.sh`、本手册。
+- 只包含：`server.cjs`、`services/`、`server/`（PDF 渲染）、`scripts/`（含迁移脚本）、`dist/`（前端构建产物）、`config/` **默认层**、`config-baseline/`（本次默认层快照，供**下一次**升级迁移做三方比较）、`package.json`、`package-lock.json`、`keydigest_start.sh`、本手册。
 - **绝不包含** `config/runtime/`（生产自定义层）、`data/`、`node_modules/`、`.git`、各类备份文件——因此把包解压覆盖到服务器目录是安全的，永远不会冲掉生产端已自定义的 prompt。
+- 脚本会先打包到临时文件并**校验包内确无 `config/runtime/`、确有 `config-baseline/`**，校验通过才输出正式文件名；校验失败直接报错退出，不会留下可用的坏包。
 - 服务器上解压后如依赖有变化需执行一次 `npm install --omit=dev`（一般无变化时可跳过）。
 
 ## 三、日常部署（迁移完成后）
@@ -67,10 +75,10 @@ bash scripts/pack-release.sh --no-build   # 跳过前端构建（dist/ 已是最
 ```bash
 # 本地：打包并上传（scp / rsync / 宝塔面板上传均可）
 bash scripts/pack-release.sh
-scp release-keydigest-*.tar.gz <user>@<服务器>:/tmp/
+scp release-keydigest-<实际文件名>.tar.gz <user>@<服务器>:/tmp/
 
-# 服务器：解压覆盖项目目录并重启
-tar -xzf /tmp/release-keydigest-*.tar.gz -C <服务器项目目录>
+# 服务器：解压覆盖项目目录并重启（注意用实际文件名，不要用通配符）
+tar -xzf /tmp/release-keydigest-<实际文件名>.tar.gz -C <服务器项目目录>
 pm2 restart keydigest
 ```
 

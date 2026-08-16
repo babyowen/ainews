@@ -237,6 +237,36 @@ function createPromptStore(options = {}) {
     return { keyword, promptId };
   }
 
+  // 条目级恢复默认：只移除该条目的运行时层覆盖或墓碑，其他生产定制不受影响
+  function resetKeywordPrompt(keyword, promptId) {
+    const runtime = configStore.readRuntimeJson('keyword-prompts.json');
+    if (!runtime) return null;
+    let touched = false;
+
+    const kwConfig = (runtime.keywords || {})[keyword];
+    if (kwConfig && Array.isArray(kwConfig.prompts)) {
+      const before = kwConfig.prompts.length;
+      kwConfig.prompts = kwConfig.prompts.filter((p) => p.id !== promptId);
+      if (kwConfig.prompts.length !== before) touched = true;
+      if (kwConfig.prompts.length === 0) delete runtime.keywords[keyword];
+    }
+
+    const tombstone = `${keyword}::${promptId}`;
+    runtime.metadata = runtime.metadata || {};
+    const deleted = runtime.metadata.deletedIds || [];
+    if (deleted.includes(tombstone)) {
+      runtime.metadata.deletedIds = deleted.filter((x) => x !== tombstone);
+      touched = true;
+    }
+
+    if (!touched) return null;
+    const hasContent =
+      Object.keys(runtime.keywords || {}).length > 0 || (runtime.metadata.deletedIds || []).length > 0;
+    if (!hasContent) configStore.clearRuntime('keyword-prompts.json');
+    else configStore.importBundle({ formatVersion: 1, files: { 'keyword-prompts.json': { type: 'json', content: runtime } } });
+    return { keyword, promptId };
+  }
+
   // ---------- 地区政策报告 prompt 库（region-policy-report-prompts.json）----------
 
   function getRegionLibrary() {
@@ -336,6 +366,36 @@ function createPromptStore(options = {}) {
     return { promptId };
   }
 
+  // 条目级恢复默认：只移除该版本的运行时层覆盖或墓碑（与关键词库同构）
+  function resetRegionPrompt(promptId) {
+    const runtime = configStore.readRuntimeJson('region-policy-report-prompts.json');
+    if (!runtime) return null;
+    let touched = false;
+
+    if (Array.isArray(runtime.prompts)) {
+      const before = runtime.prompts.length;
+      runtime.prompts = runtime.prompts.filter((p) => p.id !== promptId);
+      if (runtime.prompts.length !== before) touched = true;
+    }
+    runtime.metadata = runtime.metadata || {};
+    const deleted = runtime.metadata.deletedIds || [];
+    if (deleted.includes(promptId)) {
+      runtime.metadata.deletedIds = deleted.filter((x) => x !== promptId);
+      touched = true;
+    }
+
+    if (!touched) return null;
+    const hasContent = (runtime.prompts || []).length > 0 || (runtime.metadata.deletedIds || []).length > 0;
+    if (!hasContent) configStore.clearRuntime('region-policy-report-prompts.json');
+    else {
+      configStore.importBundle({
+        formatVersion: 1,
+        files: { 'region-policy-report-prompts.json': { type: 'json', content: runtime } },
+      });
+    }
+    return { promptId };
+  }
+
   return {
     configStore,
     getWeeklyPrompts,
@@ -346,11 +406,13 @@ function createPromptStore(options = {}) {
     findKeywordPrompt,
     saveKeywordPrompt,
     deleteKeywordPrompt,
+    resetKeywordPrompt,
     getRegionLibrary,
     getRegionPromptSummaries,
     findRegionPrompt,
     saveRegionPrompt,
     deleteRegionPrompt,
+    resetRegionPrompt,
   };
 }
 

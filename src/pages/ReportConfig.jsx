@@ -58,6 +58,8 @@ const ReportConfig = () => {
   const [runtimeMessage, setRuntimeMessage] = useState('');
   const [importingBundle, setImportingBundle] = useState(false);
   const [resettingFile, setResettingFile] = useState('');
+  const [resettingEntry, setResettingEntry] = useState('');
+  const [versionsTick, setVersionsTick] = useState(0);
 
   useEffect(() => {
     fetchConfigData();
@@ -143,7 +145,7 @@ const ReportConfig = () => {
       setEditForm({ ...EMPTY_KEYWORD_FORM, keyword: selectedKeyword });
     };
     loadKeywordPrompts();
-  }, [selectedKeyword]);
+  }, [selectedKeyword, versionsTick]);
 
   const estimateTokens = (text) => {
     if (!text) return 0;
@@ -398,6 +400,37 @@ const ReportConfig = () => {
     }
   };
 
+  // 条目级恢复默认：只清除该条目的运行时层覆盖，不影响其他生产定制
+  const handleResetEntry = async (file, keyword, promptId) => {
+    if (!window.confirm(`恢复该条目的出厂默认？「${keyword || promptId} / ${promptId}」的运行时层自定义将被清除，其他条目不受影响。`)) return;
+    const entryKey = `${keyword || ''}::${promptId}`;
+    setResettingEntry(entryKey);
+    try {
+      const r = await fetch('/api/config/reset-default', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ file, keyword, promptId })
+      });
+      const data = await r.json().catch(() => ({}));
+      if (r.status === 401 || r.status === 403) {
+        alert('恢复默认失败：需要 admin 登录状态');
+        return;
+      }
+      if (!r.ok) throw new Error(data.error || data.details || `HTTP ${r.status}`);
+      if (file === 'keyword-prompts.json') {
+        setVersionsTick((t) => t + 1);
+        fetchKeywordConfig();
+      } else {
+        fetchRegionPromptConfig();
+      }
+      fetchConfigData();
+    } catch (e) {
+      alert('恢复默认失败: ' + e.message);
+    } finally {
+      setResettingEntry('');
+    }
+  };
+
   const renderHeader = () => (
     <header className="kd-page-header config-header">
       <div className="config-header-text">
@@ -550,6 +583,16 @@ const ReportConfig = () => {
                             >
                               编辑
                             </button>
+                            {p.source === 'runtime' && (
+                              <button
+                                type="button"
+                                className="config-btn-link"
+                                disabled={resettingEntry === `${selectedKeyword}::${p.id}`}
+                                onClick={() => handleResetEntry('keyword-prompts.json', selectedKeyword, p.id)}
+                              >
+                                {resettingEntry === `${selectedKeyword}::${p.id}` ? '恢复中…' : '恢复默认'}
+                              </button>
+                            )}
                             <button
                               type="button"
                               className="config-btn-link danger"
@@ -859,6 +902,16 @@ const ReportConfig = () => {
                             >
                               编辑
                             </button>
+                            {p.source === 'runtime' && (
+                              <button
+                                type="button"
+                                className="config-btn-link"
+                                disabled={resettingEntry === `::${p.id}`}
+                                onClick={() => handleResetEntry('region-policy-report-prompts.json', null, p.id)}
+                              >
+                                {resettingEntry === `::${p.id}` ? '恢复中…' : '恢复默认'}
+                              </button>
+                            )}
                             <button
                               type="button"
                               className="config-btn-link danger"
