@@ -1,5 +1,20 @@
 # LLM配置说明
 
+## config/ 目录分层约定（issue #22）
+
+| 文件 | 用途 | 管理方式 |
+|---|---|---|
+| `prompts.md` | 周报默认 System/User/Modify 模板 | 默认层；管理界面改到 `runtime/` |
+| `policy_prompts.md` | 政策提取/对比模板 | 同上 |
+| `keyword-prompts.json` | 各关键词 prompt 版本库 | 同上（按 prompt id 与默认层合并） |
+| `region-policy-report-prompts.json` | 地区政策报告模板 | 同上 |
+| `auto-report-config.json` / `llm-config.json` / `users.json` | 运行时可变配置 | 字段级/整文件与默认层合并 |
+| `weekly-report-models.json` | 周报/政策/改稿模型端点（含 deepseek-reasoner） | 仅随代码更新 |
+| `runtime/` | **运行时层**：生产端经管理界面保存的自定义（gitignore，部署永不覆盖） | 自动维护 |
+
+- 读取 = 默认层 + 运行时层合并；保存只写 `runtime/`（仅存与默认层的差异）。
+- 部署、备份与一次性迁移见 `docs/deployment.md`。
+
 ## 配置文件结构
 
 ### 模型配置 (`models`)

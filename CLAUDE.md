@@ -39,6 +39,12 @@ npm run pdf:install-browser
 
 # Focused automatic weekly report tests
 node --test test/auto-report-service.test.cjs
+
+# Backend test suite (config dual-layer store, prompt store, migration, etc.)
+node --test test/config-store.test.cjs test/prompt-store.test.cjs test/migrate-runtime-config.test.cjs
+
+# Build a production release tarball (excludes config/runtime/, see docs/deployment.md)
+bash scripts/pack-release.sh
 ```
 
 ## Architecture
@@ -62,10 +68,15 @@ node --test test/auto-report-service.test.cjs
 ```
 Frontend (React + Vite)  ←→  Backend (Express + MySQL)
                                     │
-                                    ├─ LLMService (services/LLMService.js)
-                                    │   ├─ config/llm-config.json
-                                    │   ├─ config/prompts.md
-                                    │   └─ config/keyword-prompts.json
+                                    ├─ promptStore (services/promptStore.cjs)
+                                    │   ├─ config/            ← 默认层（git 追踪，随部署）
+                                    │   └─ config/runtime/    ← 运行时层（生产自定义，部署永不覆盖）
+                                    │
+                                    ├─ configStore (services/configStore.cjs)
+                                    │   └─ 双层合并读取 / 差异写入 / 导入导出
+                                    │
+                                    ├─ LLMService (services/llmService.cjs)
+                                    │   └─ config/llm-config.json（经 configStore 生效配置）
                                     │
                                     ├─ server/pdf/ (Playwright PDF renderers)
                                     │
@@ -75,13 +86,15 @@ Frontend (React + Vite)  ←→  Backend (Express + MySQL)
 ### Key Architectural Patterns
 
 1. **Single-file backend**: `server.cjs` is a monolithic Express file containing all routes, DB pool initialization, and business logic. It is not split into controllers or middleware directories.
-2. **LLM abstraction**: `services/LLMService.js` encapsulates all AI calls. It reads `config/llm-config.json` for model endpoints and `config/prompts.md` for prompt templates. Configuration reloads at runtime via `/api/llm/reload-config`.
-3. **Streaming reports**: Report generation endpoints (`/api/generate-report`, `/api/generate-kimi-report`, etc.) use SSE (text/event-stream) to stream LLM chunks to the frontend.
-4. **Server-side PDF rendering**: Report and policy comparison PDFs are rendered via Playwright in `server/pdf/`, not in the browser. The frontend posts HTML to the backend, which returns a PDF buffer.
-5. **Keyword-specific prompts**: `config/keyword-prompts.json` allows overriding default prompts per keyword. The config UI at `/config` manages these.
-6. **Region policy reports**: A newer workflow (`/policy/regions`, `/policy/region-report`) uses `config/region-policy-report-prompts.json` for region-specific policy analysis with separate single-region and multi-region prompt templates.
-7. **Lightweight multi-user access**: `POST /api/auth/login` validates fixed usernames against `.env` passwords, the frontend stores the returned profile in `sessionStorage`, and `src/config/userAccess.js` controls visible routes and allowed keywords. Successful logins are appended to `data/login-audit.json` through `services/loginAudit.cjs`; `/login-stats` is admin-only in the frontend.
-8. **Automatic weekly reports**: `node-cron` schedules `services/autoReportService.cjs` at `0 5 * * 0` in `Asia/Shanghai`. Admin config is stored in `config/auto-report-config.json`; the service uses `config/weekly-report-models.json`, keyword-specific prompts, server-side report PDF rendering, and `auto_report_log` for run/download audit data.
+2. **Config dual-layer store (issue #22)**: `services/configStore.cjs` merges `config/` (factory defaults, git-tracked) with `config/runtime/` (production customizations, gitignored). All admin UI saves write only to the runtime layer as a diff against defaults; deployments overwrite `config/` freely and never touch `config/runtime/`. `services/promptStore.cjs` is the single entry point for all prompt reads/writes (weekly `prompts.md`, `policy_prompts.md`, `keyword-prompts.json`, `region-policy-report-prompts.json`, plus the formerly-inline policy/JSON-repair prompt constants). Merge semantics: keyword/region prompts merge by prompt id (runtime wins, deletions recorded as `metadata.deletedIds` tombstones); markdown prompt files override whole-file; `auto-report-config.json`/`llm-config.json` shallow-merge per field; `users.json` replaces whole-file. Admin endpoints: `GET /api/config/runtime-status`, `GET /api/config/prompt-export`, `POST /api/config/prompt-import`, `POST /api/config/reset-default`. Config write routes require admin auth. Deployment and one-time migration runbook: `docs/deployment.md` (`scripts/migrate-runtime-config.cjs`, `scripts/pack-release.sh`).
+3. **LLM abstraction**: `services/llmService.cjs` (must stay `.cjs` — the package is `"type": "module"`) reads the effective `llm-config.json` via configStore; `switchModel` writes only `activeModel` to the runtime layer.
+4. **Streaming reports**: Report generation endpoints (`/api/generate-report`, `/api/generate-kimi-report`, etc.) use SSE (text/event-stream) to stream LLM chunks to the frontend.
+5. **Server-side PDF rendering**: Report and policy comparison PDFs are rendered via Playwright in `server/pdf/`, not in the browser. The frontend posts HTML to the backend, which returns a PDF buffer.
+6. **Keyword-specific prompts**: `config/keyword-prompts.json` allows overriding default prompts per keyword. The config UI at `/config` manages these.
+7. **Region policy reports**: A newer workflow (`/policy/regions`, `/policy/region-report`) uses `config/region-policy-report-prompts.json` for region-specific policy analysis with separate single-region and multi-region prompt templates.
+8. **Lightweight multi-user access**: `POST /api/auth/login` validates fixed usernames against `.env` passwords, the frontend stores the returned profile in `sessionStorage`, and `src/config/userAccess.js` controls visible routes and allowed keywords. Successful logins are appended to `data/login-audit.json` through `services/loginAudit.cjs`; `/login-stats` is admin-only in the frontend.
+9. **Automatic weekly reports**: `node-cron` schedules `services/autoReportService.cjs` at `0 5 * * 0` in `Asia/Shanghai`. Admin config is stored in `config/auto-report-config.json` (read via configStore effective config each run); the service uses `config/weekly-report-models.json` (includes `deepseek-reasoner` used by modify-report and region reports), keyword-specific prompts, server-side report PDF rendering, and `auto_report_log` for run/download audit data.
+10. **Page-scoped CSS convention**: Vite merges every `import './X.css'` into a single global stylesheet, so bare class selectors in `src/pages/*.css` leak across pages. Each page has a wrapper class (`.score-edit-page`, `.report-generator`, `.weekly-comparison-container`, `.word-count-stats`, `.history-reports-page`, `.config-container`, `.auto-report-config`, `.region-policy-browser`, `.region-report-page`, `.current-policy-page`) and page-level rules must be scoped under it. Truly shared utilities (`.kd-page`, `.kd-panel`, `.kd-state-card`, score badges) live in `src/index.css` and `src/overrides.css`; `src/overrides.css` is imported last and performs the final scoped visual normalization across pages.
 9. **Page-scoped CSS convention**: Vite merges every `import './X.css'` into a single global stylesheet, so bare class selectors in `src/pages/*.css` leak across pages. Each page has a wrapper class (`.score-edit-page`, `.report-generator`, `.weekly-comparison-container`, `.word-count-stats`, `.history-reports-page`, `.config-container`, `.auto-report-config`, `.region-policy-browser`, `.region-report-page`, `.current-policy-page`) and page-level rules must be scoped under it. Truly shared utilities (`.kd-page`, `.kd-panel`, `.kd-state-card`, score badges) live in `src/index.css` and `src/overrides.css`; `src/overrides.css` is imported last and performs the final scoped visual normalization across pages.
 
 ### Database Schema

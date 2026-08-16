@@ -15,3 +15,6 @@
 /dist/
 
 # User config
+
+# Prompt 运行时层（生产端自定义，部署永不覆盖，见 docs/deployment.md）
+/config/runtime/
