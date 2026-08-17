@@ -16,5 +16,8 @@
 
 # User config
 
+# Production runtime overrides are persistent server data, never release content.
+/config/runtime/
+
 # One-time production truth snapshot for issue #22 (may contain secrets)
 /.production-snapshot/
