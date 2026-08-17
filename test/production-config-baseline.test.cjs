@@ -54,6 +54,26 @@ test('every automatic report resolves an existing model and an explicit keyword 
   }
 });
 
+test('every keyword and region prompt library has exactly one default prompt', () => {
+  const keywordLibrary = readJson('keyword-prompts.json');
+  for (const [keyword, config] of Object.entries(keywordLibrary.keywords || {})) {
+    const prompts = config.prompts || [];
+    assert.ok(prompts.length > 0, `${keyword} must keep at least one prompt`);
+    assert.equal(
+      prompts.filter((prompt) => prompt.isDefault).length,
+      1,
+      `${keyword} must have exactly one default prompt`,
+    );
+  }
+
+  const regionLibrary = readJson('region-policy-report-prompts.json');
+  assert.equal(
+    (regionLibrary.prompts || []).filter((prompt) => prompt.isDefault).length,
+    1,
+    'region policy report must have exactly one default prompt',
+  );
+});
+
 test('production auto-report execution uses the layered promptStore without changing prompt selection', async () => {
   const raw = readJson('auto-report-config.json');
   const enabled = buildAutoReportConfig(raw).enabledKeywords;

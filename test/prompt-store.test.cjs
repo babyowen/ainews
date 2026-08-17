@@ -56,6 +56,15 @@ test('promptStore: upsertSection 替换与追加', () => {
   assert.equal(extractSection(appended, 'New Section').trim(), '新增内容');
 });
 
+test('promptStore: 拒绝会破坏 Markdown 小节边界的三反引号', () => {
+  const doc = '## Policy Extraction Prompt\n\n```\n旧内容\n```\n';
+  assert.throws(
+    () => upsertSection(doc, 'Policy Extraction Prompt', '示例：\n```json\n{"ok":true}\n```'),
+    (error) => error.status === 400 && /三反引号/.test(error.message),
+  );
+  assert.equal(extractSection(doc, 'Policy Extraction Prompt'), '旧内容');
+});
+
 function makeStoreWithDefaults() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'prompt-store-test-'));
   fs.writeFileSync(path.join(dir, 'prompts.md'), '## System Prompt\n\n```\n默认system\n```\n\n## User Prompt\n\n```\n默认user {keyword}\n```\n', 'utf-8');

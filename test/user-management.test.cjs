@@ -37,7 +37,7 @@ function readEffectiveUsers() {
 function request(method, urlPath, body, token) {
   return new Promise((resolve, reject) => {
     const url = new URL(urlPath, BASE_URL);
-    const options = { method, hostname: url.hostname, port: url.port, path: url.pathname, headers: {} };
+    const options = { method, hostname: url.hostname, port: url.port, path: `${url.pathname}${url.search}`, headers: {} };
     if (token) options.headers.Authorization = `Bearer ${token}`;
     let payload;
     if (body) {
@@ -164,6 +164,37 @@ test('prompt bundle export never includes users and import rejects users.json', 
   const resetRejected = await request('POST', '/api/config/reset-default', { file: 'users.json' }, adminToken);
   assert.equal(resetRejected.status, 400);
   assert.ok(readEffectiveUsers().some((user) => user.username === 'autotest'));
+});
+
+test('policy prompt endpoint rejects nested Markdown fences without changing the file', async () => {
+  const runtimePath = path.join(__dirname, '..', 'config/runtime/policy_prompts.md');
+  const before = fs.existsSync(runtimePath) ? fs.readFileSync(runtimePath, 'utf8') : null;
+  const rejected = await request('POST', '/api/config/policy-prompt', {
+    type: 'extraction',
+    prompt: '示例：\n```json\n{"ok":true}\n```',
+  }, adminToken);
+
+  assert.equal(rejected.status, 400);
+  assert.match(rejected.body.error, /三反引号/);
+  const after = fs.existsSync(runtimePath) ? fs.readFileSync(runtimePath, 'utf8') : null;
+  assert.equal(after, before);
+});
+
+test('prompt bundle dry-run rejects nested Markdown fences before import', async () => {
+  const defaultPolicyPath = path.join(__dirname, '..', 'config/policy_prompts.md');
+  const unsafePolicy = fs.readFileSync(defaultPolicyPath, 'utf8').replace(
+    '```\n',
+    '```\n示例：\n```json\n{"ok":true}\n```\n',
+  );
+  const rejected = await request('POST', '/api/config/prompt-import?dryRun=1', {
+    formatVersion: 1,
+    files: {
+      'policy_prompts.md': { type: 'text', content: unsafePolicy },
+    },
+  }, adminToken);
+
+  assert.equal(rejected.status, 400);
+  assert.match(rejected.body.details, /嵌套或格式异常/);
 });
 
 // ===== 测试 3: POST /api/admin/users 拒绝重复用户名 =====

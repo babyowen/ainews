@@ -70,6 +70,15 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' })); // 增加请求体大小限制
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
+function readReleaseMetadata(name) {
+  try {
+    return fs.readFileSync(path.join(__dirname, name), 'utf8').trim() || null;
+  } catch (error) {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
 // 部署健康检查不访问数据库，便于新版本切换后立即确认 Node/静态资源已正常启动。
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok' });
@@ -382,8 +391,26 @@ function promptStateFromPreview(preview = {}, autoReportConfig = readAutoReportC
   };
 }
 
+function assertPromptMarkdownFences(effective = {}) {
+  const expectedFenceLines = {
+    'prompts.md': 8,
+    'policy_prompts.md': 4,
+  };
+  for (const [name, expectedCount] of Object.entries(expectedFenceLines)) {
+    if (!Object.prototype.hasOwnProperty.call(effective, name)) continue;
+    const fenceLines = String(effective[name] || '')
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line.startsWith('```'));
+    if (fenceLines.length !== expectedCount || fenceLines.some((line) => !/^```[^`]*$/.test(line))) {
+      throw new Error(`${name} 包含嵌套或格式异常的 Markdown 三反引号围栏`);
+    }
+  }
+}
+
 function previewPromptBundle(bundle) {
   const preview = configStore.previewImportBundle(bundle, { files: WEB_PROMPT_BUNDLE_FILES });
+  assertPromptMarkdownFences(preview.effective);
   assertPromptStateReady(promptStateFromPreview(preview));
   return preview;
 }
@@ -439,7 +466,11 @@ app.get('/api/readiness', async (req, res) => {
     assertRuntimeConfigurationReady();
     await ensureAutoReportInitialized();
     await pool.query('SELECT 1 AS ready');
-    res.json({ status: 'ready' });
+    res.json({
+      status: 'ready',
+      releaseCommit: readReleaseMetadata('.release-commit'),
+      releaseId: readReleaseMetadata('.release-id'),
+    });
   } catch (error) {
     console.error('生产就绪检查失败:', error);
     res.status(503).json({ status: 'not_ready' });
@@ -2538,7 +2569,10 @@ app.post('/api/config/policy-prompt', async (req, res) => {
     res.json({ success: true });
   } catch (error) {
     console.error(`保存${req.body.type}Prompt失败:`, error);
-    res.status(500).json({ error: '保存失败' });
+    res.status(error.status || 500).json({
+      error: error.status ? error.message : '保存失败',
+      details: error.status ? undefined : error.message,
+    });
   }
 });
 

@@ -63,7 +63,7 @@ if ((APP_PORT < 1 || APP_PORT > 65535 || TEST_PORT < 1 || TEST_PORT > 65535 || A
   exit 2
 fi
 
-for command_name in git npm tar curl mktemp; do
+for command_name in git node npm tar curl mktemp; do
   command -v "$command_name" >/dev/null || { echo "缺少命令：$command_name" >&2; exit 1; }
 done
 if [[ "$SKIP_RESTART" == '0' ]]; then
@@ -153,6 +153,7 @@ ln -s "$SHARED_ENV" "$BUILD_DIR/.env"
 
 RELEASE_NAME="release-$(date -u +%Y%m%dT%H%M%SZ)-$SHORT_COMMIT"
 FINAL_RELEASE="$RELEASES_DIR/$RELEASE_NAME"
+printf '%s\n' "$RELEASE_NAME" > "$BUILD_DIR/.release-id"
 mv "$BUILD_DIR" "$FINAL_RELEASE"
 BUILD_DIR=''
 
@@ -165,7 +166,8 @@ ln -s "$FINAL_RELEASE" "$NEXT_LINK"
 mv -Tf "$NEXT_LINK" "$CURRENT_LINK"
 
 activate_pm2() {
-  KEYDIGEST_DEPLOY_ROOT="$DEPLOY_ROOT" pm2 startOrReload "$CURRENT_LINK/deploy/ecosystem.config.cjs" --update-env
+  KEYDIGEST_DEPLOY_ROOT="$DEPLOY_ROOT" KEYDIGEST_APP_PORT="$APP_PORT" \
+    pm2 startOrReload "$CURRENT_LINK/deploy/ecosystem.config.cjs" --update-env
 }
 
 rollback() {
@@ -175,8 +177,14 @@ rollback() {
     local rollback_link="$DEPLOY_ROOT/.current-rollback.$$"
     ln -s "$PREVIOUS_RELEASE" "$rollback_link"
     mv -Tf "$rollback_link" "$CURRENT_LINK"
-    activate_pm2 || true
-    echo "已回滚到：$PREVIOUS_RELEASE" >&2
+    if activate_pm2; then
+      if [[ -d "$FINAL_RELEASE" && "$FINAL_RELEASE" == "$RELEASES_DIR"/release-* ]]; then
+        rm -rf -- "$FINAL_RELEASE"
+      fi
+      echo "已回滚到：$PREVIOUS_RELEASE；失败 release 已清理。" >&2
+    else
+      echo "current 已切回 $PREVIOUS_RELEASE，但 PM2 重载失败；保留失败 release 供排查。" >&2
+    fi
   else
     echo '没有可用的上一版本，current 保持新版本，请人工处理。' >&2
   fi
@@ -187,13 +195,29 @@ if [[ "$SKIP_RESTART" == '0' ]]; then
   activate_pm2 || rollback 'PM2 启动失败'
   HEALTH_OK='0'
   for _attempt in {1..20}; do
-    if curl --fail --silent --show-error "http://127.0.0.1:$APP_PORT/api/readiness" | grep -q '"status":"ready"'; then
+    if curl --fail --silent --show-error "http://127.0.0.1:$APP_PORT/api/readiness" \
+      | node -e '
+          let body = "";
+          process.stdin.setEncoding("utf8");
+          process.stdin.on("data", chunk => { body += chunk; });
+          process.stdin.on("end", () => {
+            try {
+              const payload = JSON.parse(body);
+              const matchesTarget = payload.status === "ready"
+                && payload.releaseCommit === process.argv[1]
+                && payload.releaseId === process.argv[2];
+              process.exit(matchesTarget ? 0 : 1);
+            } catch {
+              process.exit(1);
+            }
+          });
+        ' "$DEPLOY_COMMIT" "$RELEASE_NAME"; then
       HEALTH_OK='1'
       break
     fi
     sleep 2
   done
-  [[ "$HEALTH_OK" == '1' ]] || rollback '40 秒内生产就绪检查未通过'
+  [[ "$HEALTH_OK" == '1' ]] || rollback '40 秒内未确认目标 commit 的生产就绪状态'
 else
   echo '已跳过 PM2 重启和生产就绪检查；current 已切换，请人工启动并验证。'
 fi

@@ -30,6 +30,11 @@ const EMPTY_REGION_FORM = {
   isDefault: false
 };
 
+const responseError = async (response, fallback) => {
+  const data = await response.json().catch(() => ({}));
+  return new Error(data.error || data.details || `${fallback}（HTTP ${response.status}）`);
+};
+
 const ReportConfig = () => {
   const { authHeaders } = useAuth();
   const importFileRef = useRef(null);
@@ -180,20 +185,21 @@ const ReportConfig = () => {
         alert('保存失败：需要 admin 登录状态（请先以 admin 账号登录后再修改配置）');
         return;
       }
-      if (r.ok) {
-        const j = await r.json();
-        const next = [...promptVersions];
-        const idx = next.findIndex(x => x.id === j.prompt.id);
-        if (idx >= 0) next[idx] = j.prompt; else next.push(j.prompt);
-        setPromptVersions(next);
-        if (!keywordList.includes(body.keyword)) {
-          setKeywordList([...keywordList, body.keyword]);
-        }
-        setSelectedKeyword(body.keyword);
-        fetchKeywordConfig();
-        // 保存返回值不含 source 字段，重拉当前关键词列表避免「已自定义」徽标丢失/状态过期
-        setVersionsTick((t) => t + 1);
+      if (!r.ok) throw await responseError(r, '保存关键词 Prompt 失败');
+      const j = await r.json();
+      const next = [...promptVersions];
+      const idx = next.findIndex(x => x.id === j.prompt.id);
+      if (idx >= 0) next[idx] = j.prompt; else next.push(j.prompt);
+      setPromptVersions(next);
+      if (!keywordList.includes(body.keyword)) {
+        setKeywordList([...keywordList, body.keyword]);
       }
+      setSelectedKeyword(body.keyword);
+      fetchKeywordConfig();
+      // 保存返回值不含 source 字段，重拉当前关键词列表避免「已自定义」徽标丢失/状态过期
+      setVersionsTick((t) => t + 1);
+    } catch (e) {
+      alert('保存失败: ' + e.message);
     } finally {
       setSaving(false);
     }
@@ -210,10 +216,11 @@ const ReportConfig = () => {
         alert('删除失败：需要 admin 登录状态');
         return;
       }
-      if (r.ok) {
-        setPromptVersions(promptVersions.filter(x => x.id !== promptId));
-        fetchKeywordConfig();
-      }
+      if (!r.ok) throw await responseError(r, '删除关键词 Prompt 失败');
+      setPromptVersions(promptVersions.filter(x => x.id !== promptId));
+      fetchKeywordConfig();
+    } catch (e) {
+      alert('删除失败: ' + e.message);
     } finally {
       setDeletingId('');
     }
@@ -231,6 +238,7 @@ const ReportConfig = () => {
         alert('保存失败：需要 admin 登录状态');
         return;
       }
+      if (!r.ok) throw await responseError(r, '保存政策 Prompt 失败');
       alert(type === 'extraction' ? '周报抽取提示词已保存' : '政策对比提示词已保存');
     } catch (e) {
       alert('保存失败: ' + e.message);
@@ -264,23 +272,24 @@ const ReportConfig = () => {
         alert('保存失败：需要 admin 登录状态');
         return;
       }
-      if (r.ok) {
-        const j = await r.json();
-        const next = [...regionPromptVersions];
-        const idx = next.findIndex(item => item.id === j.prompt.id);
-        if (idx >= 0) next[idx] = j.prompt; else next.push(j.prompt);
-        setRegionPromptVersions(next);
-        setRegionEditForm({
-          promptId: j.prompt.id,
-          name: j.prompt.name,
-          description: j.prompt.description || '',
-          systemPrompt: j.prompt.systemPrompt || '',
-          userPromptSingle: j.prompt.userPromptSingle || '',
-          userPromptMulti: j.prompt.userPromptMulti || '',
-          isDefault: !!j.prompt.isDefault
-        });
-        fetchRegionPromptConfig();
-      }
+      if (!r.ok) throw await responseError(r, '保存地区政策报告 Prompt 失败');
+      const j = await r.json();
+      const next = [...regionPromptVersions];
+      const idx = next.findIndex(item => item.id === j.prompt.id);
+      if (idx >= 0) next[idx] = j.prompt; else next.push(j.prompt);
+      setRegionPromptVersions(next);
+      setRegionEditForm({
+        promptId: j.prompt.id,
+        name: j.prompt.name,
+        description: j.prompt.description || '',
+        systemPrompt: j.prompt.systemPrompt || '',
+        userPromptSingle: j.prompt.userPromptSingle || '',
+        userPromptMulti: j.prompt.userPromptMulti || '',
+        isDefault: !!j.prompt.isDefault
+      });
+      fetchRegionPromptConfig();
+    } catch (e) {
+      alert('保存失败: ' + e.message);
     } finally {
       setRegionSaving(false);
     }
@@ -297,12 +306,13 @@ const ReportConfig = () => {
         alert('删除失败：需要 admin 登录状态');
         return;
       }
-      if (r.ok) {
-        setRegionPromptVersions(regionPromptVersions.filter(item => item.id !== promptId));
-        if (regionEditForm.promptId === promptId) {
-          setRegionEditForm({ ...EMPTY_REGION_FORM });
-        }
+      if (!r.ok) throw await responseError(r, '删除地区政策报告 Prompt 失败');
+      setRegionPromptVersions(regionPromptVersions.filter(item => item.id !== promptId));
+      if (regionEditForm.promptId === promptId) {
+        setRegionEditForm({ ...EMPTY_REGION_FORM });
       }
+    } catch (e) {
+      alert('删除失败: ' + e.message);
     } finally {
       setRegionDeletingId('');
     }

@@ -123,6 +123,24 @@ function atomicWrite(targetPath, raw, mode) {
   }
 }
 
+function nextBackupPath(targetPath, now = new Date()) {
+  const timestamp = now.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+  const basePath = `${targetPath}.bak-${timestamp}`;
+  let candidate = basePath;
+  let sequence = 1;
+  while (entryExists(candidate)) {
+    candidate = `${basePath}-${sequence}`;
+    sequence += 1;
+  }
+  return candidate;
+}
+
+function backupFile(sourcePath, backupPath, mode) {
+  fs.mkdirSync(path.dirname(backupPath), { recursive: true });
+  fs.copyFileSync(sourcePath, backupPath, fs.constants.COPYFILE_EXCL);
+  fs.chmodSync(backupPath, mode);
+}
+
 function prepareProductionRuntime(options) {
   if (!options.sourceConfig || !options.targetRoot) throw new Error('必须提供 --source-config 和 --target-root');
 
@@ -149,6 +167,9 @@ function prepareProductionRuntime(options) {
     label: '生产 users.json',
     allowReplace: options.forceUsers === true,
   });
+  const userBackupPath = userPlan.action === 'replace'
+    ? nextBackupPath(userPlan.targetPath, options.now || new Date())
+    : null;
   if (!Array.isArray(userPlan.parsed) || userPlan.parsed.length === 0) {
     throw new Error('生产 users.json 必须是非空数组');
   }
@@ -206,6 +227,9 @@ function prepareProductionRuntime(options) {
   if (!options.dryRun) {
     for (const plan of plans) {
       if (plan.action === 'skip') continue;
+      if (plan === userPlan && plan.action === 'replace') {
+        backupFile(plan.targetPath, userBackupPath, 0o600);
+      }
       atomicWrite(plan.targetPath, plan.raw, plan === userPlan ? 0o600 : 0o640);
     }
   }
@@ -215,7 +239,7 @@ function prepareProductionRuntime(options) {
     sourceConfig,
     sourceData,
     targetRoot,
-    users: { action: userPlan.action, sha256: userPlan.hash },
+    users: { action: userPlan.action, sha256: userPlan.hash, backupPath: userBackupPath },
     policies: policyPlans.map((plan) => ({
       name: path.basename(plan.targetPath),
       action: plan.action,

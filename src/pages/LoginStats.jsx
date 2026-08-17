@@ -1,18 +1,20 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Clock3, ShieldCheck, Users } from 'lucide-react';
 import { Empty, Error, Loading } from '../components/Status';
+import { useAuth } from '../auth/AuthContext';
 import './LoginStats.css';
 
 export default function LoginStatsPage() {
+  const { authHeaders } = useAuth();
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
 
-  const loadStats = async () => {
+  const loadStats = useCallback(async () => {
     setLoading(true);
     setError(false);
     try {
-      const response = await fetch('/api/auth/login-stats');
+      const response = await fetch('/api/auth/login-stats', { headers: { ...authHeaders() } });
       if (!response.ok) throw new Error('读取登录统计失败');
       setStats(await response.json());
     } catch {
@@ -20,11 +22,11 @@ export default function LoginStatsPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [authHeaders]);
 
   useEffect(() => {
     loadStats();
-  }, []);
+  }, [loadStats]);
 
   const summary = stats?.summary || [];
   const records = stats?.records || [];

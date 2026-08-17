@@ -3,6 +3,7 @@
 const path = require('node:path');
 
 const deployRoot = process.env.KEYDIGEST_DEPLOY_ROOT || '/www/wwwroot/keydigest';
+const appPort = process.env.KEYDIGEST_APP_PORT || '3456';
 
 module.exports = {
   apps: [{
@@ -11,6 +12,7 @@ module.exports = {
     script: 'server.cjs',
     env: {
       NODE_ENV: 'production',
+      API_PORT: appPort,
       KEYDIGEST_DATA_DIR: path.join(deployRoot, 'shared', 'data'),
     },
     autorestart: true,

@@ -67,8 +67,24 @@ test('prepareProductionRuntime refuses conflicting history and users unless expl
     /users\.json.*拒绝覆盖/,
   );
 
+  const preview = prepareProductionRuntime({ sourceConfig, targetRoot, forceUsers: true, dryRun: true });
+  assert.equal(preview.users.action, 'replace');
+  assert.match(preview.users.backupPath, /users\.json\.bak-\d{8}T\d{6}Z(?:-\d+)?$/);
+  assert.equal(fs.existsSync(preview.users.backupPath), false);
+  assert.equal(
+    JSON.parse(fs.readFileSync(path.join(targetRoot, 'config/runtime/users.json'), 'utf8'))[0].password,
+    'production-secret',
+  );
+
   const replaced = prepareProductionRuntime({ sourceConfig, targetRoot, forceUsers: true });
   assert.equal(replaced.users.action, 'replace');
+  assert.match(replaced.users.backupPath, /users\.json\.bak-\d{8}T\d{6}Z(?:-\d+)?$/);
+  assert.equal(
+    JSON.parse(fs.readFileSync(replaced.users.backupPath, 'utf8'))[0].password,
+    'production-secret',
+  );
+  assert.equal(fs.statSync(replaced.users.backupPath).mode & 0o777, 0o600);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(targetRoot, 'config/runtime/users.json'), 'utf8'))[0].password, 'new-production-secret');
 
   fs.writeFileSync(path.join(sourceConfig, 'policies/policy_initial.json'), JSON.stringify({ changed: true }));
   assert.throws(

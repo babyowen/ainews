@@ -72,7 +72,7 @@ node scripts/prepare-production-runtime.cjs \
 
 生产 Prompt 和自动周报配置已经审计并提升为 Git 默认基线，因此不会从旧目录再次整包导入。这样可避免把生产旧配置中的“烟草服务银行 `promptId: default`”错误重新带回；新默认明确使用存在的 `v1`。
 
-若目标 `users.json` 已存在且确实需要用新的生产文件替换，必须显式增加 `--force-users`。政策历史同名但内容不同会始终拒绝覆盖，需人工查明原因。
+若目标 `users.json` 已存在且确实需要用新的生产文件替换，必须显式增加 `--force-users`。覆盖前脚本会在同目录创建权限为 `0600` 的 `users.json.bak-<UTC时间>`；备份失败则拒绝覆盖。政策历史同名但内容不同会始终拒绝覆盖，需人工查明原因。
 
 ## 发布一个精确版本
 
@@ -94,8 +94,8 @@ bash scripts/deploy-from-gitee.sh \
 2. 在新的临时 release 中执行 `npm ci`、完整测试和生产构建；
 3. 接入共享 `.env`、runtime、政策历史和 data；
 4. 原子切换 `current`；
-5. 使用仓库内 `deploy/ecosystem.config.cjs` 启动或重载 PM2；
-6. 请求 `127.0.0.1:<port>/api/readiness`，验证配置、Prompt、数据库和共享数据目录；失败时自动切回上一 release；
+5. 把 `--port` 作为 `API_PORT` 传给仓库内 `deploy/ecosystem.config.cjs`，启动或重载 PM2；
+6. 请求 `127.0.0.1:<port>/api/readiness`，验证配置、Prompt、数据库、共享数据目录，并核对响应中的 release commit 与唯一 release ID 都和目标一致；失败时自动切回上一 release并清理失败 release；
 7. 成功后只保留最近 5 个 release，避免历史目录无限累积。
 
 若首次仍需沿用宝塔外部 PM2 配置，可先加 `--skip-restart`，确认 `current` 后把外部配置的 `cwd`/`script` 改为 `/www/wwwroot/keydigest/current`，再人工重启。完成一次切换后，建议统一使用仓库内 PM2 配置。
@@ -108,7 +108,7 @@ bash scripts/deploy-from-gitee.sh \
 readlink /www/wwwroot/keydigest/current
 cat /www/wwwroot/keydigest/current/.release-commit
 curl --fail http://127.0.0.1:3456/api/health
-curl --fail http://127.0.0.1:3456/api/readiness
+curl --fail http://127.0.0.1:3456/api/readiness  # releaseCommit 与 releaseId 必须对应当前目录
 find /www/wwwroot/keydigest/shared/config/policies -maxdepth 1 -name 'policy_*.json' | wc -l
 find /www/wwwroot/keydigest/shared/data/auto-report-pdfs -maxdepth 1 -name '*.pdf' | wc -l
 ```
@@ -125,7 +125,7 @@ find /www/wwwroot/keydigest/shared/data/auto-report-pdfs -maxdepth 1 -name '*.pd
 
 ## 回滚与日常纪律
 
-生产就绪检查失败会自动回滚。`/api/health` 只表示 Node 进程存活，不作为发布成功依据。若业务检查后需要手工回滚，将 `current` 原子切回保留的上一 release，再执行 PM2 `startOrReload`。不要通过修改 `RELEASE_VERSION` 或复制新的基线目录来回滚。
+生产就绪检查失败会自动回滚；回滚后的 PM2 重载成功时，失败 release 会立即删除，避免挤占保留名额。`/api/health` 只表示 Node 进程存活，不作为发布成功依据。若业务检查后需要手工回滚，将 `current` 原子切回保留的上一 release，再执行 PM2 `startOrReload`。不要通过修改 `RELEASE_VERSION` 或复制新的基线目录来回滚。
 
 日常规则：
 

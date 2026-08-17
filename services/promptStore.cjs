@@ -26,12 +26,18 @@ function extractSection(content, title) {
 // 替换或追加一个小节（用于管理界面保存 policy prompt）
 function upsertSection(content, title, text) {
   const body = String(content || '');
+  const nextText = String(text ?? '');
+  if (nextText.includes('```')) {
+    const error = new Error('Prompt 内容不能包含 Markdown 三反引号代码围栏');
+    error.status = 400;
+    throw error;
+  }
   const re = new RegExp(`^##\\s+${escapeRegExp(title)}\\s*\\n[\\s\\S]*?\\n\\s*\`\`\``, 'm');
   if (re.test(body)) {
-    return body.replace(re, `## ${title}\n\n\`\`\`\n${text}\n\`\`\``);
+    return body.replace(re, `## ${title}\n\n\`\`\`\n${nextText}\n\`\`\``);
   }
   const sep = body === '' || body.endsWith('\n') ? '' : '\n';
-  return `${body}${sep}\n\n## ${title}\n\n\`\`\`\n${text}\n\`\`\`\n`;
+  return `${body}${sep}\n\n## ${title}\n\n\`\`\`\n${nextText}\n\`\`\`\n`;
 }
 
 // ---------- 内联 prompt 常量（原先散落在 server.cjs 的 8 处定义，其中 3 对是重复）----------

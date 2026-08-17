@@ -144,8 +144,11 @@ function main() {
 
   const productionKeywords = readJson(path.join(snapshotConfig, 'keyword-prompts.json'));
   const canonicalKeywords = readJson(path.join(repoConfig, 'keyword-prompts.json'));
-  if (!sameJson(productionKeywords, canonicalKeywords)) {
-    errors.push('keyword-prompts.json 未与生产快照保持一致');
+  const expectedKeywords = clone(productionKeywords);
+  const tenderPrompts = expectedKeywords.keywords?.['潜在招标客户']?.prompts || [];
+  if (tenderPrompts.length === 1) tenderPrompts[0].isDefault = true;
+  if (!sameJson(expectedKeywords, canonicalKeywords)) {
+    errors.push('keyword-prompts.json 不符合生产快照加已确认的默认 Prompt 不变式修正');
   }
 
   for (const file of ['region-policy-report-prompts.json', 'llm-config.json']) {
