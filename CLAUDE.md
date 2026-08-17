@@ -146,7 +146,8 @@ KEYDIGEST_SESSION_SECRET
 - `GET /api/config/runtime-status` — admin-only runtime override status
 - `GET/POST /api/config/prompt-export|prompt-import` — admin-only prompt override backup/restore; never includes users
 - `POST /api/config/reset-default` — admin-only file or prompt-entry reset
-- `GET /api/health` — deployment health check without a database query
+- `GET /api/health` — liveness check without a database query
+- `GET /api/readiness` — production deployment gate for config, prompts, shared data, and database readiness
 
 ### Routing
 
@@ -175,6 +176,7 @@ Frontend route visibility is filtered by `src/config/userAccess.js`. `yzgjj` see
 - `services/loginAudit.cjs` — JSON-backed successful login audit helpers
 - `services/weeklyReportModelConfig.cjs` — DeepSeek V4 weekly report model config helpers
 - `services/autoReportService.cjs` — automatic weekly report cycle, logging, LLM call, and PDF generation
+- `services/appDataPaths.cjs` — stable shared-data and historical PDF path resolution
 - `src/auth/AuthContext.jsx` — frontend session user context
 - `src/config/userAccess.js` — frontend user route and keyword permissions
 - `src/api/autoReport.js` — frontend automatic weekly report API wrapper
@@ -190,6 +192,6 @@ Frontend route visibility is filtered by `src/config/userAccess.js`. `yzgjj` see
 - `config/keyword-prompts.json` — keyword-specific prompt overrides
 - `config/region-policy-report-prompts.json` — region policy prompt configs
 - `vite.config.js` — Vite config with `/api` proxy to backend
-- `scripts/prepare-production-runtime.cjs` — explicit first-cutover migration of production users/policy history
-- `scripts/deploy-from-gitee.sh` — exact-commit release deployment, health check, rollback, and bounded retention
+- `scripts/prepare-production-runtime.cjs` — explicit first-cutover migration of production users, policy history, login audit, and report PDFs
+- `scripts/deploy-from-gitee.sh` — exact-commit release deployment, readiness check, rollback, and bounded retention
 - `docs/deployment-gitee.md` — GitHub→Gitee→production runbook

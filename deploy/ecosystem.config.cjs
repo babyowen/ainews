@@ -11,6 +11,7 @@ module.exports = {
     script: 'server.cjs',
     env: {
       NODE_ENV: 'production',
+      KEYDIGEST_DATA_DIR: path.join(deployRoot, 'shared', 'data'),
     },
     autorestart: true,
     max_restarts: 10,

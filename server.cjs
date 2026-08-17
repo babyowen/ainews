@@ -26,11 +26,14 @@ const {
 } = require('./services/weeklyReportModelConfig.cjs');
 const {
   DEFAULT_AUTO_REPORT_CONFIG,
+  buildAutoReportConfig,
   canUserAccessAutoReport,
   createAutoReportService,
   normalizeAutoReportConfig,
   sanitizeAutoReportRecord,
+  validateAutoReportConfigReferences,
 } = require('./services/autoReportService.cjs');
+const { resolveAppDataDir, resolveStoredPdfPath } = require('./services/appDataPaths.cjs');
 const {
   appendLoginAudit,
   readLoginAuditStats,
@@ -44,6 +47,7 @@ const {
   buildStrictUserPrompt,
   buildJsonRepairUserPrompt,
   createPromptStore,
+  extractSection,
 } = require('./services/promptStore.cjs');
 
 // config 双层存储：默认层 config/ + 运行时层 config/runtime/（issue #22）
@@ -89,8 +93,9 @@ function buildAttachmentDisposition(filename) {
 
 const REGION_POLICY_REPORT_KEYWORD = '公积金';
 const LEGACY_DEEPSEEK_MODEL_KEY = 'deepseek-reasoner';
-const LOGIN_AUDIT_PATH = path.join(__dirname, 'data/login-audit.json');
-const AUTO_REPORT_PDF_DIR = path.join(__dirname, 'data/auto-report-pdfs');
+const DATA_DIR = resolveAppDataDir({ fallbackDir: path.join(__dirname, 'data') });
+const LOGIN_AUDIT_PATH = path.join(DATA_DIR, 'login-audit.json');
+const AUTO_REPORT_PDF_DIR = path.join(DATA_DIR, 'auto-report-pdfs');
 const AUTO_REPORT_ROUTE = '/auto-report';
 
 const AVAILABLE_ROUTES = [
@@ -260,17 +265,162 @@ function readAutoReportConfig() {
 
 function saveAutoReportConfig(config) {
   const normalized = normalizeAutoReportConfig(config);
+  assertAutoReportReferences(normalized);
   configStore.commitJson('auto-report-config.json', normalized);
   return normalized;
 }
 
-function resolveAutoReportPdfPath(pdfPath) {
-  const resolvedBase = path.resolve(AUTO_REPORT_PDF_DIR);
-  const resolvedFile = path.resolve(pdfPath || '');
-  if (resolvedFile !== resolvedBase && !resolvedFile.startsWith(`${resolvedBase}${path.sep}`)) {
-    return null;
+function weeklyPromptsFromText(content) {
+  const read = (title) => {
+    const value = extractSection(content || '', title);
+    return value === null ? '' : value.trim();
+  };
+  return {
+    systemPrompt: read('System Prompt'),
+    userPrompt: read('User Prompt'),
+    modifySystemPrompt: read('Modify System Prompt'),
+    modifyUserPrompt: read('Modify User Prompt'),
+  };
+}
+
+function policyPromptsFromText(content) {
+  const extraction = extractSection(content || '', 'Policy Extraction Prompt');
+  const comparison = extractSection(content || '', 'Policy Comparison Prompt');
+  return {
+    extractionPrompt: extraction === null ? '' : extraction.trim(),
+    comparisonPrompt: comparison === null ? '' : comparison.trim(),
+  };
+}
+
+function assertSinglePromptDefaults(keywordLibrary, regionLibrary) {
+  const errors = [];
+  for (const [keyword, config] of Object.entries(keywordLibrary?.keywords || {})) {
+    const prompts = config?.prompts || [];
+    if (prompts.length && prompts.filter((prompt) => prompt.isDefault).length !== 1) {
+      errors.push(`${keyword} 必须且只能有一个默认 Prompt`);
+    }
   }
-  return resolvedFile;
+  const regionPrompts = regionLibrary?.prompts || [];
+  if (regionPrompts.length && regionPrompts.filter((prompt) => prompt.isDefault).length !== 1) {
+    errors.push('地区政策报告必须且只能有一个默认 Prompt');
+  }
+  if (errors.length) throw new Error(errors.join('；'));
+}
+
+function assertAutoReportReferences(config, {
+  keywordLibrary = promptStore.getKeywordLibrary(),
+  weeklyPrompts = promptStore.getWeeklyPrompts(),
+} = {}) {
+  return validateAutoReportConfigReferences(config, {
+    getModel: getWeeklyReportModel,
+    findKeywordPrompt: (keyword, promptId) => (
+      keywordLibrary?.keywords?.[keyword]?.prompts || []
+    ).find((prompt) => prompt.id === promptId) || null,
+    getWeeklyPrompts: () => weeklyPrompts,
+  });
+}
+
+function assertPromptStateReady({
+  autoReportConfig = readAutoReportConfig(),
+  keywordLibrary = promptStore.getKeywordLibrary(),
+  regionLibrary = promptStore.getRegionLibrary(),
+  weeklyPrompts = promptStore.getWeeklyPrompts(),
+  policyPrompts = promptStore.getPolicyPrompts(),
+} = {}) {
+  if (!weeklyPrompts.systemPrompt || !weeklyPrompts.userPrompt
+      || !weeklyPrompts.modifySystemPrompt || !weeklyPrompts.modifyUserPrompt) {
+    throw new Error('周报 Prompt 文件缺少 System/User/Modify 小节');
+  }
+  if (!policyPrompts.extractionPrompt || !policyPrompts.comparisonPrompt) {
+    throw new Error('政策 Prompt 文件缺少提取或对比小节');
+  }
+  assertSinglePromptDefaults(keywordLibrary, regionLibrary);
+  assertAutoReportReferences(autoReportConfig, { keywordLibrary, weeklyPrompts });
+}
+
+function assertRuntimeConfigurationReady() {
+  const users = configStore.readEffectiveJson('users.json');
+  if (!Array.isArray(users) || users.length === 0) throw new Error('生产用户配置必须是非空数组');
+  const usernames = new Set();
+  for (const user of users) {
+    if (!user?.username || !user?.password) throw new Error('生产用户配置存在空用户名或密码');
+    if (usernames.has(user.username)) throw new Error(`生产用户配置存在重复用户名：${user.username}`);
+    usernames.add(user.username);
+  }
+  if (!users.some((user) => user.username === 'admin' && user.role === 'admin')) {
+    throw new Error('生产用户配置缺少 admin 管理员');
+  }
+
+  const llmConfig = configStore.readEffectiveJson('llm-config.json');
+  if (!llmConfig?.models || typeof llmConfig.models !== 'object') throw new Error('LLM 配置缺少 models');
+
+  const policiesDir = path.join(configStore.configDir, 'policies');
+  const policyFiles = fs.readdirSync(policiesDir).filter((name) => /^policy_[A-Za-z0-9_-]+\.json$/.test(name));
+  if (!policyFiles.length) throw new Error('共享政策历史为空');
+  for (const name of policyFiles) JSON.parse(fs.readFileSync(path.join(policiesDir, name), 'utf8'));
+
+  assertPromptStateReady();
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  fs.accessSync(DATA_DIR, fs.constants.R_OK | fs.constants.W_OK);
+  if (!fs.existsSync(path.join(__dirname, 'dist', 'index.html'))) throw new Error('生产前端构建不存在');
+}
+
+function promptStateFromPreview(preview = {}, autoReportConfig = readAutoReportConfig()) {
+  const effective = preview.effective || {};
+  const weeklyPrompts = Object.prototype.hasOwnProperty.call(effective, 'prompts.md')
+    ? weeklyPromptsFromText(effective['prompts.md'])
+    : promptStore.getWeeklyPrompts();
+  const policyPrompts = Object.prototype.hasOwnProperty.call(effective, 'policy_prompts.md')
+    ? policyPromptsFromText(effective['policy_prompts.md'])
+    : promptStore.getPolicyPrompts();
+  return {
+    autoReportConfig,
+    keywordLibrary: effective['keyword-prompts.json'] || promptStore.getKeywordLibrary(),
+    regionLibrary: effective['region-policy-report-prompts.json'] || promptStore.getRegionLibrary(),
+    weeklyPrompts,
+    policyPrompts,
+  };
+}
+
+function previewPromptBundle(bundle) {
+  const preview = configStore.previewImportBundle(bundle, { files: WEB_PROMPT_BUNDLE_FILES });
+  assertPromptStateReady(promptStateFromPreview(preview));
+  return preview;
+}
+
+function assertKeywordPromptNotReferenced(keyword, promptId, { allowFactoryFallback = false } = {}) {
+  const references = buildAutoReportConfig(readAutoReportConfig()).enabledKeywords
+    .filter((item) => item.keyword === keyword && item.promptId === promptId);
+  if (!references.length) return;
+
+  if (allowFactoryFallback) {
+    const factoryPrompt = configStore.readDefaultJson('keyword-prompts.json')
+      ?.keywords?.[keyword]?.prompts?.find((prompt) => prompt.id === promptId);
+    if (factoryPrompt?.systemPrompt && factoryPrompt?.userPrompt) return;
+  }
+
+  const error = new Error(`Prompt ${keyword}/${promptId} 正被启用的自动周报引用，请先修改自动周报配置`);
+  error.status = 409;
+  throw error;
+}
+
+function assertResetTargetsReady(targets) {
+  const effective = {};
+  for (const name of targets) {
+    if (name === 'prompts.md' || name === 'policy_prompts.md') {
+      effective[name] = fs.readFileSync(configStore.defaultPathOf(name), 'utf8');
+    } else if (name === 'keyword-prompts.json' || name === 'region-policy-report-prompts.json') {
+      effective[name] = configStore.previewRuntimeJson(name, null);
+    }
+  }
+  const autoReportConfig = targets.includes('auto-report-config.json')
+    ? normalizeAutoReportConfig(configStore.previewRuntimeJson('auto-report-config.json', null))
+    : readAutoReportConfig();
+  assertPromptStateReady(promptStateFromPreview({ effective }, autoReportConfig));
+}
+
+function resolveAutoReportPdfPath(pdfPath) {
+  return resolveStoredPdfPath(AUTO_REPORT_PDF_DIR, pdfPath);
 }
 
 const autoReportService = createAutoReportService({
@@ -284,9 +434,38 @@ const autoReportService = createAutoReportService({
   buildPdfFilename: buildReportPdfFilename,
 });
 
+app.get('/api/readiness', async (req, res) => {
+  try {
+    assertRuntimeConfigurationReady();
+    await ensureAutoReportInitialized();
+    await pool.query('SELECT 1 AS ready');
+    res.json({ status: 'ready' });
+  } catch (error) {
+    console.error('生产就绪检查失败:', error);
+    res.status(503).json({ status: 'not_ready' });
+  }
+});
+
 let autoReportCronTask = null;
 let autoReportRunning = false;
 let autoReportLastRun = null;
+let autoReportInitializationPromise = null;
+
+function ensureAutoReportInitialized() {
+  if (autoReportCronTask) return Promise.resolve();
+  if (!autoReportInitializationPromise) {
+    autoReportInitializationPromise = autoReportService.ensureLogTable()
+      .then(() => {
+        startAutoReportCron();
+        console.log('自动周报调度已注册: Asia/Shanghai 每周日 05:00');
+      })
+      .catch((error) => {
+        autoReportInitializationPromise = null;
+        throw error;
+      });
+  }
+  return autoReportInitializationPromise;
+}
 
 function startAutoReportCron() {
   if (autoReportCronTask) {
@@ -1370,7 +1549,8 @@ app.post('/api/config/auto-report', (req, res) => {
     res.json({ success: true, config: saved });
   } catch (error) {
     console.error('保存自动周报配置失败:', error);
-    res.status(500).json({ error: '保存自动周报配置失败', details: error.message });
+    const status = error.code === 'AUTO_REPORT_REFERENCE_INVALID' ? 400 : 500;
+    res.status(status).json({ error: '保存自动周报配置失败', details: error.message });
   }
 });
 
@@ -2411,6 +2591,7 @@ app.delete('/api/config/keyword-prompts/:keyword/:promptId', async (req, res) =>
   if (!requireAdminRequest(req, res)) return;
   try {
     const { keyword, promptId } = req.params;
+    assertKeywordPromptNotReferenced(keyword, promptId);
     const removed = promptStore.deleteKeywordPrompt(keyword, promptId);
     if (!removed) {
       return res.status(404).json({ error: `Prompt配置 "${promptId}" 不存在` });
@@ -2421,7 +2602,7 @@ app.delete('/api/config/keyword-prompts/:keyword/:promptId', async (req, res) =>
     });
   } catch (error) {
     console.error('删除关键词prompt配置失败:', error);
-    res.status(500).json({ error: '删除关键词prompt配置失败' });
+    res.status(error.status || 500).json({ error: error.status ? error.message : '删除关键词prompt配置失败' });
   }
 });
 
@@ -2544,11 +2725,11 @@ app.post('/api/config/prompt-import', async (req, res) => {
   try {
     const bundle = req.body;
     const dryRun = req.query.dryRun === '1' || req.query.dryRun === 'true';
+    const preview = previewPromptBundle(bundle);
+    if (dryRun) return res.json({ success: true, dryRun: true, files: preview.files });
     const imported = configStore.importBundle(bundle, {
       files: WEB_PROMPT_BUNDLE_FILES,
-      dryRun,
     });
-    if (dryRun) return res.json({ success: true, dryRun: true, files: imported });
     res.json({ success: true, imported });
   } catch (error) {
     console.error('导入 prompt 包失败:', error);
@@ -2564,6 +2745,7 @@ app.post('/api/config/reset-default', async (req, res) => {
 
     // 条目级：只清除该条目的运行时层覆盖/墓碑，不影响其他生产定制
     if (file === 'keyword-prompts.json' && keyword && promptId) {
+      assertKeywordPromptNotReferenced(keyword, promptId, { allowFactoryFallback: true });
       const removed = promptStore.resetKeywordPrompt(keyword, promptId);
       return res.json({ success: true, reset: removed ? [`${keyword}::${promptId}`] : [] });
     }
@@ -2577,6 +2759,7 @@ app.post('/api/config/reset-default', async (req, res) => {
     if (targets.some((name) => !WEB_RESETTABLE_FILES.has(name))) {
       return res.status(400).json({ error: '该文件不允许通过配置页面恢复默认' });
     }
+    assertResetTargetsReady(targets);
     const reset = [];
     for (const name of targets) {
       if (configStore.isOverridden(name)) {
@@ -2587,7 +2770,7 @@ app.post('/api/config/reset-default', async (req, res) => {
     res.json({ success: true, reset });
   } catch (error) {
     console.error('恢复默认配置失败:', error);
-    res.status(500).json({ error: '恢复默认配置失败', details: error.message });
+    res.status(error.status || 500).json({ error: '恢复默认配置失败', details: error.message });
   }
 });
 
@@ -4835,11 +5018,7 @@ app.get('*', (req, res) => {
 const port = process.env.API_PORT || 3000;
 app.listen(port, () => {
   console.log(`API server running at http://localhost:${port}`);
-  autoReportService.ensureLogTable()
-    .then(() => {
-      startAutoReportCron();
-      console.log('自动周报调度已注册: Asia/Shanghai 每周日 05:00');
-    })
+  ensureAutoReportInitialized()
     .catch(error => {
       console.error('初始化自动周报失败:', error);
     });

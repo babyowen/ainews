@@ -253,6 +253,12 @@ function createConfigStore(options = {}) {
     if (spec.type !== 'json') throw new Error(`${name} 不是 JSON 配置`);
     const base = readDefaultJson(name);
     const override = readRuntimeJson(name);
+    return mergeJsonLayers(name, base, override);
+  }
+
+  function mergeJsonLayers(name, base, override) {
+    const spec = specOf(name);
+    if (spec.type !== 'json') throw new Error(`${name} 不是 JSON 配置`);
     if (spec.merge === 'keyword-prompts') {
       if (!base && !override) return null;
       return mergeKeywordPrompts(base || { keywords: {}, metadata: {} }, override);
@@ -266,6 +272,11 @@ function createConfigStore(options = {}) {
       return mergeShallow(base || {}, override, spec.deepKeys || []);
     }
     return override ?? base ?? null; // replace
+  }
+
+  // 只计算指定运行时层与默认层合并后的结果，不落盘；用于导入/恢复前的引用校验。
+  function previewRuntimeJson(name, runtimeData) {
+    return mergeJsonLayers(name, readDefaultJson(name), runtimeData);
   }
 
   function ensureRuntimeDir() {
@@ -429,6 +440,21 @@ function createConfigStore(options = {}) {
     return imported;
   }
 
+  function previewImportBundle(bundle, opts = {}) {
+    const validated = validateBundle(bundle, opts);
+    const effective = {};
+    for (const { name, content } of validated) {
+      const spec = specOf(name);
+      effective[name] = spec.type === 'json'
+        ? previewRuntimeJson(name, JSON.parse(content))
+        : content;
+    }
+    return {
+      files: validated.map(({ name }) => name),
+      effective,
+    };
+  }
+
   return {
     configDir,
     runtimeDir,
@@ -447,6 +473,8 @@ function createConfigStore(options = {}) {
     exportBundle,
     validateBundle,
     importBundle,
+    previewImportBundle,
+    previewRuntimeJson,
   };
 }
 

@@ -187,15 +187,15 @@ if [[ "$SKIP_RESTART" == '0' ]]; then
   activate_pm2 || rollback 'PM2 启动失败'
   HEALTH_OK='0'
   for _attempt in {1..20}; do
-    if curl --fail --silent --show-error "http://127.0.0.1:$APP_PORT/api/health" | grep -q '"status":"ok"'; then
+    if curl --fail --silent --show-error "http://127.0.0.1:$APP_PORT/api/readiness" | grep -q '"status":"ready"'; then
       HEALTH_OK='1'
       break
     fi
     sleep 2
   done
-  [[ "$HEALTH_OK" == '1' ]] || rollback '40 秒内健康检查未通过'
+  [[ "$HEALTH_OK" == '1' ]] || rollback '40 秒内生产就绪检查未通过'
 else
-  echo '已跳过 PM2 重启和健康检查；current 已切换，请人工启动并验证。'
+  echo '已跳过 PM2 重启和生产就绪检查；current 已切换，请人工启动并验证。'
 fi
 
 # 边界控制：成功后只保留最近 N 个 release，避免目录无限累积。

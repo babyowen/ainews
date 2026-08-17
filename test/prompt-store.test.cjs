@@ -202,14 +202,36 @@ test('promptStore: 条目级恢复默认（只清该条目覆盖/墓碑，不影
   assert.equal(store.resetKeywordPrompt('养老', 'default'), null);
 });
 
+test('promptStore: 恢复运行时默认版本后重新启用出厂默认', () => {
+  const { dir, store } = makeStoreWithDefaults();
+  const saved = store.saveKeywordPrompt({
+    keyword: '养老',
+    promptId: 'runtime-default',
+    name: '生产默认版',
+    description: 'd',
+    systemPrompt: 'production system',
+    userPrompt: 'production user',
+    isDefault: true,
+  });
+  assert.equal(store.findKeywordPrompt('养老', 'default').isDefault, false);
+  assert.equal(store.findKeywordPrompt('养老', saved.id).isDefault, true);
+
+  store.resetKeywordPrompt('养老', saved.id);
+  const prompts = store.listKeywordPrompts('养老');
+  assert.deepEqual(prompts.map((prompt) => [prompt.id, prompt.isDefault]), [['default', true]]);
+  assert.equal(fs.existsSync(path.join(dir, 'runtime', 'keyword-prompts.json')), false);
+});
+
 test('promptStore: 地区报告条目级恢复默认', () => {
   const { dir, store } = makeStoreWithDefaults();
-  const saved = store.saveRegionPrompt({ name: '生产版', description: 'd', systemPrompt: 's2', userPromptSingle: 'u2', userPromptMulti: 'm2', isDefault: false });
+  const saved = store.saveRegionPrompt({ name: '生产版', description: 'd', systemPrompt: 's2', userPromptSingle: 'u2', userPromptMulti: 'm2', isDefault: true });
   assert.equal(store.getRegionPromptSummaries().find((p) => p.id === saved.id).source, 'runtime');
+  assert.equal(store.getRegionPromptSummaries().find((p) => p.id === saved.id).isDefault, true);
 
   assert.deepEqual(store.resetRegionPrompt(saved.id), { promptId: saved.id });
   const summaries = store.getRegionPromptSummaries();
   assert.equal(summaries.length, 1);
   assert.equal(summaries.every((p) => p.source === 'default'), true);
+  assert.equal(summaries[0].isDefault, true);
   assert.equal(fs.existsSync(path.join(dir, 'runtime', 'region-policy-report-prompts.json')), false);
 });

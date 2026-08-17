@@ -10,9 +10,10 @@ function usage() {
     '用法：',
     '  node scripts/prepare-production-runtime.cjs \\',
     '    --source-config /旧生产目录/config \\',
+    '    [--source-data /旧生产目录/data] \\',
     '    --target-root /部署根目录/shared [--dry-run] [--force-users]',
     '',
-    '只迁移生产 users.json 与 config/policies 历史。Prompt 已进入 Git 默认基线，不在这里重复导入。',
+    '迁移 users.json、config/policies、登录审计和自动周报 PDF。Prompt 已进入 Git 默认基线，不重复导入。',
   ].join('\n');
 }
 
@@ -23,6 +24,7 @@ function parseArgs(argv) {
     if (value === '--dry-run') args.dryRun = true;
     else if (value === '--force-users') args.forceUsers = true;
     else if (value === '--source-config') args.sourceConfig = argv[++index];
+    else if (value === '--source-data') args.sourceData = argv[++index];
     else if (value === '--target-root') args.targetRoot = argv[++index];
     else if (value === '--help' || value === '-h') args.help = true;
     else throw new Error(`未知参数：${value}`);
@@ -34,7 +36,30 @@ function sha256(buffer) {
   return crypto.createHash('sha256').update(buffer).digest('hex');
 }
 
+function entryExists(filePath) {
+  try {
+    fs.lstatSync(filePath);
+    return true;
+  } catch (error) {
+    if (error.code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
+function assertRegularFile(filePath, label) {
+  let stat;
+  try {
+    stat = fs.lstatSync(filePath);
+  } catch (error) {
+    throw new Error(`${label} 不可读：${filePath}（${error.message}）`);
+  }
+  if (!stat.isFile() || stat.isSymbolicLink()) {
+    throw new Error(`${label} 必须是普通文件，不能是符号链接：${filePath}`);
+  }
+}
+
 function readAndValidateJson(filePath, label) {
+  assertRegularFile(filePath, label);
   let raw;
   try {
     raw = fs.readFileSync(filePath);
@@ -51,7 +76,7 @@ function readAndValidateJson(filePath, label) {
 }
 
 function assertSafeDirectory(directory, label) {
-  if (!fs.existsSync(directory)) return;
+  if (!entryExists(directory)) return;
   const stat = fs.lstatSync(directory);
   if (!stat.isDirectory() || stat.isSymbolicLink()) {
     throw new Error(`${label} 必须是普通目录，不能是符号链接：${directory}`);
@@ -60,11 +85,27 @@ function assertSafeDirectory(directory, label) {
 
 function planFile({ sourcePath, targetPath, label, allowReplace = false }) {
   const source = readAndValidateJson(sourcePath, label);
-  if (fs.existsSync(targetPath)) {
+  if (entryExists(targetPath)) {
     const target = readAndValidateJson(targetPath, `${label} 目标`);
     if (source.hash === target.hash) return { action: 'skip', sourcePath, targetPath, ...source };
     if (!allowReplace) throw new Error(`${label} 目标已存在且内容不同，拒绝覆盖：${targetPath}`);
     return { action: 'replace', sourcePath, targetPath, ...source };
+  }
+  return { action: 'copy', sourcePath, targetPath, ...source };
+}
+
+function readRawFile(filePath, label) {
+  assertRegularFile(filePath, label);
+  const raw = fs.readFileSync(filePath);
+  return { raw, hash: sha256(raw) };
+}
+
+function planRawFile({ sourcePath, targetPath, label }) {
+  const source = readRawFile(sourcePath, label);
+  if (entryExists(targetPath)) {
+    const target = readRawFile(targetPath, `${label} 目标`);
+    if (source.hash === target.hash) return { action: 'skip', sourcePath, targetPath, ...source };
+    throw new Error(`${label} 目标已存在且内容不同，拒绝覆盖：${targetPath}`);
   }
   return { action: 'copy', sourcePath, targetPath, ...source };
 }
@@ -86,11 +127,13 @@ function prepareProductionRuntime(options) {
   if (!options.sourceConfig || !options.targetRoot) throw new Error('必须提供 --source-config 和 --target-root');
 
   const sourceConfig = path.resolve(options.sourceConfig);
+  const sourceData = path.resolve(options.sourceData || path.join(path.dirname(sourceConfig), 'data'));
   const targetRoot = path.resolve(options.targetRoot);
   const sourcePolicies = path.join(sourceConfig, 'policies');
   const targetConfig = path.join(targetRoot, 'config');
   const targetRuntime = path.join(targetConfig, 'runtime');
   const targetPolicies = path.join(targetConfig, 'policies');
+  const targetData = path.join(targetRoot, 'data');
 
   assertSafeDirectory(sourceConfig, '源 config');
   assertSafeDirectory(sourcePolicies, '源 policies');
@@ -98,6 +141,7 @@ function prepareProductionRuntime(options) {
   assertSafeDirectory(targetConfig, '目标 config');
   assertSafeDirectory(targetRuntime, '目标 runtime');
   assertSafeDirectory(targetPolicies, '目标 policies');
+  assertSafeDirectory(targetData, '目标 data');
 
   const userPlan = planFile({
     sourcePath: path.join(sourceConfig, 'users.json'),
@@ -125,7 +169,39 @@ function prepareProductionRuntime(options) {
     label: `政策历史 ${name}`,
     allowReplace: false,
   }));
-  const plans = [userPlan, ...policyPlans];
+
+  let loginAuditPlan = null;
+  const pdfPlans = [];
+  if (entryExists(sourceData)) {
+    assertSafeDirectory(sourceData, '源 data');
+    const sourceLoginAudit = path.join(sourceData, 'login-audit.json');
+    if (entryExists(sourceLoginAudit)) {
+      loginAuditPlan = planFile({
+        sourcePath: sourceLoginAudit,
+        targetPath: path.join(targetData, 'login-audit.json'),
+        label: '登录审计 login-audit.json',
+        allowReplace: false,
+      });
+    }
+
+    const sourcePdfDir = path.join(sourceData, 'auto-report-pdfs');
+    if (entryExists(sourcePdfDir)) {
+      assertSafeDirectory(sourcePdfDir, '源自动周报 PDF 目录');
+      const pdfNames = fs.readdirSync(sourcePdfDir)
+        .filter((name) => path.extname(name).toLowerCase() === '.pdf')
+        .sort();
+      for (const name of pdfNames) {
+        pdfPlans.push(planRawFile({
+          sourcePath: path.join(sourcePdfDir, name),
+          targetPath: path.join(targetData, 'auto-report-pdfs', name),
+          label: `自动周报 PDF ${name}`,
+        }));
+      }
+    }
+  }
+
+  const dataPlans = [loginAuditPlan, ...pdfPlans].filter(Boolean);
+  const plans = [userPlan, ...policyPlans, ...dataPlans];
 
   if (!options.dryRun) {
     for (const plan of plans) {
@@ -137,6 +213,7 @@ function prepareProductionRuntime(options) {
   return {
     dryRun: options.dryRun === true,
     sourceConfig,
+    sourceData,
     targetRoot,
     users: { action: userPlan.action, sha256: userPlan.hash },
     policies: policyPlans.map((plan) => ({
@@ -144,6 +221,14 @@ function prepareProductionRuntime(options) {
       action: plan.action,
       sha256: plan.hash,
     })),
+    data: {
+      loginAudit: loginAuditPlan ? { action: loginAuditPlan.action, sha256: loginAuditPlan.hash } : null,
+      pdfs: pdfPlans.map((plan) => ({
+        name: path.basename(plan.targetPath),
+        action: plan.action,
+        sha256: plan.hash,
+      })),
+    },
   };
 }
 

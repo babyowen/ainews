@@ -53,18 +53,22 @@ chmod 600 /www/wwwroot/keydigest/shared/.env
 ```bash
 node scripts/prepare-production-runtime.cjs \
   --source-config /www/wwwroot/keydigest-legacy/config \
+  --source-data /www/wwwroot/keydigest-legacy/data \
   --target-root /www/wwwroot/keydigest/shared \
   --dry-run
 
 node scripts/prepare-production-runtime.cjs \
   --source-config /www/wwwroot/keydigest-legacy/config \
+  --source-data /www/wwwroot/keydigest-legacy/data \
   --target-root /www/wwwroot/keydigest/shared
 ```
 
-该脚本有意只处理两类服务器真值：
+该脚本处理四类服务器真值：
 
 1. 完整生产 `users.json` → `shared/config/runtime/users.json`，保留真实密码和权限；
 2. 全部 `policy_*.json` → `shared/config/policies/`，保留历史政策版本。
+3. `login-audit.json` → `shared/data/login-audit.json`，保留登录审计；
+4. `auto-report-pdfs/*.pdf` → `shared/data/auto-report-pdfs/`，保留历史自动周报文件。
 
 生产 Prompt 和自动周报配置已经审计并提升为 Git 默认基线，因此不会从旧目录再次整包导入。这样可避免把生产旧配置中的“烟草服务银行 `promptId: default`”错误重新带回；新默认明确使用存在的 `v1`。
 
@@ -91,7 +95,7 @@ bash scripts/deploy-from-gitee.sh \
 3. 接入共享 `.env`、runtime、政策历史和 data；
 4. 原子切换 `current`；
 5. 使用仓库内 `deploy/ecosystem.config.cjs` 启动或重载 PM2；
-6. 请求 `127.0.0.1:<port>/api/health`；失败时自动切回上一 release；
+6. 请求 `127.0.0.1:<port>/api/readiness`，验证配置、Prompt、数据库和共享数据目录；失败时自动切回上一 release；
 7. 成功后只保留最近 5 个 release，避免历史目录无限累积。
 
 若首次仍需沿用宝塔外部 PM2 配置，可先加 `--skip-restart`，确认 `current` 后把外部配置的 `cwd`/`script` 改为 `/www/wwwroot/keydigest/current`，再人工重启。完成一次切换后，建议统一使用仓库内 PM2 配置。
@@ -104,7 +108,9 @@ bash scripts/deploy-from-gitee.sh \
 readlink /www/wwwroot/keydigest/current
 cat /www/wwwroot/keydigest/current/.release-commit
 curl --fail http://127.0.0.1:3456/api/health
+curl --fail http://127.0.0.1:3456/api/readiness
 find /www/wwwroot/keydigest/shared/config/policies -maxdepth 1 -name 'policy_*.json' | wc -l
+find /www/wwwroot/keydigest/shared/data/auto-report-pdfs -maxdepth 1 -name '*.pdf' | wc -l
 ```
 
 然后用浏览器验证：
@@ -119,7 +125,7 @@ find /www/wwwroot/keydigest/shared/config/policies -maxdepth 1 -name 'policy_*.j
 
 ## 回滚与日常纪律
 
-健康检查失败会自动回滚。若业务检查后需要手工回滚，将 `current` 原子切回保留的上一 release，再执行 PM2 `startOrReload`。不要通过修改 `RELEASE_VERSION` 或复制新的基线目录来回滚。
+生产就绪检查失败会自动回滚。`/api/health` 只表示 Node 进程存活，不作为发布成功依据。若业务检查后需要手工回滚，将 `current` 原子切回保留的上一 release，再执行 PM2 `startOrReload`。不要通过修改 `RELEASE_VERSION` 或复制新的基线目录来回滚。
 
 日常规则：
 

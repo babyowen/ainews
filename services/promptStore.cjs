@@ -97,6 +97,18 @@ function slugifyPromptName(value = '') {
     .replace(/^-+|-+$/g, '');
 }
 
+function ensureSingleDefault(prompts, preferredId = '', forcePreferred = false) {
+  if (!Array.isArray(prompts) || prompts.length === 0) return;
+  const defaults = prompts.filter((prompt) => prompt.isDefault);
+  const preferred = prompts.find((prompt) => prompt.id === preferredId);
+  if (defaults.length === 1 && (!forcePreferred || defaults[0].id === preferred?.id)) return;
+
+  const selected = preferred
+    || defaults[0]
+    || prompts[0];
+  for (const prompt of prompts) prompt.isDefault = prompt.id === selected.id;
+}
+
 function createPromptStore(options = {}) {
   const configStore = options.configStore || createConfigStore({ configDir: options.configDir });
 
@@ -143,6 +155,12 @@ function createPromptStore(options = {}) {
 
   function getKeywordLibrary() {
     return configStore.readEffectiveJson('keyword-prompts.json') || { keywords: {}, metadata: {} };
+  }
+
+  function getKeywordFactoryDefaultId(keyword) {
+    const defaults = configStore.readDefaultJson('keyword-prompts.json');
+    const prompts = defaults?.keywords?.[keyword]?.prompts || [];
+    return prompts.find((prompt) => prompt.isDefault)?.id || '';
   }
 
   function listKeywordPrompts(keyword) {
@@ -216,6 +234,7 @@ function createPromptStore(options = {}) {
     }
     if (existingIndex >= 0) prompts[existingIndex] = promptConfig;
     else prompts.push(promptConfig);
+    ensureSingleDefault(prompts, isDefault ? promptConfig.id : getKeywordFactoryDefaultId(keyword));
 
     library.metadata.lastUpdated = now;
     configStore.commitJson('keyword-prompts.json', library);
@@ -230,6 +249,7 @@ function createPromptStore(options = {}) {
     const index = keywordConfig.prompts.findIndex((p) => p.id === promptId);
     if (index === -1) return null;
     keywordConfig.prompts.splice(index, 1);
+    ensureSingleDefault(keywordConfig.prompts, getKeywordFactoryDefaultId(keyword));
     if (keywordConfig.prompts.length === 0) delete library.keywords[keyword];
     library.metadata = library.metadata || {};
     library.metadata.lastUpdated = new Date().toISOString();
@@ -239,6 +259,8 @@ function createPromptStore(options = {}) {
 
   // 条目级恢复默认：只移除该条目的运行时层覆盖或墓碑，其他生产定制不受影响
   function resetKeywordPrompt(keyword, promptId) {
+    const currentPrompt = findKeywordPrompt(keyword, promptId);
+    const factoryDefaultId = getKeywordFactoryDefaultId(keyword);
     const runtime = configStore.readRuntimeJson('keyword-prompts.json');
     if (!runtime) return null;
     let touched = false;
@@ -262,8 +284,14 @@ function createPromptStore(options = {}) {
     if (!touched) return null;
     const hasContent =
       Object.keys(runtime.keywords || {}).length > 0 || (runtime.metadata.deletedIds || []).length > 0;
-    if (!hasContent) configStore.clearRuntime('keyword-prompts.json');
-    else configStore.importBundle({ formatVersion: 1, files: { 'keyword-prompts.json': { type: 'json', content: runtime } } });
+    const effective = configStore.previewRuntimeJson('keyword-prompts.json', hasContent ? runtime : null);
+    const prompts = effective?.keywords?.[keyword]?.prompts || [];
+    ensureSingleDefault(
+      prompts,
+      factoryDefaultId,
+      promptId === factoryDefaultId || currentPrompt?.isDefault === true,
+    );
+    configStore.commitJson('keyword-prompts.json', effective);
     return { keyword, promptId };
   }
 
@@ -276,6 +304,11 @@ function createPromptStore(options = {}) {
         prompts: [],
       }
     );
+  }
+
+  function getRegionFactoryDefaultId() {
+    const defaults = configStore.readDefaultJson('region-policy-report-prompts.json');
+    return (defaults?.prompts || []).find((prompt) => prompt.isDefault)?.id || '';
   }
 
   function getRegionPromptSummaries() {
@@ -340,6 +373,7 @@ function createPromptStore(options = {}) {
     }
     if (existingIndex >= 0) library.prompts[existingIndex] = prompt;
     else library.prompts.push(prompt);
+    ensureSingleDefault(library.prompts, isDefault ? prompt.id : getRegionFactoryDefaultId());
 
     library.metadata.version = library.metadata.version || '1.0.0';
     library.metadata.description = library.metadata.description || '地区政策报告 Prompt 配置，支持多版本与单地区/多地区双模板';
@@ -360,6 +394,7 @@ function createPromptStore(options = {}) {
       throw err;
     }
     prompts.splice(index, 1);
+    ensureSingleDefault(prompts, getRegionFactoryDefaultId());
     library.metadata = library.metadata || {};
     library.metadata.lastUpdated = new Date().toISOString();
     configStore.commitJson('region-policy-report-prompts.json', library);
@@ -368,6 +403,8 @@ function createPromptStore(options = {}) {
 
   // 条目级恢复默认：只移除该版本的运行时层覆盖或墓碑（与关键词库同构）
   function resetRegionPrompt(promptId) {
+    const currentPrompt = findRegionPrompt(promptId);
+    const factoryDefaultId = getRegionFactoryDefaultId();
     const runtime = configStore.readRuntimeJson('region-policy-report-prompts.json');
     if (!runtime) return null;
     let touched = false;
@@ -386,13 +423,13 @@ function createPromptStore(options = {}) {
 
     if (!touched) return null;
     const hasContent = (runtime.prompts || []).length > 0 || (runtime.metadata.deletedIds || []).length > 0;
-    if (!hasContent) configStore.clearRuntime('region-policy-report-prompts.json');
-    else {
-      configStore.importBundle({
-        formatVersion: 1,
-        files: { 'region-policy-report-prompts.json': { type: 'json', content: runtime } },
-      });
-    }
+    const effective = configStore.previewRuntimeJson('region-policy-report-prompts.json', hasContent ? runtime : null);
+    ensureSingleDefault(
+      effective?.prompts || [],
+      factoryDefaultId,
+      promptId === factoryDefaultId || currentPrompt?.isDefault === true,
+    );
+    configStore.commitJson('region-policy-report-prompts.json', effective);
     return { promptId };
   }
 

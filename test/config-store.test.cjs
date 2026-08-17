@@ -270,6 +270,37 @@ test('configStore: exportBundle / importBundle 往返', () => {
   assert.deepEqual(dryRun, ['prompts.md']);
 });
 
+test('configStore: previewImportBundle validates prospective effective config without writing runtime', () => {
+  const dir = makeTempConfigDir();
+  writeDefaults(dir, {
+    'prompts.md': '默认',
+    'keyword-prompts.json': JSON.stringify(sampleKeywordDefaults()),
+  });
+  const store = createConfigStore({ configDir: dir });
+  const preview = store.previewImportBundle({
+    formatVersion: 1,
+    files: {
+      'keyword-prompts.json': {
+        type: 'json',
+        content: {
+          keywords: {
+            养老: {
+              prompts: [
+                { id: 'runtime', name: 'runtime', systemPrompt: 's', userPrompt: 'u', isDefault: true },
+              ],
+            },
+          },
+          metadata: {},
+        },
+      },
+    },
+  }, { files: ['keyword-prompts.json'] });
+
+  assert.deepEqual(preview.files, ['keyword-prompts.json']);
+  assert.equal(preview.effective['keyword-prompts.json'].keywords.养老.prompts.find((item) => item.id === 'runtime').source, 'runtime');
+  assert.equal(store.isOverridden('keyword-prompts.json'), false);
+});
+
 test('configStore: runtimeStatus 汇总覆盖状态', () => {
   const dir = makeTempConfigDir();
   writeDefaults(dir, { 'keyword-prompts.json': JSON.stringify(sampleKeywordDefaults()) });
