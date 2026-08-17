@@ -7,10 +7,45 @@
     "summaryVersion": "short"
   },
   "keywords": {
+    "养老": {
+      "enabled": true,
+      "modelKey": "deepseek-v4-flash",
+      "promptId": "prompt-1760599514629",
+      "minScore": 4,
+      "summaryVersion": "short"
+    },
+    "公积金": {
+      "enabled": true,
+      "modelKey": "deepseek-v4-flash",
+      "promptId": "prompt-1760599287921",
+      "minScore": 4,
+      "summaryVersion": "short"
+    },
+    "数字政务": {
+      "enabled": true,
+      "modelKey": "deepseek-v4-flash",
+      "promptId": "prompt-1760599706160",
+      "minScore": 4,
+      "summaryVersion": "short"
+    },
+    "政府基金": {
+      "enabled": true,
+      "modelKey": "deepseek-v4-flash",
+      "promptId": "prompt-1760598932288",
+      "minScore": 4,
+      "summaryVersion": "short"
+    },
+    "中国烟草": {
+      "enabled": true,
+      "modelKey": "deepseek-v4-flash",
+      "promptId": "启动v1-202511151621",
+      "minScore": 3,
+      "summaryVersion": "short"
+    },
     "烟草服务银行": {
       "enabled": true,
       "modelKey": "",
-      "promptId": "default",
+      "promptId": "v1",
       "minScore": 4,
       "summaryVersion": "short"
     }

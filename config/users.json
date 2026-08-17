@@ -36,8 +36,7 @@
     "role": "restricted",
     "password": "yzgjj",
     "keywords": [
-      "公积金",
-      "养老"
+      "公积金"
     ],
     "routes": [
       "/summary",

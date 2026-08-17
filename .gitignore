@@ -15,3 +15,6 @@
 /dist/
 
 # User config
+
+# One-time production truth snapshot for issue #22 (may contain secrets)
+/.production-snapshot/
