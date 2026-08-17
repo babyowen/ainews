@@ -35,11 +35,41 @@ const {
   appendLoginAudit,
   readLoginAuditStats,
 } = require('./services/loginAudit.cjs');
+const { createConfigStore } = require('./services/configStore.cjs');
+const {
+  POLICY_EXTRACTION_SYSTEM,
+  POLICY_COMPARISON_SYSTEM,
+  POLICY_COMPARISON_FALLBACK_USER,
+  JSON_REPAIR_SYSTEM,
+  buildStrictUserPrompt,
+  buildJsonRepairUserPrompt,
+  createPromptStore,
+} = require('./services/promptStore.cjs');
+
+// config 双层存储：默认层 config/ + 运行时层 config/runtime/（issue #22）
+const configStore = createConfigStore();
+const promptStore = createPromptStore({ configStore });
+const WEB_PROMPT_BUNDLE_FILES = [
+  'prompts.md',
+  'policy_prompts.md',
+  'keyword-prompts.json',
+  'region-policy-report-prompts.json',
+];
+const WEB_RESETTABLE_FILES = new Set([
+  ...WEB_PROMPT_BUNDLE_FILES,
+  'auto-report-config.json',
+  'llm-config.json',
+]);
 
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '50mb' })); // 增加请求体大小限制
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+// 部署健康检查不访问数据库，便于新版本切换后立即确认 Node/静态资源已正常启动。
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok' });
+});
 
 const pool = mysql.createPool({
   host: process.env.DB_HOST,
@@ -57,12 +87,9 @@ function buildAttachmentDisposition(filename) {
   return `attachment; filename="${safeAscii}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
 }
 
-const REGION_POLICY_REPORT_PROMPTS_PATH = path.join(__dirname, 'config/region-policy-report-prompts.json');
 const REGION_POLICY_REPORT_KEYWORD = '公积金';
-const REGION_POLICY_REPORT_MODEL = 'deepseek-reasoner';
+const LEGACY_DEEPSEEK_MODEL_KEY = 'deepseek-reasoner';
 const LOGIN_AUDIT_PATH = path.join(__dirname, 'data/login-audit.json');
-const USERS_CONFIG_PATH = path.join(__dirname, 'config/users.json');
-const AUTO_REPORT_CONFIG_PATH = path.join(__dirname, 'config/auto-report-config.json');
 const AUTO_REPORT_PDF_DIR = path.join(__dirname, 'data/auto-report-pdfs');
 const AUTO_REPORT_ROUTE = '/auto-report';
 
@@ -193,47 +220,47 @@ function getUserFromRequest(req) {
 }
 
 function loadUsersConfig() {
-  if (fs.existsSync(USERS_CONFIG_PATH)) {
-    const users = JSON.parse(fs.readFileSync(USERS_CONFIG_PATH, 'utf-8'));
-    // Lightweight migration: ensure built-in users have routes from AUTH_USERS
-    let changed = false;
-    for (const u of users) {
-      const builtin = AUTH_USERS[u.username];
-      if (!builtin) continue;
-      if (!Array.isArray(u.routes)) { u.routes = []; changed = true; }
-      for (const route of builtin.routes) {
-        if (!u.routes.includes(route)) {
-          u.routes.push(route);
-          changed = true;
-        }
-      }
-    }
-    if (changed) writeJsonFile(USERS_CONFIG_PATH, users);
+  let users = configStore.readEffectiveJson('users.json');
+  if (!Array.isArray(users)) {
+    users = Object.values(AUTH_USERS).map(u => ({
+      username: u.username,
+      displayName: u.displayName,
+      role: u.role,
+      password: getConfiguredPassword(u),
+      keywords: [...u.keywords],
+      routes: [...u.routes],
+    }));
+    configStore.commitJson('users.json', users);
     return users;
   }
-  const users = Object.values(AUTH_USERS).map(u => ({
-    username: u.username,
-    displayName: u.displayName,
-    role: u.role,
-    password: getConfiguredPassword(u),
-    keywords: [...u.keywords],
-    routes: [...u.routes],
-  }));
-  writeJsonFile(USERS_CONFIG_PATH, users);
+  // Lightweight migration: ensure built-in users have routes from AUTH_USERS
+  let changed = false;
+  for (const u of users) {
+    const builtin = AUTH_USERS[u.username];
+    if (!builtin) continue;
+    if (!Array.isArray(u.routes)) { u.routes = []; changed = true; }
+    for (const route of builtin.routes) {
+      if (!u.routes.includes(route)) {
+        u.routes.push(route);
+        changed = true;
+      }
+    }
+  }
+  if (changed) saveUsersConfig(users);
   return users;
 }
 
 function saveUsersConfig(users) {
-  writeJsonFile(USERS_CONFIG_PATH, users);
+  configStore.commitJson('users.json', users);
 }
 
 function readAutoReportConfig() {
-  return normalizeAutoReportConfig(loadJsonFile(AUTO_REPORT_CONFIG_PATH, DEFAULT_AUTO_REPORT_CONFIG));
+  return normalizeAutoReportConfig(configStore.readEffectiveJson('auto-report-config.json') || DEFAULT_AUTO_REPORT_CONFIG);
 }
 
 function saveAutoReportConfig(config) {
   const normalized = normalizeAutoReportConfig(config);
-  writeJsonFile(AUTO_REPORT_CONFIG_PATH, normalized);
+  configStore.commitJson('auto-report-config.json', normalized);
   return normalized;
 }
 
@@ -248,7 +275,8 @@ function resolveAutoReportPdfPath(pdfPath) {
 
 const autoReportService = createAutoReportService({
   pool,
-  configPath: AUTO_REPORT_CONFIG_PATH,
+  loadConfig: () => configStore.readEffectiveJson('auto-report-config.json'),
+  promptStore,
   outputDir: AUTO_REPORT_PDF_DIR,
   getWeeklyReportModel,
   buildChatPayload: buildDeepSeekChatPayload,
@@ -285,39 +313,6 @@ function startAutoReportCron() {
     scheduled: true,
     timezone: 'Asia/Shanghai',
   });
-}
-
-function slugifyPromptId(value = '') {
-  return String(value)
-    .toLowerCase()
-    .replace(/[^a-z0-9\u4e00-\u9fff]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-}
-
-function createEmptyRegionPolicyPromptConfig() {
-  return {
-    metadata: {
-      version: '1.0.0',
-      lastUpdated: new Date().toISOString(),
-      description: '地区政策报告 Prompt 配置，支持多版本与单地区/多地区双模板',
-    },
-    prompts: [],
-  };
-}
-
-function loadRegionPolicyPromptConfig() {
-  return loadJsonFile(REGION_POLICY_REPORT_PROMPTS_PATH, createEmptyRegionPolicyPromptConfig());
-}
-
-function saveRegionPolicyPromptConfig(config) {
-  const nextConfig = config || createEmptyRegionPolicyPromptConfig();
-  nextConfig.metadata = nextConfig.metadata || {};
-  nextConfig.metadata.version = nextConfig.metadata.version || '1.0.0';
-  nextConfig.metadata.description = nextConfig.metadata.description || '地区政策报告 Prompt 配置，支持多版本与单地区/多地区双模板';
-  nextConfig.metadata.lastUpdated = new Date().toISOString();
-  nextConfig.prompts = Array.isArray(nextConfig.prompts) ? nextConfig.prompts : [];
-  writeJsonFile(REGION_POLICY_REPORT_PROMPTS_PATH, nextConfig);
-  return nextConfig;
 }
 
 app.post('/api/auth/login', (req, res) => {
@@ -371,6 +366,7 @@ function sanitizeUser(user) {
 }
 
 app.get('/api/admin/users', async (req, res) => {
+  if (!requireAdminRequest(req, res)) return;
   try {
     const users = loadUsersConfig();
     const [rows] = await pool.query('SELECT DISTINCT keyword FROM scored_news WHERE keyword IS NOT NULL AND keyword != ""');
@@ -386,6 +382,7 @@ app.get('/api/admin/users', async (req, res) => {
 });
 
 app.post('/api/admin/users', (req, res) => {
+  if (!requireAdminRequest(req, res)) return;
   const { username, displayName, password, role, keywords, routes } = req.body || {};
   if (!username || !password) {
     return res.status(400).json({ error: '用户名和密码不能为空' });
@@ -411,6 +408,7 @@ app.post('/api/admin/users', (req, res) => {
 });
 
 app.put('/api/admin/users/:username', (req, res) => {
+  if (!requireAdminRequest(req, res)) return;
   const { username } = req.params;
   const { displayName, password, role, keywords, routes } = req.body || {};
   const users = loadUsersConfig();
@@ -437,6 +435,7 @@ app.put('/api/admin/users/:username', (req, res) => {
 });
 
 app.delete('/api/admin/users/:username', (req, res) => {
+  if (!requireAdminRequest(req, res)) return;
   const { username } = req.params;
   if (username === 'admin') {
     return res.status(403).json({ error: 'admin 用户不可删除' });
@@ -451,18 +450,6 @@ app.delete('/api/admin/users/:username', (req, res) => {
   res.json({ success: true });
 });
 
-function getRegionPromptSummary(prompt) {
-  return {
-    id: prompt.id,
-    name: prompt.name,
-    description: prompt.description || '',
-    systemPrompt: prompt.systemPrompt || '',
-    userPromptSingle: prompt.userPromptSingle || '',
-    userPromptMulti: prompt.userPromptMulti || '',
-    isDefault: !!prompt.isDefault,
-    updatedAt: prompt.updatedAt,
-  };
-}
 
 function getNextDateYmd(value = '') {
   const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -482,21 +469,8 @@ app.get('/api/keywords', async (req, res) => {
 // 关键词的可用prompt列表
 app.get('/api/keyword-prompts', async (req, res) => {
   try {
-    const fs = require('fs');
-    const path = require('path');
     const { keyword } = req.query;
-    const configPath = path.join(__dirname, 'config/keyword-prompts.json');
-    if (!fs.existsSync(configPath)) {
-      return res.status(404).json({ error: 'keyword-prompts configuration not found' });
-    }
-    const content = fs.readFileSync(configPath, 'utf-8');
-    const json = JSON.parse(content);
-    if (!keyword || !json.keywords || !json.keywords[keyword]) {
-      return res.json([]);
-    }
-    const prompts = json.keywords[keyword].prompts || [];
-    const result = prompts.map(p => ({ id: p.id, name: p.name, description: p.description, isDefault: !!p.isDefault, systemPrompt: p.systemPrompt || '', userPrompt: p.userPrompt || '' }));
-    res.json(result);
+    res.json(promptStore.listKeywordPrompts(keyword));
   } catch (err) {
     res.status(500).json({ error: 'Failed to load keyword prompts', details: err.message });
   }
@@ -1046,20 +1020,11 @@ app.post('/api/preview-modify-message', async (req, res) => {
   }
   
   try {
-    const fs = require('fs');
-    const path = require('path');
-    
-    // 读取提示词
-    const promptsPath = path.join(__dirname, 'config/prompts.md');
-    const promptsContent = fs.readFileSync(promptsPath, 'utf-8');
-    
-    // 解析modify system prompt和modify user prompt
-    const modifySystemPromptMatch = promptsContent.match(/## Modify System Prompt\s*\n\s*```\s*\n([\s\S]*?)\n\s*```/);
-    const modifyUserPromptMatch = promptsContent.match(/## Modify User Prompt\s*\n\s*```\s*\n([\s\S]*?)\n\s*```/);
-    
-    const modifySystemPrompt = modifySystemPromptMatch ? modifySystemPromptMatch[1].trim() : '';
-    const modifyUserPromptTemplate = modifyUserPromptMatch ? modifyUserPromptMatch[1].trim() : '';
-    
+    // 读取提示词（默认层 + 运行时层合并后的生效配置）
+    const weeklyPrompts = promptStore.getWeeklyPrompts();
+    const modifySystemPrompt = weeklyPrompts.modifySystemPrompt;
+    const modifyUserPromptTemplate = weeklyPrompts.modifyUserPrompt;
+
     // 替换修改用户提示词中的变量
     const finalModifyUserPrompt = modifyUserPromptTemplate
       .replace('{originalReport}', originalReport)
@@ -1067,7 +1032,7 @@ app.post('/api/preview-modify-message', async (req, res) => {
       .replace('{keyword}', keyword)
       .replace('{startDate}', startDate)
       .replace('{endDate}', endDate);
-    
+
     // 计算字数和Token估算
     const totalContent = modifySystemPrompt + finalModifyUserPrompt;
     const totalChars = totalContent.length;
@@ -1107,20 +1072,11 @@ app.post('/api/modify-report', async (req, res) => {
   }
   
   try {
-    const fs = require('fs');
-    const path = require('path');
-    
-    // 读取提示词
-    const promptsPath = path.join(__dirname, 'config/prompts.md');
-    const promptsContent = fs.readFileSync(promptsPath, 'utf-8');
-    
-    // 解析modify system prompt和modify user prompt
-    const modifySystemPromptMatch = promptsContent.match(/## Modify System Prompt\s*\n\s*```\s*\n([\s\S]*?)\n\s*```/);
-    const modifyUserPromptMatch = promptsContent.match(/## Modify User Prompt\s*\n\s*```\s*\n([\s\S]*?)\n\s*```/);
-    
-    const modifySystemPrompt = modifySystemPromptMatch ? modifySystemPromptMatch[1].trim() : '';
-    const modifyUserPromptTemplate = modifyUserPromptMatch ? modifyUserPromptMatch[1].trim() : '';
-    
+    // 读取提示词（默认层 + 运行时层合并后的生效配置）
+    const weeklyPrompts = promptStore.getWeeklyPrompts();
+    const modifySystemPrompt = weeklyPrompts.modifySystemPrompt;
+    const modifyUserPromptTemplate = weeklyPrompts.modifyUserPrompt;
+
     // 替换修改用户提示词中的变量
     const finalModifyUserPrompt = modifyUserPromptTemplate
       .replace('{originalReport}', originalReport)
@@ -1162,16 +1118,17 @@ app.post('/api/modify-report', async (req, res) => {
       res.write(`data: ${JSON.stringify({ type: 'status', message: '🔗 正在连接DeepSeek R1...' })}\n\n`);
       console.log('DeepSeek API Request - Token estimate:', estimateTokens(totalContent));
 
-      // 调用DeepSeek API with stream
+      // 调用DeepSeek API with stream（模型与端点来自配置，不再硬编码）
       console.log('Calling DeepSeek API...');
-      const response = await fetch('https://api.deepseek.com/chat/completions', {
+      const modifyModelConfig = getWeeklyReportModel(LEGACY_DEEPSEEK_MODEL_KEY);
+      const response = await fetch(modifyModelConfig.endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}`
+          'Authorization': `Bearer ${process.env[modifyModelConfig.apiKey]}`
         },
         body: JSON.stringify({
-          model: 'deepseek-reasoner',
+          model: modifyModelConfig.model,
           messages: [
             {
               role: 'system',
@@ -1234,14 +1191,15 @@ app.post('/api/modify-report', async (req, res) => {
       }
     } else {
       // 非流式模式，保持原有逻辑
-      const response = await fetch('https://api.deepseek.com/chat/completions', {
+      const modifyModelConfig = getWeeklyReportModel(LEGACY_DEEPSEEK_MODEL_KEY);
+      const response = await fetch(modifyModelConfig.endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}`
+          'Authorization': `Bearer ${process.env[modifyModelConfig.apiKey]}`
         },
         body: JSON.stringify({
-          model: 'deepseek-reasoner',
+          model: modifyModelConfig.model,
           messages: [
             {
               role: 'system',
@@ -1306,20 +1264,11 @@ app.post('/api/preview-report-message', async (req, res) => {
   }
   
   try {
-    const fs = require('fs');
-    const path = require('path');
-    
-    // 读取标准提示词
-    const promptsPath = path.join(__dirname, 'config/prompts.md');
-    const promptsContent = fs.readFileSync(promptsPath, 'utf-8');
-    
-    // 解析system prompt和user prompt
-    const systemPromptMatch = promptsContent.match(/## System Prompt\s*\n\s*```\s*\n([\s\S]*?)\n\s*```/);
-    const userPromptMatch = promptsContent.match(/## User Prompt\s*\n\s*```\s*\n([\s\S]*?)\n\s*```/);
-    
-    const systemPrompt = systemPromptMatch ? systemPromptMatch[1].trim() : '';
-    const userPromptTemplate = userPromptMatch ? userPromptMatch[1].trim() : '';
-    
+    // 读取标准提示词（默认层 + 运行时层合并后的生效配置）
+    const weeklyPrompts = promptStore.getWeeklyPrompts();
+    const systemPrompt = weeklyPrompts.systemPrompt;
+    const userPromptTemplate = weeklyPrompts.userPrompt;
+
     // 拼接新闻内容
   const newsContent = selectedNews.map((news, index) => {
       const text = summaryVersion === 'short' ? (news.short_summary || news.content || '内容不详') : (news.content || news.short_summary || '内容不详');
@@ -1565,47 +1514,31 @@ app.post('/api/generate-report', async (req, res) => {
 
   try {
     const modelConfig = getWeeklyReportModel(modelKey);
-    const fs = require('fs');
-    const path = require('path');
-    
+
     let systemPrompt = '';
     let userPromptTemplate = '';
-    
-    // 如果指定了promptId，使用关键词特定的prompt配置
+
+    // 如果指定了promptId，使用关键词特定的prompt配置（默认层+运行时层合并后的生效配置）
     if (promptId) {
       try {
-        const keywordPromptsPath = path.join(__dirname, 'config/keyword-prompts.json');
-        const keywordPromptsContent = fs.readFileSync(keywordPromptsPath, 'utf-8');
-        const keywordPrompts = JSON.parse(keywordPromptsContent);
-        
-        // 查找指定关键词的prompt配置
-        const keywordConfig = keywordPrompts.keywords[keyword];
-        if (keywordConfig && keywordConfig.prompts) {
-          const selectedPrompt = keywordConfig.prompts.find(p => p.id === promptId);
-          if (selectedPrompt) {
-            systemPrompt = selectedPrompt.systemPrompt;
-            userPromptTemplate = selectedPrompt.userPrompt;
-            console.log(`使用关键词 ${keyword} 的自定义prompt配置 (ID: ${promptId})`);
-          }
+        const selectedPrompt = promptStore.findKeywordPrompt(keyword, promptId);
+        if (selectedPrompt) {
+          systemPrompt = selectedPrompt.systemPrompt;
+          userPromptTemplate = selectedPrompt.userPrompt;
+          console.log(`使用关键词 ${keyword} 的自定义prompt配置 (ID: ${promptId})`);
         }
       } catch (error) {
         console.warn('读取关键词prompt配置失败，使用默认配置:', error);
       }
     }
-    
+
     // 如果没有找到关键词特定的prompt，使用默认配置
     if (!systemPrompt || !userPromptTemplate) {
-      const promptsPath = path.join(__dirname, 'config/prompts.md');
-      const promptsContent = fs.readFileSync(promptsPath, 'utf-8');
-      
-      // 解析system prompt和user prompt
-      const systemPromptMatch = promptsContent.match(/## System Prompt\s*\n\s*```\s*\n([\s\S]*?)\n\s*```/);
-      const userPromptMatch = promptsContent.match(/## User Prompt\s*\n\s*```\s*\n([\s\S]*?)\n\s*```/);
-      
-      systemPrompt = systemPromptMatch ? systemPromptMatch[1].trim() : '';
-      userPromptTemplate = userPromptMatch ? userPromptMatch[1].trim() : '';
+      const weeklyPrompts = promptStore.getWeeklyPrompts();
+      systemPrompt = weeklyPrompts.systemPrompt;
+      userPromptTemplate = weeklyPrompts.userPrompt;
     }
-    
+
     // 拼接新闻内容
     const newsContent = selectedNews.map((news, index) => {
       const text = summaryVersion === 'short' ? (news.short_summary || news.content || '内容不详') : (news.content || news.short_summary || '内容不详');
@@ -1869,47 +1802,30 @@ app.post('/api/generate-siliconflow-report', async (req, res) => {
   }
 
   try {
-    const fs = require('fs');
-    const path = require('path');
-    
     let systemPrompt = '';
     let userPromptTemplate = '';
-    
-    // 如果指定了promptId，使用关键词特定的prompt配置
+
+    // 如果指定了promptId，使用关键词特定的prompt配置（默认层+运行时层合并后的生效配置）
     if (promptId) {
       try {
-        const keywordPromptsPath = path.join(__dirname, 'config/keyword-prompts.json');
-        const keywordPromptsContent = fs.readFileSync(keywordPromptsPath, 'utf-8');
-        const keywordPrompts = JSON.parse(keywordPromptsContent);
-        
-        // 查找指定关键词的prompt配置
-        const keywordConfig = keywordPrompts.keywords[keyword];
-        if (keywordConfig && keywordConfig.prompts) {
-          const selectedPrompt = keywordConfig.prompts.find(p => p.id === promptId);
-          if (selectedPrompt) {
-            systemPrompt = selectedPrompt.systemPrompt;
-            userPromptTemplate = selectedPrompt.userPrompt;
-            console.log(`硅基流使用关键词 ${keyword} 的自定义prompt配置 (ID: ${promptId})`);
-          }
+        const selectedPrompt = promptStore.findKeywordPrompt(keyword, promptId);
+        if (selectedPrompt) {
+          systemPrompt = selectedPrompt.systemPrompt;
+          userPromptTemplate = selectedPrompt.userPrompt;
+          console.log(`硅基流使用关键词 ${keyword} 的自定义prompt配置 (ID: ${promptId})`);
         }
       } catch (error) {
         console.warn('硅基流读取关键词prompt配置失败，使用默认配置:', error);
       }
     }
-    
+
     // 如果没有找到关键词特定的prompt，使用默认配置
     if (!systemPrompt || !userPromptTemplate) {
-      const promptsPath = path.join(__dirname, 'config/prompts.md');
-      const promptsContent = fs.readFileSync(promptsPath, 'utf-8');
-      
-      // 解析system prompt和user prompt
-      const systemPromptMatch = promptsContent.match(/## System Prompt\s*\n\s*```\s*\n([\s\S]*?)\n\s*```/);
-      const userPromptMatch = promptsContent.match(/## User Prompt\s*\n\s*```\s*\n([\s\S]*?)\n\s*```/);
-      
-      systemPrompt = systemPromptMatch ? systemPromptMatch[1].trim() : '';
-      userPromptTemplate = userPromptMatch ? userPromptMatch[1].trim() : '';
+      const weeklyPrompts = promptStore.getWeeklyPrompts();
+      systemPrompt = weeklyPrompts.systemPrompt;
+      userPromptTemplate = weeklyPrompts.userPrompt;
     }
-    
+
     // 拼接新闻内容
     const newsContent = selectedNews.map((news, index) => {
       const text = summaryVersion === 'short' ? (news.short_summary || news.content || '内容不详') : (news.content || news.short_summary || '内容不详');
@@ -2173,47 +2089,30 @@ app.post('/api/generate-kimi-report', async (req, res) => {
   }
 
   try {
-    const fs = require('fs');
-    const path = require('path');
-    
     let systemPrompt = '';
     let userPromptTemplate = '';
-    
-    // 如果指定了promptId，使用关键词特定的prompt配置
+
+    // 如果指定了promptId，使用关键词特定的prompt配置（默认层+运行时层合并后的生效配置）
     if (promptId) {
       try {
-        const keywordPromptsPath = path.join(__dirname, 'config/keyword-prompts.json');
-        const keywordPromptsContent = fs.readFileSync(keywordPromptsPath, 'utf-8');
-        const keywordPrompts = JSON.parse(keywordPromptsContent);
-        
-        // 查找指定关键词的prompt配置
-        const keywordConfig = keywordPrompts.keywords[keyword];
-        if (keywordConfig && keywordConfig.prompts) {
-          const selectedPrompt = keywordConfig.prompts.find(p => p.id === promptId);
-          if (selectedPrompt) {
-            systemPrompt = selectedPrompt.systemPrompt;
-            userPromptTemplate = selectedPrompt.userPrompt;
-            console.log(`KIMI使用关键词 ${keyword} 的自定义prompt配置 (ID: ${promptId})`);
-          }
+        const selectedPrompt = promptStore.findKeywordPrompt(keyword, promptId);
+        if (selectedPrompt) {
+          systemPrompt = selectedPrompt.systemPrompt;
+          userPromptTemplate = selectedPrompt.userPrompt;
+          console.log(`KIMI使用关键词 ${keyword} 的自定义prompt配置 (ID: ${promptId})`);
         }
       } catch (error) {
         console.warn('KIMI读取关键词prompt配置失败，使用默认配置:', error);
       }
     }
-    
+
     // 如果没有找到关键词特定的prompt，使用默认配置
     if (!systemPrompt || !userPromptTemplate) {
-      const promptsPath = path.join(__dirname, 'config/prompts.md');
-      const promptsContent = fs.readFileSync(promptsPath, 'utf-8');
-      
-      // 解析system prompt和user prompt
-      const systemPromptMatch = promptsContent.match(/## System Prompt\s*\n\s*```\s*\n([\s\S]*?)\n\s*```/);
-      const userPromptMatch = promptsContent.match(/## User Prompt\s*\n\s*```\s*\n([\s\S]*?)\n\s*```/);
-      
-      systemPrompt = systemPromptMatch ? systemPromptMatch[1].trim() : '';
-      userPromptTemplate = userPromptMatch ? userPromptMatch[1].trim() : '';
+      const weeklyPrompts = promptStore.getWeeklyPrompts();
+      systemPrompt = weeklyPrompts.systemPrompt;
+      userPromptTemplate = weeklyPrompts.userPrompt;
     }
-    
+
     // 拼接新闻内容
     const newsContent = selectedNews.map((news, index) => {
       const text = summaryVersion === 'short' ? (news.short_summary || news.content || '内容不详') : (news.content || news.short_summary || '内容不详');
@@ -2424,40 +2323,17 @@ app.post('/api/generate-kimi-report', async (req, res) => {
 // 获取配置信息API
 app.get('/api/config/prompts', async (req, res) => {
   try {
-    const fs = require('fs');
-    const path = require('path');
-    
-    // 读取周报生成提示词配置
-    const promptsPath = path.join(__dirname, 'config/prompts.md');
-    const promptsContent = fs.readFileSync(promptsPath, 'utf-8');
-    
-    // 读取政策分析提示词配置
-    const policyPromptsPath = path.join(__dirname, 'config/policy_prompts.md');
-    let policyPromptsContent = '';
-    if (fs.existsSync(policyPromptsPath)) {
-        policyPromptsContent = fs.readFileSync(policyPromptsPath, 'utf-8');
-    }
-    
-    // 解析周报生成提示词
-    const systemPromptMatch = promptsContent.match(/## System Prompt[\s\S]*?```\w*\s*([\s\S]*?)\s*```/);
-    const userPromptMatch = promptsContent.match(/## User Prompt[\s\S]*?```\w*\s*([\s\S]*?)\s*```/);
-    const modifySystemPromptMatch = promptsContent.match(/## Modify System Prompt[\s\S]*?```\w*\s*([\s\S]*?)\s*```/);
-    const modifyUserPromptMatch = promptsContent.match(/## Modify User Prompt[\s\S]*?```\w*\s*([\s\S]*?)\s*```/);
-    
-    // 解析政策分析提示词
-    const policyComparisonPromptMatch = policyPromptsContent.match(/## Policy Comparison Prompt[\s\S]*?```\w*\s*([\s\S]*?)\s*```/);
-    const policyExtractionPromptMatch = policyPromptsContent.match(/## Policy Extraction Prompt[\s\S]*?```\w*\s*([\s\S]*?)\s*```/);
-    
-    // 默认优化后的提示词 (从文件读取失败时的后备)
-    const defaultExtractionPrompt = '';
+    // 读取周报/政策提示词（默认层 + 运行时层合并后的生效配置）
+    const weeklyPrompts = promptStore.getWeeklyPrompts();
+    const policyPrompts = promptStore.getPolicyPrompts();
 
     res.json({
-      systemPrompt: systemPromptMatch ? systemPromptMatch[1].trim() : '',
-      userPrompt: userPromptMatch ? userPromptMatch[1].trim() : '',
-      modifySystemPrompt: modifySystemPromptMatch ? modifySystemPromptMatch[1].trim() : '',
-      modifyUserPrompt: modifyUserPromptMatch ? modifyUserPromptMatch[1].trim() : '',
-      policyComparisonPrompt: policyComparisonPromptMatch ? policyComparisonPromptMatch[1].trim() : '',
-      policyExtractionPrompt: policyExtractionPromptMatch ? policyExtractionPromptMatch[1].trim() : defaultExtractionPrompt,
+      systemPrompt: weeklyPrompts.systemPrompt,
+      userPrompt: weeklyPrompts.userPrompt,
+      modifySystemPrompt: weeklyPrompts.modifySystemPrompt,
+      modifyUserPrompt: weeklyPrompts.modifyUserPrompt,
+      policyComparisonPrompt: policyPrompts.comparisonPrompt,
+      policyExtractionPrompt: policyPrompts.extractionPrompt,
       model: 'DeepSeek R1',
       modelConfig: {
         type: 'deepseek-reasoner',
@@ -2472,36 +2348,12 @@ app.get('/api/config/prompts', async (req, res) => {
   }
 });
 
-// 保存政策相关Prompt
+// 保存政策相关Prompt（仅写运行时层 config/runtime/）
 app.post('/api/config/policy-prompt', async (req, res) => {
+  if (!requireAdminRequest(req, res)) return;
   try {
-    const fs = require('fs');
-    const path = require('path');
     const { prompt, type } = req.body; // type: 'comparison' or 'extraction'
-    
-    // 使用新的配置文件
-    const promptsPath = path.join(__dirname, 'config/policy_prompts.md');
-    let content = '';
-    
-    if (fs.existsSync(promptsPath)) {
-        content = fs.readFileSync(promptsPath, 'utf-8');
-    }
-    
-    const sectionTitle = type === 'extraction' ? 'Policy Extraction Prompt' : 'Policy Comparison Prompt';
-    
-    // 检查是否存在对应部分 (使用更宽松的正则)
-    const regex = new RegExp(`## ${sectionTitle}[\\s\\S]*?\`\`\`\\w*\\s*[\\s\\S]*?\`\`\``);
-    
-    if (regex.test(content)) {
-      content = content.replace(
-        regex,
-        `## ${sectionTitle}\n\n\`\`\`\n${prompt}\n\`\`\``
-      );
-    } else {
-      content += `\n\n## ${sectionTitle}\n\n\`\`\`\n${prompt}\n\`\`\``;
-    }
-    
-    fs.writeFileSync(promptsPath, content, 'utf-8');
+    promptStore.savePolicyPrompt(type === 'extraction' ? 'extraction' : 'comparison', prompt);
     res.json({ success: true });
   } catch (error) {
     console.error(`保存${req.body.type}Prompt失败:`, error);
@@ -2509,30 +2361,10 @@ app.post('/api/config/policy-prompt', async (req, res) => {
   }
 });
 
-// 获取关键词prompt配置API
+// 获取关键词prompt配置API（默认层+运行时层合并后的生效配置）
 app.get('/api/config/keyword-prompts', async (req, res) => {
   try {
-    const fs = require('fs');
-    const path = require('path');
-    
-    const keywordPromptsPath = path.join(__dirname, 'config/keyword-prompts.json');
-    
-    // 检查文件是否存在
-    if (!fs.existsSync(keywordPromptsPath)) {
-      return res.json({
-        keywords: {},
-        metadata: {
-          version: '1.0.0',
-          lastUpdated: new Date().toISOString(),
-          description: '关键词级别的prompt配置文件'
-        }
-      });
-    }
-    
-    const keywordPromptsContent = fs.readFileSync(keywordPromptsPath, 'utf-8');
-    const keywordPrompts = JSON.parse(keywordPromptsContent);
-    
-    res.json(keywordPrompts);
+    res.json(promptStore.getKeywordLibrary());
   } catch (error) {
     console.error('获取关键词prompt配置失败:', error);
     res.status(500).json({ error: '获取关键词prompt配置失败' });
@@ -2542,27 +2374,13 @@ app.get('/api/config/keyword-prompts', async (req, res) => {
 // 获取指定关键词的prompt配置API
 app.get('/api/config/keyword-prompts/:keyword', async (req, res) => {
   try {
-    const fs = require('fs');
-    const path = require('path');
     const { keyword } = req.params;
-    
-    const keywordPromptsPath = path.join(__dirname, 'config/keyword-prompts.json');
-    
-    if (!fs.existsSync(keywordPromptsPath)) {
-      return res.status(404).json({ error: '关键词prompt配置文件不存在' });
-    }
-    
-    const keywordPromptsContent = fs.readFileSync(keywordPromptsPath, 'utf-8');
-    const keywordPrompts = JSON.parse(keywordPromptsContent);
-    
-    if (!keywordPrompts.keywords[keyword]) {
+    const library = promptStore.getKeywordLibrary();
+    const keywordConfig = library.keywords[keyword];
+    if (!keywordConfig) {
       return res.status(404).json({ error: `关键词 "${keyword}" 的配置不存在` });
     }
-    
-    res.json({
-      keyword,
-      prompts: keywordPrompts.keywords[keyword].prompts
-    });
+    res.json({ keyword, prompts: keywordConfig.prompts });
   } catch (error) {
     console.error('获取关键词prompt配置失败:', error);
     res.status(500).json({ error: '获取关键词prompt配置失败' });
@@ -2570,142 +2388,34 @@ app.get('/api/config/keyword-prompts/:keyword', async (req, res) => {
 });
 
 // 保存/更新关键词prompt配置API
+// 保存关键词prompt配置API（仅写运行时层 config/runtime/）
 app.post('/api/config/keyword-prompts', async (req, res) => {
+  if (!requireAdminRequest(req, res)) return;
   try {
-    const fs = require('fs');
-    const path = require('path');
     const { keyword, promptId, name, description, systemPrompt, userPrompt, isDefault } = req.body;
-
-    if (!keyword || !name || !description || !systemPrompt || !userPrompt) {
-      return res.status(400).json({ error: '缺少必要参数：关键词、版本名称、描述、System Prompt、User Prompt为必填' });
-    }
-    
-    const keywordPromptsPath = path.join(__dirname, 'config/keyword-prompts.json');
-    let keywordPrompts;
-    
-    // 读取现有配置或创建新配置
-    if (fs.existsSync(keywordPromptsPath)) {
-      const keywordPromptsContent = fs.readFileSync(keywordPromptsPath, 'utf-8');
-      keywordPrompts = JSON.parse(keywordPromptsContent);
-    } else {
-      keywordPrompts = {
-        keywords: {},
-        metadata: {
-          version: '1.0.0',
-          lastUpdated: new Date().toISOString(),
-          description: '关键词级别的prompt配置文件'
-        }
-      };
-    }
-    
-    // 初始化关键词配置
-    if (!keywordPrompts.keywords[keyword]) {
-      keywordPrompts.keywords[keyword] = {
-        prompts: []
-      };
-    }
-    
-    // 生成或使用版本ID（选填）
-    const rawId = (promptId || '').trim();
-    const slugify = (s) => s.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]+/g, '-').replace(/^-+|-+$/g, '');
-    const ts = new Date();
-    const tsStr = `${ts.getFullYear()}${String(ts.getMonth()+1).padStart(2,'0')}${String(ts.getDate()).padStart(2,'0')}${String(ts.getHours()).padStart(2,'0')}${String(ts.getMinutes()).padStart(2,'0')}`;
-    let effectiveId = rawId || `${slugify(name)}-${tsStr}`;
-    // 保证ID在该关键词下唯一
-    const existingIds = new Set(keywordPrompts.keywords[keyword].prompts.map(p => p.id));
-    if (existingIds.has(effectiveId)) {
-      let counter = 2;
-      while (existingIds.has(`${effectiveId}-${counter}`)) counter++;
-      effectiveId = `${effectiveId}-${counter}`;
-    }
-
-    // 查找现有prompt配置
-    const existingPromptIndex = keywordPrompts.keywords[keyword].prompts.findIndex(p => p.id === effectiveId || p.id === rawId);
-
-    const promptConfig = {
-      id: existingPromptIndex >= 0 ? keywordPrompts.keywords[keyword].prompts[existingPromptIndex].id : effectiveId,
-      name,
-      description: description || '',
-      systemPrompt,
-      userPrompt,
-      isDefault: isDefault || false,
-      createdAt: existingPromptIndex >= 0 ? keywordPrompts.keywords[keyword].prompts[existingPromptIndex].createdAt : new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
-    
-    // 如果设置为默认配置，取消其他配置的默认状态
-    if (isDefault) {
-      keywordPrompts.keywords[keyword].prompts.forEach(p => {
-        p.isDefault = false;
-      });
-    }
-    
-    // 更新或添加配置
-    if (existingPromptIndex >= 0) {
-      keywordPrompts.keywords[keyword].prompts[existingPromptIndex] = promptConfig;
-    } else {
-      keywordPrompts.keywords[keyword].prompts.push(promptConfig);
-    }
-    
-    // 更新元数据
-    keywordPrompts.metadata.lastUpdated = new Date().toISOString();
-    
-    // 保存配置文件
-    fs.writeFileSync(keywordPromptsPath, JSON.stringify(keywordPrompts, null, 2), 'utf-8');
-    
-    res.json({ 
-      success: true, 
+    const prompt = promptStore.saveKeywordPrompt({ keyword, promptId, name, description, systemPrompt, userPrompt, isDefault });
+    res.json({
+      success: true,
       message: '配置保存成功',
-      prompt: promptConfig
+      prompt
     });
   } catch (error) {
     console.error('保存关键词prompt配置失败:', error);
-    res.status(500).json({ error: '保存关键词prompt配置失败' });
+    res.status(error.status || 500).json({ error: error.status ? error.message : '保存关键词prompt配置失败' });
   }
 });
 
-// 删除关键词prompt配置API
+// 删除关键词prompt配置API（默认层条目产生墓碑）
 app.delete('/api/config/keyword-prompts/:keyword/:promptId', async (req, res) => {
+  if (!requireAdminRequest(req, res)) return;
   try {
-    const fs = require('fs');
-    const path = require('path');
     const { keyword, promptId } = req.params;
-    
-    const keywordPromptsPath = path.join(__dirname, 'config/keyword-prompts.json');
-    
-    if (!fs.existsSync(keywordPromptsPath)) {
-      return res.status(404).json({ error: '关键词prompt配置文件不存在' });
-    }
-    
-    const keywordPromptsContent = fs.readFileSync(keywordPromptsPath, 'utf-8');
-    const keywordPrompts = JSON.parse(keywordPromptsContent);
-    
-    if (!keywordPrompts.keywords[keyword]) {
-      return res.status(404).json({ error: `关键词 "${keyword}" 的配置不存在` });
-    }
-    
-    const promptIndex = keywordPrompts.keywords[keyword].prompts.findIndex(p => p.id === promptId);
-    
-    if (promptIndex === -1) {
+    const removed = promptStore.deleteKeywordPrompt(keyword, promptId);
+    if (!removed) {
       return res.status(404).json({ error: `Prompt配置 "${promptId}" 不存在` });
     }
-    
-    // 删除配置
-    keywordPrompts.keywords[keyword].prompts.splice(promptIndex, 1);
-    
-    // 如果删除后没有配置了，删除整个关键词
-    if (keywordPrompts.keywords[keyword].prompts.length === 0) {
-      delete keywordPrompts.keywords[keyword];
-    }
-    
-    // 更新元数据
-    keywordPrompts.metadata.lastUpdated = new Date().toISOString();
-    
-    // 保存配置文件
-    fs.writeFileSync(keywordPromptsPath, JSON.stringify(keywordPrompts, null, 2), 'utf-8');
-    
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       message: '配置删除成功'
     });
   } catch (error) {
@@ -2714,11 +2424,10 @@ app.delete('/api/config/keyword-prompts/:keyword/:promptId', async (req, res) =>
   }
 });
 
-// 获取地区政策报告 prompt 配置
+// 获取地区政策报告 prompt 配置（默认层+运行时层合并后的生效配置）
 app.get('/api/config/region-policy-report-prompts', async (req, res) => {
   try {
-    const config = loadRegionPolicyPromptConfig();
-    res.json(config);
+    res.json(promptStore.getRegionLibrary());
   } catch (error) {
     console.error('获取地区政策报告 prompt 配置失败:', error);
     res.status(500).json({ error: '获取地区政策报告 prompt 配置失败' });
@@ -2728,8 +2437,7 @@ app.get('/api/config/region-policy-report-prompts', async (req, res) => {
 // 获取单个地区政策报告 prompt
 app.get('/api/config/region-policy-report-prompts/:promptId', async (req, res) => {
   try {
-    const config = loadRegionPolicyPromptConfig();
-    const prompt = (config.prompts || []).find((item) => item.id === req.params.promptId);
+    const prompt = promptStore.findRegionPrompt(req.params.promptId);
     if (!prompt) {
       return res.status(404).json({ error: `Prompt配置 "${req.params.promptId}" 不存在` });
     }
@@ -2740,8 +2448,9 @@ app.get('/api/config/region-policy-report-prompts/:promptId', async (req, res) =
   }
 });
 
-// 保存/更新地区政策报告 prompt
+// 保存/更新地区政策报告 prompt（仅写运行时层 config/runtime/）
 app.post('/api/config/region-policy-report-prompts', async (req, res) => {
+  if (!requireAdminRequest(req, res)) return;
   try {
     const {
       promptId,
@@ -2753,54 +2462,15 @@ app.post('/api/config/region-policy-report-prompts', async (req, res) => {
       isDefault,
     } = req.body || {};
 
-    if (!name || !description || !systemPrompt || !userPromptSingle || !userPromptMulti) {
-      return res.status(400).json({
-        error: '缺少必要参数：版本名称、描述、System Prompt、单地区 User Prompt、多地区 User Prompt 为必填',
-      });
-    }
-
-    const config = loadRegionPolicyPromptConfig();
-    const now = new Date().toISOString();
-    const rawId = String(promptId || '').trim();
-    let effectiveId = rawId || `${slugifyPromptId(name)}-${now.slice(0, 16).replace(/[-:T]/g, '')}`;
-    const existingIndex = (config.prompts || []).findIndex((item) => item.id === rawId || item.id === effectiveId);
-
-    if (existingIndex === -1) {
-      const existingIds = new Set((config.prompts || []).map((item) => item.id));
-      if (existingIds.has(effectiveId)) {
-        let counter = 2;
-        while (existingIds.has(`${effectiveId}-${counter}`)) counter += 1;
-        effectiveId = `${effectiveId}-${counter}`;
-      }
-    } else {
-      effectiveId = config.prompts[existingIndex].id;
-    }
-
-    if (isDefault) {
-      (config.prompts || []).forEach((item) => {
-        item.isDefault = false;
-      });
-    }
-
-    const prompt = {
-      id: effectiveId,
-      name: String(name).trim(),
-      description: String(description || '').trim(),
-      systemPrompt: String(systemPrompt || ''),
-      userPromptSingle: String(userPromptSingle || ''),
-      userPromptMulti: String(userPromptMulti || ''),
-      isDefault: !!isDefault,
-      createdAt: existingIndex >= 0 ? config.prompts[existingIndex].createdAt : now,
-      updatedAt: now,
-    };
-
-    if (existingIndex >= 0) {
-      config.prompts[existingIndex] = prompt;
-    } else {
-      config.prompts.push(prompt);
-    }
-
-    saveRegionPolicyPromptConfig(config);
+    const prompt = promptStore.saveRegionPrompt({
+      promptId,
+      name,
+      description,
+      systemPrompt,
+      userPromptSingle,
+      userPromptMulti,
+      isDefault,
+    });
     res.json({
       success: true,
       message: '配置保存成功',
@@ -2808,42 +2478,115 @@ app.post('/api/config/region-policy-report-prompts', async (req, res) => {
     });
   } catch (error) {
     console.error('保存地区政策报告 prompt 失败:', error);
-    res.status(500).json({ error: '保存地区政策报告 prompt 失败' });
+    res.status(error.status || 500).json({ error: error.status ? error.message : '保存地区政策报告 prompt 失败' });
   }
 });
 
 // 删除地区政策报告 prompt
 app.delete('/api/config/region-policy-report-prompts/:promptId', async (req, res) => {
+  if (!requireAdminRequest(req, res)) return;
   try {
-    const config = loadRegionPolicyPromptConfig();
-    if ((config.prompts || []).length <= 1) {
-      return res.status(400).json({ error: '至少保留一个地区政策报告 Prompt 版本，不能删除最后一个版本' });
-    }
-    const promptIndex = (config.prompts || []).findIndex((item) => item.id === req.params.promptId);
-    if (promptIndex === -1) {
+    const removed = promptStore.deleteRegionPrompt(req.params.promptId);
+    if (!removed) {
       return res.status(404).json({ error: `Prompt配置 "${req.params.promptId}" 不存在` });
     }
-
-    config.prompts.splice(promptIndex, 1);
-    saveRegionPolicyPromptConfig(config);
     res.json({
       success: true,
       message: '配置删除成功',
     });
   } catch (error) {
     console.error('删除地区政策报告 prompt 失败:', error);
-    res.status(500).json({ error: '删除地区政策报告 prompt 失败' });
+    res.status(error.status || 500).json({ error: error.status ? error.message : '删除地区政策报告 prompt 失败' });
   }
 });
 
 // 获取地区政策报告 prompt 列表（前台使用）
 app.get('/api/policy/region-report/prompts', async (req, res) => {
   try {
-    const config = loadRegionPolicyPromptConfig();
-    res.json((config.prompts || []).map(getRegionPromptSummary));
+    res.json(promptStore.getRegionPromptSummaries());
   } catch (error) {
     console.error('获取地区政策报告 prompt 列表失败:', error);
     res.status(500).json({ error: '获取地区政策报告 prompt 列表失败' });
+  }
+});
+
+// ============ 运行时配置管理（issue #22：默认层/运行时层） ============
+
+// 查看哪些配置文件被生产端自定义（运行时层覆盖状态）
+app.get('/api/config/runtime-status', async (req, res) => {
+  if (!requireAdminRequest(req, res)) return;
+  try {
+    res.json({ runtimeDir: configStore.runtimeDir, files: configStore.runtimeStatus() });
+  } catch (error) {
+    console.error('获取运行时配置状态失败:', error);
+    res.status(500).json({ error: '获取运行时配置状态失败', details: error.message });
+  }
+});
+
+// 导出生产端自定义 prompt 包（仅含运行时层覆盖，用于备份/迁移）
+app.get('/api/config/prompt-export', async (req, res) => {
+  if (!requireAdminRequest(req, res)) return;
+  try {
+    // 浏览器导出只包含 prompt；users.json 含明文密码，绝不进入下载包。
+    const bundle = configStore.exportBundle({ files: WEB_PROMPT_BUNDLE_FILES });
+    res.setHeader('Content-Disposition', buildAttachmentDisposition(`prompt-runtime-bundle-${new Date().toISOString().slice(0, 10)}.json`));
+    res.json(bundle);
+  } catch (error) {
+    console.error('导出 prompt 包失败:', error);
+    res.status(500).json({ error: '导出 prompt 包失败', details: error.message });
+  }
+});
+
+// 导入 prompt 包（写入运行时层；dryRun 只返回将导入的文件清单）
+app.post('/api/config/prompt-import', async (req, res) => {
+  if (!requireAdminRequest(req, res)) return;
+  try {
+    const bundle = req.body;
+    const dryRun = req.query.dryRun === '1' || req.query.dryRun === 'true';
+    const imported = configStore.importBundle(bundle, {
+      files: WEB_PROMPT_BUNDLE_FILES,
+      dryRun,
+    });
+    if (dryRun) return res.json({ success: true, dryRun: true, files: imported });
+    res.json({ success: true, imported });
+  } catch (error) {
+    console.error('导入 prompt 包失败:', error);
+    res.status(400).json({ error: '导入 prompt 包失败', details: error.message });
+  }
+});
+
+// 恢复默认：{ file } 整文件恢复；或条目级 { file, keyword, promptId } / { file, promptId }
+app.post('/api/config/reset-default', async (req, res) => {
+  if (!requireAdminRequest(req, res)) return;
+  try {
+    const { file, files, keyword, promptId } = req.body || {};
+
+    // 条目级：只清除该条目的运行时层覆盖/墓碑，不影响其他生产定制
+    if (file === 'keyword-prompts.json' && keyword && promptId) {
+      const removed = promptStore.resetKeywordPrompt(keyword, promptId);
+      return res.json({ success: true, reset: removed ? [`${keyword}::${promptId}`] : [] });
+    }
+    if (file === 'region-policy-report-prompts.json' && promptId) {
+      const removed = promptStore.resetRegionPrompt(promptId);
+      return res.json({ success: true, reset: removed ? [promptId] : [] });
+    }
+
+    // 文件级：删除整个运行时层覆盖
+    const targets = Array.isArray(files) && files.length ? files : [file];
+    if (targets.some((name) => !WEB_RESETTABLE_FILES.has(name))) {
+      return res.status(400).json({ error: '该文件不允许通过配置页面恢复默认' });
+    }
+    const reset = [];
+    for (const name of targets) {
+      if (configStore.isOverridden(name)) {
+        configStore.clearRuntime(name);
+        reset.push(name);
+      }
+    }
+    res.json({ success: true, reset });
+  } catch (error) {
+    console.error('恢复默认配置失败:', error);
+    res.status(500).json({ error: '恢复默认配置失败', details: error.message });
   }
 });
 
@@ -3009,22 +2752,11 @@ app.post('/api/policy/extract', async (req, res) => {
       }
     }
     
-    // 读取提示词
-    const promptsPath = path.join(__dirname, 'config/policy_prompts.md');
-    let promptsContent = '';
-    if (fs.existsSync(promptsPath)) {
-        promptsContent = fs.readFileSync(promptsPath, 'utf-8');
-    }
-    
-    // 获取抽取提示词 (使用更宽松的正则)
-    const extractionPromptMatch = promptsContent.match(/## Policy Extraction Prompt[\s\S]*?```\w*\s*([\s\S]*?)\s*```/);
-    const systemPrompt = "你是一个专业的政策分析助手，请严格按照用户的要求提取政策信息并输出为JSON格式。";
-    
-    // 默认优化后的提示词 (从文件读取失败时的后备)
-    const defaultExtractionPrompt = '';
+    // 读取提示词（默认层 + 运行时层合并后的生效配置）
+    const policyPrompts = promptStore.getPolicyPrompts();
+    const systemPrompt = POLICY_EXTRACTION_SYSTEM;
+    const userPromptTemplate = policyPrompts.extractionPrompt;
 
-    const userPromptTemplate = extractionPromptMatch ? extractionPromptMatch[1].trim() : defaultExtractionPrompt;
-    
     if (!userPromptTemplate) {
         throw new Error('Policy Extraction Prompt not found in config/policy_prompts.md');
     }
@@ -3127,17 +2859,9 @@ app.post('/api/policy/extract', async (req, res) => {
       parsed = tryParse(firstResult);
     } catch (e) {
       const eMsg = String(e?.message || e || '');
-      const strictPrefix = [
-        '【强制约束：为避免超长/截断导致JSON不完整，请严格执行】',
-        '1) 仅输出一个JSON对象，且必须能被JSON.parse解析。',
-        '2) 每条“政策明细”的“内容”请控制在120字以内；禁止换行、禁止使用\\n；用分号/逗号表达要点。',
-        '3) 只保留关键数字与要素（对象/门槛/额度比例/期限/范围/流程关键点），不要写办理渠道/网址/过长材料清单。',
-        '4) 若同城同类信息重复，请合并为1条更精炼的政策明细；优先保留数字最明确的条目。',
-        '5) “依据文件”请尽量短（<=60字）。'
-      ].join('\n');
-      const strictPrompt = `${strictPrefix}\n\n${finalUserPrompt}`;
+      const strictPrompt = buildStrictUserPrompt(finalUserPrompt);
 
-      const repairSystem = '你是一个严格的JSON修复器。你只输出可被JSON.parse解析的单一JSON对象，不要任何解释或markdown。';
+      const repairSystem = JSON_REPAIR_SYSTEM;
       let strictResult = '';
       try {
         strictResult = await callDeepSeekJsonObject(strictPrompt, { temperature: 0.1, maxTokens: 4096 });
@@ -3145,16 +2869,7 @@ app.post('/api/policy/extract', async (req, res) => {
       } catch (strictErr) {
         const strictMsg = String(strictErr?.message || strictErr || '');
         const repairSource = strictResult || firstResult;
-        const repairUser = [
-          '请将下面文本修复为合法JSON对象：',
-          '要求：',
-          '1) 只输出一个JSON对象',
-          '2) 不要多余文字',
-          '3) 需要时将字符串中的换行转义为\\\\n，双引号转义为\\\"',
-          '',
-          '待修复文本：',
-          String(repairSource || '').slice(0, 12000)
-        ].join('\n');
+        const repairUser = buildJsonRepairUserPrompt(repairSource);
 
         const repairResp = await fetch(modelConfig.endpoint, {
           method: 'POST',
@@ -3215,16 +2930,9 @@ app.post('/api/policy/preview-prompt', async (req, res) => {
   
   try {
     const modelConfig = getWeeklyReportModel(modelKey);
-    const fs = require('fs');
-    const path = require('path');
     const policiesDir = path.join(__dirname, 'config/policies');
-    const promptsPath = path.join(__dirname, 'config/policy_prompts.md');
-    
-    let promptsContent = '';
-    if (fs.existsSync(promptsPath)) {
-        promptsContent = fs.readFileSync(promptsPath, 'utf-8');
-    }
-    
+    const policyPrompts = promptStore.getPolicyPrompts();
+
     let systemPrompt = '';
     let userPrompt = '';
     
@@ -3255,9 +2963,8 @@ app.post('/api/policy/preview-prompt', async (req, res) => {
           }
         }
         
-        const extractionPromptMatch = promptsContent.match(/## Policy Extraction Prompt[\s\S]*?```\w*\s*([\s\S]*?)\s*```/);
-        systemPrompt = "你是一个专业的政策分析助手，请严格按照用户的要求提取政策信息并输出为JSON格式。";
-        const userPromptTemplate = extractionPromptMatch ? extractionPromptMatch[1].trim() : '';
+        systemPrompt = POLICY_EXTRACTION_SYSTEM;
+        const userPromptTemplate = policyPrompts.extractionPrompt;
         
         userPrompt = userPromptTemplate
           .replace('{report}', contentToProcess || '')
@@ -3283,10 +2990,9 @@ app.post('/api/policy/preview-prompt', async (req, res) => {
            }
         }
         
-        const comparisonPromptMatch = promptsContent.match(/## Policy Comparison Prompt[\s\S]*?```\w*\s*([\s\S]*?)\s*```/);
-        systemPrompt = "你是一个专业的政策对比分析专家。";
-        const userPromptTemplate = comparisonPromptMatch ? comparisonPromptMatch[1].trim() : '请对比以下两份政策内容：\n\n现行政策：\n{current}\n\n新提取政策：\n{extracted}';
-        
+        systemPrompt = POLICY_COMPARISON_SYSTEM;
+        const userPromptTemplate = policyPrompts.comparisonPrompt || POLICY_COMPARISON_FALLBACK_USER;
+
         userPrompt = userPromptTemplate
           .replace('{current}', JSON.stringify(currentPolicyContent || {}, null, 2))
           .replace('{extracted}', JSON.stringify(extractedPolicy || {}, null, 2));
@@ -3339,18 +3045,11 @@ app.post('/api/policy/compare', async (req, res) => {
        }
     }
     
-    // 读取提示词
-    const promptsPath = path.join(__dirname, 'config/policy_prompts.md');
-    let promptsContent = '';
-    if (fs.existsSync(promptsPath)) {
-        promptsContent = fs.readFileSync(promptsPath, 'utf-8');
-    }
-    
-    // 获取对比提示词 (使用更宽松的正则)
-    const comparisonPromptMatch = promptsContent.match(/## Policy Comparison Prompt[\s\S]*?```\w*\s*([\s\S]*?)\s*```/);
-    const systemPrompt = "你是一个专业的政策对比分析专家。";
-    const userPromptTemplate = comparisonPromptMatch ? comparisonPromptMatch[1].trim() : '请对比以下两份政策内容：\n\n现行政策：\n{current}\n\n新提取政策：\n{extracted}';
-    
+    // 读取提示词（默认层 + 运行时层合并后的生效配置）
+    const policyPrompts = promptStore.getPolicyPrompts();
+    const systemPrompt = POLICY_COMPARISON_SYSTEM;
+    const userPromptTemplate = policyPrompts.comparisonPrompt || POLICY_COMPARISON_FALLBACK_USER;
+
     const finalUserPrompt = userPromptTemplate
       .replace('{current}', JSON.stringify(currentPolicyContent, null, 2))
       .replace('{extracted}', JSON.stringify(extractedPolicy, null, 2));
@@ -3396,9 +3095,9 @@ app.post('/api/policy/compare', async (req, res) => {
 // 获取所有可用模型
 app.get('/api/llm/models', async (req, res) => {
   try {
-    const LLMService = require('./services/llmService');
+    const LLMService = require('./services/llmService.cjs');
     const llmService = new LLMService();
-    
+
     const models = llmService.getAvailableModels();
     res.json(models);
   } catch (err) {
@@ -3410,9 +3109,9 @@ app.get('/api/llm/models', async (req, res) => {
 // 获取当前活跃模型
 app.get('/api/llm/active-model', async (req, res) => {
   try {
-    const LLMService = require('./services/llmService');
+    const LLMService = require('./services/llmService.cjs');
     const llmService = new LLMService();
-    
+
     const activeModel = llmService.getActiveModelConfig();
     res.json(activeModel);
   } catch (err) {
@@ -3421,22 +3120,23 @@ app.get('/api/llm/active-model', async (req, res) => {
   }
 });
 
-// 切换模型
+// 切换模型（仅写运行时层 activeModel 覆盖；需 admin）
 app.post('/api/llm/switch-model', async (req, res) => {
+  if (!requireAdminRequest(req, res)) return;
   const { modelKey } = req.body;
-  
+
   if (!modelKey) {
     return res.status(400).json({ error: 'modelKey is required' });
   }
-  
+
   try {
-    const LLMService = require('./services/llmService');
+    const LLMService = require('./services/llmService.cjs');
     const llmService = new LLMService();
-    
+
     const newActiveModel = llmService.switchModel(modelKey);
-    res.json({ 
+    res.json({
       message: `Successfully switched to model: ${modelKey}`,
-      activeModel: newActiveModel 
+      activeModel: newActiveModel
     });
   } catch (err) {
     console.error('Switch model error:', err);
@@ -3444,36 +3144,8 @@ app.post('/api/llm/switch-model', async (req, res) => {
   }
 });
 
-// 获取自定义Prompt选项
-app.get('/api/llm/custom-prompts', async (req, res) => {
-  try {
-    const LLMService = require('./services/llmService');
-    const llmService = new LLMService();
-    
-    const customPrompts = llmService.getCustomPrompts();
-    res.json(customPrompts);
-  } catch (err) {
-    console.error('Get custom prompts error:', err);
-    res.status(500).json({ error: 'Failed to get custom prompts', details: err.message });
-  }
-});
-
-// 重新加载配置
-app.post('/api/llm/reload-config', async (req, res) => {
-  try {
-    const LLMService = require('./services/llmService');
-    const llmService = new LLMService();
-    
-    const config = llmService.reloadConfig();
-    res.json({ 
-      message: 'Configuration reloaded successfully',
-      activeModel: config.activeModel
-    });
-  } catch (err) {
-    console.error('Reload config error:', err);
-    res.status(500).json({ error: 'Failed to reload configuration', details: err.message });
-  }
-});
+// 说明：/api/llm/custom-prompts（调用了不存在的 getCustomPrompts，恒 500）与
+// /api/llm/reload-config（空操作；所有配置均为每请求现读）已随 issue #22 重构移除。
 
 // 质量分析API - 获取各轮次总结数据
 app.get('/api/quality-analysis', async (req, res) => {
@@ -4551,17 +4223,6 @@ function fillPromptTemplate(template, variables) {
   });
 }
 
-function resolveRegionReportPrompt(prompts = [], promptId, selectionCount = 0) {
-  const promptById = promptId ? prompts.find((item) => item.id === promptId) : null;
-  const recommendedId = selectionCount === 1 ? 'single-region-default' : 'multi-region-default';
-  return (
-    promptById ||
-    prompts.find((item) => item.id === recommendedId) ||
-    prompts.find((item) => item.isDefault) ||
-    prompts[0] ||
-    null
-  );
-}
 
 function isContextLengthErrorText(text = '') {
   const content = String(text || '').toLowerCase();
@@ -4986,7 +4647,7 @@ app.post('/api/policy/region-report/generate', async (req, res) => {
       return res.status(400).json({ error: '当前筛选范围无可分析政策新闻' });
     }
 
-    const promptConfig = loadRegionPolicyPromptConfig();
+    const promptConfig = promptStore.getRegionLibrary();
     const prompts = Array.isArray(promptConfig.prompts) ? promptConfig.prompts : [];
     const promptById = promptId ? prompts.find((item) => item.id === promptId) : null;
     const recommendedId = selections.length === 1 ? 'single-region-default' : 'multi-region-default';
@@ -5029,14 +4690,15 @@ app.post('/api/policy/region-report/generate', async (req, res) => {
       regionBlocks,
     });
 
-    const deepseekResponse = await fetch('https://api.deepseek.com/chat/completions', {
+    const regionModelConfig = getWeeklyReportModel(LEGACY_DEEPSEEK_MODEL_KEY);
+    const deepseekResponse = await fetch(regionModelConfig.endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${process.env.DEEPSEEK_API_KEY}`,
+        Authorization: `Bearer ${process.env[regionModelConfig.apiKey]}`,
       },
       body: JSON.stringify({
-        model: REGION_POLICY_REPORT_MODEL,
+        model: regionModelConfig.model,
         messages: [
           { role: 'system', content: selectedPrompt.systemPrompt },
           { role: 'user', content: finalUserPrompt },
@@ -5086,7 +4748,7 @@ app.post('/api/policy/region-report/generate', async (req, res) => {
         excludedNewsCount,
         promptVersion: selectedPrompt.name,
         promptId: selectedPrompt.id,
-        modelName: REGION_POLICY_REPORT_MODEL,
+        modelName: regionModelConfig.model,
       },
     });
   } catch (error) {

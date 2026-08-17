@@ -1,13 +1,18 @@
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 
 const {
   buildAutoReportConfig,
+  createAutoReportService,
   loadPromptPair,
 } = require('../services/autoReportService.cjs');
+const { createConfigStore } = require('../services/configStore.cjs');
+const { createPromptStore } = require('../services/promptStore.cjs');
+const { getWeeklyReportModel } = require('../services/weeklyReportModelConfig.cjs');
 
 const rootDir = path.join(__dirname, '..');
 const configDir = path.join(rootDir, 'config');
@@ -46,6 +51,57 @@ test('every automatic report resolves an existing model and an explicit keyword 
       fallbackPromptsPath: path.join(configDir, 'prompts.md'),
     });
     assert.equal(prompt.promptId, item.promptId, `${item.keyword} must not silently fall back to global prompts`);
+  }
+});
+
+test('production auto-report execution uses the layered promptStore without changing prompt selection', async () => {
+  const raw = readJson('auto-report-config.json');
+  const enabled = buildAutoReportConfig(raw).enabledKeywords;
+  const rowsByKeyword = Object.fromEntries(enabled.map((item) => [item.keyword, [{
+    id: 1,
+    title: `${item.keyword}测试新闻`,
+    short_summary: '测试摘要',
+    content: '测试全文',
+    search_keyword: '测试客户',
+    score: 5,
+  }]]));
+  let nextId = 1;
+  const pool = {
+    async query(sql, params = []) {
+      if (sql.includes('FROM scored_news')) return [rowsByKeyword[params[0]] || []];
+      if (sql.includes('INSERT INTO weekly_reports') || sql.includes('INSERT INTO auto_report_log')) {
+        return [{ insertId: nextId++ }];
+      }
+      if (sql.includes('UPDATE auto_report_log')) return [{ affectedRows: 1 }];
+      return [[]];
+    },
+  };
+  const promptStore = createPromptStore({ configStore: createConfigStore({ configDir }) });
+  const calls = new Map();
+  const service = createAutoReportService({
+    pool,
+    config: raw,
+    promptStore,
+    getWeeklyReportModel,
+    callLlm: async ({ keyword, systemPrompt, userPrompt }) => {
+      calls.set(keyword, { systemPrompt, userPrompt });
+      return '测试周报';
+    },
+    renderPdf: async () => Buffer.from('%PDF-test'),
+    outputDir: fs.mkdtempSync(path.join(os.tmpdir(), 'production-prompt-execution-')),
+  });
+
+  for (const item of enabled) {
+    await service.generateReportForKeyword({
+      ...item,
+      startDate: '2026-08-09',
+      endDate: '2026-08-15',
+      triggerType: 'test',
+    });
+    const selected = promptStore.findKeywordPrompt(item.keyword, item.promptId);
+    assert.ok(selected, `${item.keyword}/${item.promptId} must exist in layered promptStore`);
+    assert.equal(calls.get(item.keyword).systemPrompt, selected.systemPrompt);
+    assert.ok(calls.get(item.keyword).userPrompt.includes(`${item.keyword}测试新闻`));
   }
 });
 

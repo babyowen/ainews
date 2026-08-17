@@ -148,10 +148,22 @@ function main() {
     errors.push('keyword-prompts.json 未与生产快照保持一致');
   }
 
-  for (const file of ['region-policy-report-prompts.json', 'llm-config.json', 'weekly-report-models.json']) {
+  for (const file of ['region-policy-report-prompts.json', 'llm-config.json']) {
     const production = readJson(path.join(snapshotConfig, file));
     const canonical = readJson(path.join(repoConfig, file));
     if (!sameJson(production, canonical)) errors.push(`${file} 未与生产快照保持一致`);
+  }
+
+  const productionModels = readJson(path.join(snapshotConfig, 'weekly-report-models.json'));
+  const canonicalModels = readJson(path.join(repoConfig, 'weekly-report-models.json'));
+  const canonicalModelsWithoutReasoner = clone(canonicalModels);
+  delete canonicalModelsWithoutReasoner.models?.['deepseek-reasoner'];
+  if (!sameJson(productionModels, canonicalModelsWithoutReasoner)) {
+    errors.push('weekly-report-models.json 除显式收口的 deepseek-reasoner 外未与生产快照保持一致');
+  }
+  const reasoner = canonicalModels.models?.['deepseek-reasoner'];
+  if (!reasoner || reasoner.model !== 'deepseek-reasoner' || reasoner.apiKey !== 'DEEPSEEK_API_KEY') {
+    errors.push('weekly-report-models.json 缺少已确认的 deepseek-reasoner 配置');
   }
 
   const productionAutoReport = readJson(path.join(snapshotConfig, 'auto-report-config.json'));

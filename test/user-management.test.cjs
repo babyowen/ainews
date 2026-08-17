@@ -5,23 +5,40 @@ const path = require('node:path');
 const test = require('node:test');
 
 const USERS_CONFIG_PATH = path.join(__dirname, '..', 'config', 'users.json');
-const BASE_URL = 'http://127.0.0.1:3456';
+const RUNTIME_USERS_PATH = path.join(__dirname, '..', 'config', 'runtime', 'users.json');
+const TEST_API_PORT = Number(process.env.TEST_API_PORT || 3456);
+const BASE_URL = `http://127.0.0.1:${TEST_API_PORT}`;
 
 let originalConfig;
+let originalRuntimeConfig;
 let serverProc;
+let adminToken = '';
 
 function backupConfig() {
   originalConfig = fs.readFileSync(USERS_CONFIG_PATH, 'utf-8');
+  originalRuntimeConfig = fs.existsSync(RUNTIME_USERS_PATH) ? fs.readFileSync(RUNTIME_USERS_PATH, 'utf-8') : null;
 }
 
 function restoreConfig() {
   fs.writeFileSync(USERS_CONFIG_PATH, originalConfig, 'utf-8');
+  if (originalRuntimeConfig === null) {
+    if (fs.existsSync(RUNTIME_USERS_PATH)) fs.unlinkSync(RUNTIME_USERS_PATH);
+  } else {
+    fs.writeFileSync(RUNTIME_USERS_PATH, originalRuntimeConfig, 'utf-8');
+  }
 }
 
-function request(method, urlPath, body) {
+// 生效配置 = config/runtime/users.json（若存在）整文件覆盖 config/users.json
+function readEffectiveUsers() {
+  const filePath = fs.existsSync(RUNTIME_USERS_PATH) ? RUNTIME_USERS_PATH : USERS_CONFIG_PATH;
+  return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+}
+
+function request(method, urlPath, body, token) {
   return new Promise((resolve, reject) => {
     const url = new URL(urlPath, BASE_URL);
     const options = { method, hostname: url.hostname, port: url.port, path: url.pathname, headers: {} };
+    if (token) options.headers.Authorization = `Bearer ${token}`;
     let payload;
     if (body) {
       payload = JSON.stringify(body);
@@ -42,7 +59,7 @@ function request(method, urlPath, body) {
 }
 
 // 启动 server
-test.before(() => {
+test.before(async () => {
   backupConfig();
   // 需要设置环境变量让 server 能启动
   if (!process.env.DB_HOST) {
@@ -53,14 +70,19 @@ test.before(() => {
   const { spawn } = require('child_process');
   serverProc = spawn(process.execPath, [path.join(__dirname, '..', 'server.cjs')], {
     stdio: 'pipe',
-    env: { ...process.env },
+    env: { ...process.env, API_PORT: String(TEST_API_PORT) },
   });
-  return new Promise((resolve) => {
+  await new Promise((resolve) => {
     serverProc.stdout.on('data', (chunk) => {
       if (chunk.toString().includes('running')) resolve();
     });
     setTimeout(resolve, 4000);
   });
+  // 以 admin 登录获取 token（管理接口现已要求 admin 鉴权）
+  const login = await request('POST', '/api/auth/login', { username: 'admin', password: 'citic3104' });
+  if (login.status === 200 && login.body.token) {
+    adminToken = login.body.token;
+  }
 });
 
 test.after(() => {
@@ -70,7 +92,7 @@ test.after(() => {
 
 // ===== 测试 1: GET /api/admin/users 返回正确结构 =====
 test('GET /api/admin/users returns users, allKeywords, and availableRoutes', async () => {
-  const res = await request('GET', '/api/admin/users');
+  const res = await request('GET', '/api/admin/users', null, adminToken);
   assert.equal(res.status, 200);
   assert.ok(Array.isArray(res.body.users));
   assert.ok(Array.isArray(res.body.allKeywords));
@@ -83,6 +105,18 @@ test('GET /api/admin/users returns users, allKeywords, and availableRoutes', asy
   res.body.users.forEach(u => assert.equal(u.password, ''));
 });
 
+// ===== 测试 1b: 管理接口要求 admin 鉴权，匿名访问被拒 =====
+test('admin user management endpoints reject anonymous requests', async () => {
+  const anonGet = await request('GET', '/api/admin/users');
+  assert.equal(anonGet.status, 401);
+  const anonPost = await request('POST', '/api/admin/users', { username: 'hacker', password: 'x', role: 'admin' });
+  assert.equal(anonPost.status, 401);
+  const anonDelete = await request('DELETE', '/api/admin/users/yzgjj');
+  assert.equal(anonDelete.status, 401);
+  const anonSwitch = await request('POST', '/api/llm/switch-model', { modelKey: 'kimi-k2' });
+  assert.equal(anonSwitch.status, 401);
+});
+
 // ===== 测试 2: POST /api/admin/users 创建用户成功 =====
 test('POST /api/admin/users creates a new user', async () => {
   const res = await request('POST', '/api/admin/users', {
@@ -92,17 +126,37 @@ test('POST /api/admin/users creates a new user', async () => {
     role: 'restricted',
     keywords: ['公积金'],
     routes: ['/summary', '/report'],
-  });
+  }, adminToken);
   assert.equal(res.status, 200);
   assert.equal(res.body.success, true);
   assert.equal(res.body.user.username, 'autotest');
   assert.equal(res.body.user.password, '');
-  // 验证已写入配置
-  const config = JSON.parse(fs.readFileSync(USERS_CONFIG_PATH, 'utf-8'));
+  // 验证已写入生效配置（运行时层）
+  const config = readEffectiveUsers();
   const created = config.find(u => u.username === 'autotest');
   assert.ok(created);
   assert.deepEqual(created.keywords, ['公积金']);
   assert.deepEqual(created.routes, ['/summary', '/report']);
+});
+
+test('prompt bundle export never includes users and import rejects users.json', async () => {
+  const exported = await request('GET', '/api/config/prompt-export', null, adminToken);
+  assert.equal(exported.status, 200);
+  assert.equal(Object.prototype.hasOwnProperty.call(exported.body.files, 'users.json'), false);
+  assert.equal(JSON.stringify(exported.body).includes('test123'), false);
+
+  const rejected = await request('POST', '/api/config/prompt-import', {
+    formatVersion: 1,
+    files: {
+      'users.json': { type: 'json', content: [{ username: 'injected', password: 'secret' }] },
+    },
+  }, adminToken);
+  assert.equal(rejected.status, 400);
+  assert.match(rejected.body.details, /users\.json 不允许/);
+
+  const resetRejected = await request('POST', '/api/config/reset-default', { file: 'users.json' }, adminToken);
+  assert.equal(resetRejected.status, 400);
+  assert.ok(readEffectiveUsers().some((user) => user.username === 'autotest'));
 });
 
 // ===== 测试 3: POST /api/admin/users 拒绝重复用户名 =====
@@ -114,16 +168,16 @@ test('POST /api/admin/users rejects duplicate username', async () => {
     role: 'restricted',
     keywords: [],
     routes: [],
-  });
+  }, adminToken);
   assert.equal(res.status, 409);
   assert.equal(res.body.error, '用户名已存在');
 });
 
 // ===== 测试 4: POST /api/admin/users 拒绝空用户名或密码 =====
 test('POST /api/admin/users rejects empty username or password', async () => {
-  const noName = await request('POST', '/api/admin/users', { username: '', password: 'x' });
+  const noName = await request('POST', '/api/admin/users', { username: '', password: 'x' }, adminToken);
   assert.equal(noName.status, 400);
-  const noPass = await request('POST', '/api/admin/users', { username: 'someone', password: '' });
+  const noPass = await request('POST', '/api/admin/users', { username: 'someone', password: '' }, adminToken);
   assert.equal(noPass.status, 400);
 });
 
@@ -132,7 +186,7 @@ test('PUT /api/admin/users updates display name and keywords', async () => {
   const res = await request('PUT', '/api/admin/users/autotest', {
     displayName: 'AutoTest Updated',
     keywords: ['公积金', '养老'],
-  });
+  }, adminToken);
   assert.equal(res.status, 200);
   assert.equal(res.body.user.displayName, 'AutoTest Updated');
   assert.deepEqual(res.body.user.keywords, ['公积金', '养老']);
@@ -140,7 +194,7 @@ test('PUT /api/admin/users updates display name and keywords', async () => {
 
 // ===== 测试 6: PUT 更新密码后可用新密码登录 =====
 test('Password update allows login with new password', async () => {
-  await request('PUT', '/api/admin/users/autotest', { password: 'newpass999' });
+  await request('PUT', '/api/admin/users/autotest', { password: 'newpass999' }, adminToken);
   const login = await request('POST', '/api/auth/login', { username: 'autotest', password: 'newpass999' });
   assert.equal(login.status, 200);
   assert.equal(login.body.user.username, 'autotest');
@@ -151,24 +205,24 @@ test('Password update allows login with new password', async () => {
 
 // ===== 测试 7: PUT /api/admin/users/admin 阻止 admin 降级 =====
 test('PUT /api/admin/users/admin prevents role downgrade', async () => {
-  const res = await request('PUT', '/api/admin/users/admin', { role: 'restricted' });
+  const res = await request('PUT', '/api/admin/users/admin', { role: 'restricted' }, adminToken);
   assert.equal(res.status, 403);
   assert.equal(res.body.error, 'admin 用户不可降级');
 });
 
 // ===== 测试 8: DELETE /api/admin/users/:username 删除用户成功 =====
 test('DELETE /api/admin/users/:username deletes a non-admin user', async () => {
-  const res = await request('DELETE', '/api/admin/users/autotest');
+  const res = await request('DELETE', '/api/admin/users/autotest', null, adminToken);
   assert.equal(res.status, 200);
   assert.equal(res.body.success, true);
-  // 确认已从配置中移除
-  const config = JSON.parse(fs.readFileSync(USERS_CONFIG_PATH, 'utf-8'));
+  // 确认已从生效配置中移除
+  const config = readEffectiveUsers();
   assert.ok(!config.find(u => u.username === 'autotest'));
 });
 
 // ===== 测试 9: DELETE /api/admin/users/admin 阻止删除 =====
 test('DELETE /api/admin/users/admin prevents admin deletion', async () => {
-  const res = await request('DELETE', '/api/admin/users/admin');
+  const res = await request('DELETE', '/api/admin/users/admin', null, adminToken);
   assert.equal(res.status, 403);
   assert.equal(res.body.error, 'admin 用户不可删除');
 });

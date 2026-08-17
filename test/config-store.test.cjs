@@ -229,6 +229,8 @@ test('configStore: exportBundle / importBundle 往返', () => {
 
   const bundle = source.exportBundle();
   assert.deepEqual(Object.keys(bundle.files), ['prompts.md']);
+  const promptOnly = source.exportBundle({ files: ['prompts.md'] });
+  assert.deepEqual(Object.keys(promptOnly.files), ['prompts.md']);
 
   const targetDir = makeTempConfigDir();
   writeDefaults(targetDir, {
@@ -248,6 +250,24 @@ test('configStore: exportBundle / importBundle 往返', () => {
     () => target.importBundle({ formatVersion: 1, files: { 'prompts.md': { type: 'json', content: {} } } }),
     /类型不匹配/,
   );
+  assert.throws(
+    () => target.importBundle(
+      {
+        formatVersion: 1,
+        files: {
+          'prompts.md': { type: 'text', content: '不会落盘' },
+          'users.json': { type: 'json', content: [] },
+        },
+      },
+      { files: ['prompts.md'] },
+    ),
+    /users\.json 不允许/,
+  );
+  // 先完整校验、后写入：前面的合法文件也不会被部分导入。
+  assert.equal(target.readEffectiveText('prompts.md'), '生产版');
+
+  const dryRun = target.importBundle(promptOnly, { files: ['prompts.md'], dryRun: true });
+  assert.deepEqual(dryRun, ['prompts.md']);
 });
 
 test('configStore: runtimeStatus 汇总覆盖状态', () => {

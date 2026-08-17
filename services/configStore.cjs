@@ -363,9 +363,19 @@ function createConfigStore(options = {}) {
     });
   }
 
-  function exportBundle() {
+  function resolveManagedNames(names) {
+    const requested = names === undefined ? Object.keys(MANAGED_FILES) : names;
+    if (!Array.isArray(requested)) throw new Error('files 必须是文件名数组');
+    return requested.map((name) => {
+      specOf(name);
+      return name;
+    });
+  }
+
+  function exportBundle(options = {}) {
+    const managedNames = resolveManagedNames(options.files);
     const files = {};
-    for (const name of Object.keys(MANAGED_FILES)) {
+    for (const name of managedNames) {
       if (!isOverridden(name)) continue;
       const spec = MANAGED_FILES[name];
       const raw = readTextFile(runtimePathOf(name));
@@ -375,21 +385,43 @@ function createConfigStore(options = {}) {
     return { formatVersion: BUNDLE_FORMAT_VERSION, exportedAt: new Date().toISOString(), files };
   }
 
-  function importBundle(bundle, opts = {}) {
+  function validateBundle(bundle, opts = {}) {
     if (!bundle || bundle.formatVersion !== BUNDLE_FORMAT_VERSION) {
       throw new Error('prompt 包格式不正确（formatVersion 不匹配）');
     }
     if (!bundle.files || typeof bundle.files !== 'object') {
       throw new Error('prompt 包缺少 files 字段');
     }
-    const imported = [];
+    const allowedNames = new Set(resolveManagedNames(opts.files));
+    const validated = [];
     for (const [name, file] of Object.entries(bundle.files)) {
       const spec = specOf(name); // 未知文件名直接抛错，拒绝导入
+      if (!allowedNames.has(name)) throw new Error(`${name} 不允许通过当前入口导入`);
       if (file === null || file === undefined) continue;
+      if (typeof file !== 'object' || Array.isArray(file)) throw new Error(`${name} 的文件描述格式不正确`);
       if (file.type && file.type !== spec.type) {
         throw new Error(`${name} 的类型不匹配：期望 ${spec.type}，实际 ${file.type}`);
       }
-      const content = spec.type === 'json' ? `${JSON.stringify(file.content, null, 2)}\n` : String(file.content);
+      if (!Object.prototype.hasOwnProperty.call(file, 'content')) throw new Error(`${name} 缺少 content 字段`);
+      if (spec.type === 'text' && typeof file.content !== 'string') throw new Error(`${name} 的内容必须是字符串`);
+      if (spec.type === 'json' && (file.content === null || typeof file.content !== 'object')) {
+        throw new Error(`${name} 的内容必须是 JSON 对象或数组`);
+      }
+      const serialized = spec.type === 'json' ? JSON.stringify(file.content, null, 2) : file.content;
+      if (serialized === undefined) throw new Error(`${name} 的内容无法序列化`);
+      const content = spec.type === 'json' ? `${serialized}\n` : serialized;
+      validated.push({ name, content });
+    }
+    return validated;
+  }
+
+  function importBundle(bundle, opts = {}) {
+    // 先完整校验，再执行任何写入，避免一个坏文件造成“只导入了一半”。
+    const validated = validateBundle(bundle, opts);
+    if (opts.dryRun) return validated.map(({ name }) => name);
+
+    const imported = [];
+    for (const { name, content } of validated) {
       if (opts.skipUnchanged && sameJson(content, readTextFile(runtimePathOf(name)))) continue;
       writeRuntimeRaw(name, content);
       imported.push(name);
@@ -413,6 +445,7 @@ function createConfigStore(options = {}) {
     isOverridden,
     runtimeStatus,
     exportBundle,
+    validateBundle,
     importBundle,
   };
 }

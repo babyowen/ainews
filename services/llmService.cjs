@@ -1,21 +1,23 @@
-const fs = require('fs');
-const path = require('path');
+// 本文件为 CommonJS，扩展名必须是 .cjs：package.json 声明 "type": "module"，
+// 原先的 .js 在生产 Node 20 下被 require 会抛 ERR_REQUIRE_ESM（issue #22 顺带修复）。
+
+const { createConfigStore } = require('./configStore.cjs');
+const { createPromptStore } = require('./promptStore.cjs');
 
 class LLMService {
   constructor() {
     this.config = this.loadConfig();
   }
 
-  // 加载配置文件
+  // 加载配置文件（默认层 + 运行时层合并后的生效配置）
   loadConfig() {
     try {
-      const configPath = path.join(__dirname, '../config/llm-config.json');
-      const configContent = fs.readFileSync(configPath, 'utf8');
-      const config = JSON.parse(configContent);
-      
+      const configStore = createConfigStore();
+      const config = configStore.readEffectiveJson('llm-config.json');
+
       // 尝试从markdown文件加载提示词
       this.loadPromptsFromMarkdown(config);
-      
+
       return config;
     } catch (error) {
       console.error('Failed to load LLM config:', error);
@@ -23,39 +25,17 @@ class LLMService {
     }
   }
 
-  // 从markdown文件加载提示词
+  // 从markdown文件加载提示词（仅内存使用，绝不写回配置文件）
   loadPromptsFromMarkdown(config) {
     try {
-      const promptsPath = path.join(__dirname, '../config/prompts.md');
-      if (fs.existsSync(promptsPath)) {
-        const promptsContent = fs.readFileSync(promptsPath, 'utf8');
-        
-        // 初始化prompts对象（如果不存在）
-        if (!config.prompts) {
-          config.prompts = {};
-        }
-        
-        // 解析System Prompt
-        const systemPromptMatch = promptsContent.match(/## System Prompt\s*```\s*([\s\S]*?)\s*```/);
-        if (systemPromptMatch) {
-          config.prompts.systemPrompt = systemPromptMatch[1].trim();
-          console.log('System prompt loaded from markdown file');
-        }
-        
-        // 解析User Prompt
-        const userPromptMatch = promptsContent.match(/## User Prompt\s*```\s*([\s\S]*?)\s*```/);
-        if (userPromptMatch) {
-          config.prompts.userPrompt = userPromptMatch[1].trim();
-          console.log('User prompt loaded from markdown file');
-        }
-        
-        // 检查是否成功加载了提示词
-        if (!config.prompts.systemPrompt || !config.prompts.userPrompt) {
-          throw new Error('Failed to parse prompts from markdown file');
-        }
-      } else {
-        throw new Error('Prompts markdown file not found');
+      const weekly = createPromptStore().getWeeklyPrompts();
+      if (!weekly.systemPrompt || !weekly.userPrompt) {
+        throw new Error('Failed to parse prompts from markdown file');
       }
+      config.prompts = {
+        systemPrompt: weekly.systemPrompt,
+        userPrompt: weekly.userPrompt,
+      };
     } catch (error) {
       console.error('Failed to load prompts from markdown file:', error.message);
       throw new Error('Prompt configuration is required but not found');
@@ -253,22 +233,23 @@ class LLMService {
     }));
   }
 
-  // 切换活跃模型
+  // 切换活跃模型：仅将 activeModel 写入运行时层 config/runtime/llm-config.json，
+  // 不再把内存中的 prompts 对象整体回写（修复 llm-config.json 被污染的问题）
   switchModel(modelKey) {
     if (!this.config.models[modelKey]) {
       throw new Error(`Model '${modelKey}' not found in configuration`);
     }
-    
+
     this.config.activeModel = modelKey;
-    
-    // 更新配置文件
-    const configPath = path.join(__dirname, '../config/llm-config.json');
-    fs.writeFileSync(configPath, JSON.stringify(this.config, null, 2));
-    
+
+    const configStore = createConfigStore();
+    const effective = configStore.readEffectiveJson('llm-config.json') || {};
+    effective.activeModel = modelKey;
+    configStore.commitJson('llm-config.json', effective);
+
     return this.getActiveModelConfig();
   }
 
-
 }
 
-module.exports = LLMService; 
+module.exports = LLMService;
