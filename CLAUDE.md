@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 KeyDigest is an AI-powered keyword news analysis system. It aggregates news by keywords, scores articles with LLMs, generates weekly reports, and provides source analytics. The system is built around a keyword-centric data model and supports configurable AI prompts per keyword.
 
-The app now has lightweight multi-user access for internal use. `admin` keeps full access, while `yzgjj` is restricted in the frontend to the `公积金` keyword and the selected daily/news/report/word-count/policy menu set. This is a UI-level permission model, not server-side data isolation.
+The app now has lightweight multi-user access for internal use. `admin` keeps full access, while `yzgjj` is restricted to the `公积金` keyword and the selected daily/news/report/word-count/policy menu set. Admin mutation endpoints require a signed Bearer token; this remains lightweight application authorization rather than complete row-level database isolation.
 
 `/auto-report` adds admin-configured automatic weekly reports. The cron runs every Sunday at 05:00 Asia/Shanghai, summarizes the previous Sunday through Saturday by `scored_news.fetchdate`, writes logs to `auto_report_log`, and stores downloadable contact-info PDFs under `data/auto-report-pdfs`.
 
@@ -30,6 +30,9 @@ npm run build
 
 # Lint
 npm run lint
+
+# Full test suite
+npm test
 
 # Preview production build
 npm run preview
@@ -62,10 +65,11 @@ node --test test/auto-report-service.test.cjs
 ```
 Frontend (React + Vite)  ←→  Backend (Express + MySQL)
                                     │
-                                    ├─ LLMService (services/LLMService.js)
-                                    │   ├─ config/llm-config.json
-                                    │   ├─ config/prompts.md
-                                    │   └─ config/keyword-prompts.json
+                                    ├─ configStore + promptStore
+                                    │   ├─ config/* (Git defaults)
+                                    │   └─ config/runtime/* (server overrides)
+                                    │
+                                    ├─ LLMService (services/llmService.cjs)
                                     │
                                     ├─ server/pdf/ (Playwright PDF renderers)
                                     │
@@ -75,14 +79,15 @@ Frontend (React + Vite)  ←→  Backend (Express + MySQL)
 ### Key Architectural Patterns
 
 1. **Single-file backend**: `server.cjs` is a monolithic Express file containing all routes, DB pool initialization, and business logic. It is not split into controllers or middleware directories.
-2. **LLM abstraction**: `services/LLMService.js` encapsulates all AI calls. It reads `config/llm-config.json` for model endpoints and `config/prompts.md` for prompt templates. Configuration reloads at runtime via `/api/llm/reload-config`.
-3. **Streaming reports**: Report generation endpoints (`/api/generate-report`, `/api/generate-kimi-report`, etc.) use SSE (text/event-stream) to stream LLM chunks to the frontend.
-4. **Server-side PDF rendering**: Report and policy comparison PDFs are rendered via Playwright in `server/pdf/`, not in the browser. The frontend posts HTML to the backend, which returns a PDF buffer.
-5. **Keyword-specific prompts**: `config/keyword-prompts.json` allows overriding default prompts per keyword. The config UI at `/config` manages these.
-6. **Region policy reports**: A newer workflow (`/policy/regions`, `/policy/region-report`) uses `config/region-policy-report-prompts.json` for region-specific policy analysis with separate single-region and multi-region prompt templates.
-7. **Lightweight multi-user access**: `POST /api/auth/login` validates fixed usernames against `.env` passwords, the frontend stores the returned profile in `sessionStorage`, and `src/config/userAccess.js` controls visible routes and allowed keywords. Successful logins are appended to `data/login-audit.json` through `services/loginAudit.cjs`; `/login-stats` is admin-only in the frontend.
-8. **Automatic weekly reports**: `node-cron` schedules `services/autoReportService.cjs` at `0 5 * * 0` in `Asia/Shanghai`. Admin config is stored in `config/auto-report-config.json`; the service uses `config/weekly-report-models.json`, keyword-specific prompts, server-side report PDF rendering, and `auto_report_log` for run/download audit data.
-9. **Page-scoped CSS convention**: Vite merges every `import './X.css'` into a single global stylesheet, so bare class selectors in `src/pages/*.css` leak across pages. Each page has a wrapper class (`.score-edit-page`, `.report-generator`, `.weekly-comparison-container`, `.word-count-stats`, `.history-reports-page`, `.config-container`, `.auto-report-config`, `.region-policy-browser`, `.region-report-page`, `.current-policy-page`) and page-level rules must be scoped under it. Truly shared utilities (`.kd-page`, `.kd-panel`, `.kd-state-card`, score badges) live in `src/index.css` and `src/overrides.css`; `src/overrides.css` is imported last and performs the final scoped visual normalization across pages.
+2. **Layered runtime configuration**: `services/configStore.cjs` reads Git defaults from `config/` and merges ignored production differences from `config/runtime/`. `services/promptStore.cjs` is the only prompt parsing/CRUD entry point. Admin writes never modify Git defaults.
+3. **LLM abstraction**: `services/llmService.cjs` encapsulates AI calls and reads the effective layered model/prompt configuration on construction. The former no-op reload endpoint was removed.
+4. **Streaming reports**: Report generation endpoints (`/api/generate-report`, `/api/generate-kimi-report`, etc.) use SSE (text/event-stream) to stream LLM chunks to the frontend.
+5. **Server-side PDF rendering**: Report and policy comparison PDFs are rendered via Playwright in `server/pdf/`, not in the browser. The frontend posts HTML to the backend, which returns a PDF buffer.
+6. **Keyword-specific prompts**: `config/keyword-prompts.json` contains defaults. The config UI at `/config` manages runtime overrides and shows each entry's source.
+7. **Region policy reports**: `/policy/regions` and `/policy/region-report` use the layered `region-policy-report-prompts.json` configuration with separate single-region and multi-region templates.
+8. **Lightweight multi-user access**: `POST /api/auth/login` validates `users.json`, and admin mutation endpoints validate the signed token. Successful logins are appended to `data/login-audit.json`.
+9. **Automatic weekly reports**: `node-cron` schedules `services/autoReportService.cjs` at `0 5 * * 0` in `Asia/Shanghai`. The service reads effective auto-report and prompt config on each cycle.
+10. **Page-scoped CSS convention**: Vite merges every `import './X.css'` into a single global stylesheet, so bare class selectors in `src/pages/*.css` leak across pages. Page-level rules must remain scoped under their page wrapper.
 
 ### Database Schema
 
@@ -109,12 +114,10 @@ SILICONFLOW_API_KEY
 GOOGLE_API_KEY
 GOOGLE_SEARCH_ENGINE_ID
 VITE_ADMIN_PASSWORD
-KEYDIGEST_ADMIN_PASSWORD
-KEYDIGEST_YZGJJ_PASSWORD
 KEYDIGEST_SESSION_SECRET
 ```
 
-`VITE_ADMIN_PASSWORD` is still used by the legacy score-edit password guard. Full-site login uses `KEYDIGEST_ADMIN_PASSWORD` and `KEYDIGEST_YZGJJ_PASSWORD`; the backend falls back from `KEYDIGEST_ADMIN_PASSWORD` to `VITE_ADMIN_PASSWORD` for admin if the new variable is absent.
+`VITE_ADMIN_PASSWORD` is still used by the legacy score-edit password guard. Full-site login uses the effective layered `users.json`; on production, the complete credential file lives at `config/runtime/users.json`. `KEYDIGEST_ADMIN_PASSWORD` and `KEYDIGEST_YZGJJ_PASSWORD` are bootstrap fallbacks only when no valid users config exists and do not override an existing file.
 
 `KEYDIGEST_SESSION_SECRET` signs Bearer tokens. If absent, the backend falls back to `DB_PASS`, then `KEYDIGEST_ADMIN_PASSWORD`, then a local default.
 
@@ -138,8 +141,12 @@ KEYDIGEST_SESSION_SECRET
 - `GET/POST /api/config/region-policy-report-prompts` — region policy prompt CRUD
 - `GET/POST /api/policy/*` — policy comparison and region report workflows
 - `POST /api/google-search` — Google Custom Search proxy
-- `POST /api/auth/login` — lightweight login for fixed internal users
+- `POST /api/auth/login` — lightweight login using the effective layered users config
 - `GET /api/auth/login-stats` — JSON-backed successful login statistics for the admin page
+- `GET /api/config/runtime-status` — admin-only runtime override status
+- `GET/POST /api/config/prompt-export|prompt-import` — admin-only prompt override backup/restore; never includes users
+- `POST /api/config/reset-default` — admin-only file or prompt-entry reset
+- `GET /api/health` — deployment health check without a database query
 
 ### Routing
 
@@ -162,7 +169,9 @@ Frontend route visibility is filtered by `src/config/userAccess.js`. `yzgjj` see
 ### Important File Locations
 
 - `server.cjs` — all backend routes and DB logic
-- `services/LLMService.js` — LLM abstraction layer
+- `services/configStore.cjs` — default/runtime merge engine and atomic runtime writes
+- `services/promptStore.cjs` — unified prompt parsing and CRUD
+- `services/llmService.cjs` — LLM abstraction layer
 - `services/loginAudit.cjs` — JSON-backed successful login audit helpers
 - `services/weeklyReportModelConfig.cjs` — DeepSeek V4 weekly report model config helpers
 - `services/autoReportService.cjs` — automatic weekly report cycle, logging, LLM call, and PDF generation
@@ -175,8 +184,12 @@ Frontend route visibility is filtered by `src/config/userAccess.js`. `yzgjj` see
 - `server/pdf/renderRegionPolicyReportPdf.cjs` — region policy PDF renderer
 - `config/llm-config.json` — model endpoints and settings
 - `config/weekly-report-models.json` — weekly report model choices used by manual and automatic reports
-- `config/auto-report-config.json` — automatic weekly report runtime configuration
+- `config/auto-report-config.json` — automatic weekly report Git defaults
+- `config/runtime/` — ignored production overrides; shared across releases
 - `config/prompts.md` — system/user/modify prompt templates
 - `config/keyword-prompts.json` — keyword-specific prompt overrides
 - `config/region-policy-report-prompts.json` — region policy prompt configs
 - `vite.config.js` — Vite config with `/api` proxy to backend
+- `scripts/prepare-production-runtime.cjs` — explicit first-cutover migration of production users/policy history
+- `scripts/deploy-from-gitee.sh` — exact-commit release deployment, health check, rollback, and bounded retention
+- `docs/deployment-gitee.md` — GitHub→Gitee→production runbook

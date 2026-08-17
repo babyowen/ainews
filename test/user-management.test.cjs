@@ -103,6 +103,11 @@ test('GET /api/admin/users returns users, allKeywords, and availableRoutes', asy
   assert.ok(res.body.availableRoutes[0].group);
   // 密码字段脱敏
   res.body.users.forEach(u => assert.equal(u.password, ''));
+
+  const loginStats = await request('GET', '/api/auth/login-stats', null, adminToken);
+  assert.equal(loginStats.status, 200);
+  assert.ok(Array.isArray(loginStats.body.summary));
+  assert.ok(Array.isArray(loginStats.body.records));
 });
 
 // ===== 测试 1b: 管理接口要求 admin 鉴权，匿名访问被拒 =====
@@ -115,6 +120,8 @@ test('admin user management endpoints reject anonymous requests', async () => {
   assert.equal(anonDelete.status, 401);
   const anonSwitch = await request('POST', '/api/llm/switch-model', { modelKey: 'kimi-k2' });
   assert.equal(anonSwitch.status, 401);
+  const anonLoginStats = await request('GET', '/api/auth/login-stats');
+  assert.equal(anonLoginStats.status, 401);
 });
 
 // ===== 测试 2: POST /api/admin/users 创建用户成功 =====

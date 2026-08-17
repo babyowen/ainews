@@ -16,6 +16,14 @@
 
 # User config
 
+# Local/production history and manual backups are runtime evidence, not release content.
+/config/policies/policy_[0-9]*.json
+/config/*.bak-*
+/config/*备份*.json
+/config/*备份*.md
+/config-备份*/
+/*.tar.gz
+
 # Production runtime overrides are persistent server data, never release content.
 /config/runtime/
 

@@ -352,6 +352,7 @@ app.post('/api/auth/login', (req, res) => {
 });
 
 app.get('/api/auth/login-stats', (req, res) => {
+  if (!requireAdminRequest(req, res)) return;
   try {
     res.json(readLoginAuditStats(LOGIN_AUDIT_PATH));
   } catch (error) {

@@ -34,6 +34,8 @@
 
 `users.json` 的哈希对应脱敏的 Git 默认文件，不对应包含真实生产密码的运行时文件。
 
+上表记录重构前的独立基线 commit `cfc1705d`。后续架构提交允许在 `weekly-report-models.json` 中新增原先硬编码的 `deepseek-reasoner`，校验脚本会显式验证该唯一允许的模型配置收口；其他生产基线内容仍须保持一致。
+
 ## 可复现校验
 
 在仓库根目录运行：
@@ -46,6 +48,8 @@ node --test test/production-config-baseline.test.cjs
 ```
 
 校验脚本只输出文件哈希、关键词名称、引用状态和政策快照数量，不输出 Prompt 正文或密码。
+
+首次上线时执行 `scripts/prepare-production-runtime.cjs`，显式把生产 `users.json` 和全部政策历史复制到共享运行时目录；后续按 [`deployment-gitee.md`](deployment-gitee.md) 从 Gitee 部署精确 commit。该流程不自动扫描旧目录，也不依赖可手工修改的版本号。
 
 ## 后续架构约束
 
