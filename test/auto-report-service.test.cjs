@@ -13,6 +13,7 @@ const {
   loadPromptPair,
   normalizeAutoReportConfig,
   sanitizeAutoReportRecord,
+  validateAutoReportConfigReferences,
 } = require('../services/autoReportService.cjs');
 
 function makeTempDir() {
@@ -131,6 +132,31 @@ test('buildAutoReportConfig merges keyword overrides with defaults', () => {
   ]);
 });
 
+test('validateAutoReportConfigReferences rejects missing explicit prompts and models', () => {
+  const findKeywordPrompt = (keyword, promptId) => (
+    keyword === '公积金' && promptId === 'existing'
+      ? { systemPrompt: 'system', userPrompt: 'user' }
+      : null
+  );
+  const getWeeklyPrompts = () => ({ systemPrompt: 'global system', userPrompt: 'global user' });
+  const getModel = (modelKey) => {
+    if (modelKey !== 'deepseek-v4-pro') throw new Error('unknown model');
+    return { key: modelKey };
+  };
+
+  assert.throws(() => validateAutoReportConfigReferences({
+    enabled: true,
+    defaults: { modelKey: 'deepseek-v4-pro', promptId: 'missing', minScore: 4, summaryVersion: 'short' },
+    keywords: { '公积金': { enabled: true } },
+  }, { findKeywordPrompt, getWeeklyPrompts, getModel }), /不存在或不完整的 Prompt：missing/);
+
+  assert.throws(() => validateAutoReportConfigReferences({
+    enabled: true,
+    defaults: { modelKey: 'missing-model', promptId: 'existing', minScore: 4, summaryVersion: 'short' },
+    keywords: { '公积金': { enabled: true } },
+  }, { findKeywordPrompt, getWeeklyPrompts, getModel }), /无效模型 missing-model/);
+});
+
 test('generateReportForKeyword queries fetchdate as yyyy-mm-dd closed range and min score', async () => {
   const pool = makePool({
     '公积金': [
@@ -191,6 +217,28 @@ test('generateReportForKeyword skips without calling LLM when no news matches', 
   assert.equal(llmCalls, 0);
 });
 
+test('generateReportForKeyword rejects a missing explicit prompt even when no news matches', async () => {
+  const service = createAutoReportService({
+    pool: makePool({ '公积金': [] }),
+    config: baseConfig,
+    promptStore: {
+      findKeywordPrompt: () => null,
+      getWeeklyPrompts: () => ({ systemPrompt: 'global system', userPrompt: 'global user' }),
+    },
+    getWeeklyReportModel: () => ({ key: 'deepseek-v4-pro', model: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro' }),
+    outputDir: makeTempDir(),
+  });
+
+  await assert.rejects(() => service.generateReportForKeyword({
+    keyword: '公积金',
+    startDate: '2026-05-23',
+    endDate: '2026-05-30',
+    modelKey: 'deepseek-v4-pro',
+    promptId: 'missing',
+    minScore: 4,
+  }), /Prompt 不存在或内容不完整：公积金\/missing/);
+});
+
 test('generateReportForKeyword creates contact PDF after successful report insert', async () => {
   const outputDir = makeTempDir();
   let pdfPayload;
@@ -220,8 +268,9 @@ test('generateReportForKeyword creates contact PDF after successful report inser
 
   assert.equal(pdfPayload.includeContact, true);
   assert.equal(result.pdfStatus, 'success');
-  assert.ok(result.pdfPath.endsWith('.pdf'));
-  assert.equal(fs.existsSync(result.pdfPath), true);
+  assert.equal(path.isAbsolute(result.pdfPath), false);
+  assert.equal(path.basename(result.pdfPath).endsWith('.pdf'), true);
+  assert.equal(fs.existsSync(path.join(outputDir, path.basename(result.pdfPath))), true);
 });
 
 test('generateReportForKeyword writes run parameters and content metrics to log', async () => {
@@ -327,6 +376,21 @@ test('loadPromptPair reports missing fallback prompt file with a clear error', (
     promptConfigPath: path.join(makeTempDir(), 'missing-keyword-prompts.json'),
     fallbackPromptsPath: path.join(makeTempDir(), 'missing-prompts.md'),
   }), /Fallback prompt file is not readable/);
+});
+
+test('loadPromptPair refuses to silently fall back when an explicit prompt is missing', () => {
+  const dir = makeTempDir();
+  const promptConfigPath = path.join(dir, 'keyword-prompts.json');
+  const fallbackPromptsPath = path.join(dir, 'prompts.md');
+  fs.writeFileSync(promptConfigPath, JSON.stringify({ keywords: {} }));
+  fs.writeFileSync(fallbackPromptsPath, '## System Prompt\n\n```\nglobal system\n```\n\n## User Prompt\n\n```\nglobal user\n```\n');
+
+  assert.throws(() => loadPromptPair({
+    keyword: '公积金',
+    promptId: 'missing',
+    promptConfigPath,
+    fallbackPromptsPath,
+  }), /Prompt 不存在或内容不完整：公积金\/missing/);
 });
 
 test('defaultCallLlm reports missing API key environment variable clearly', async () => {

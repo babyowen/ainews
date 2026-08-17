@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { extractSection: sharedExtractSection } = require('./promptStore.cjs');
 
 const DEFAULT_AUTO_REPORT_CONFIG = {
   enabled: false,
@@ -60,6 +61,45 @@ function buildAutoReportConfig(input) {
   return { ...config, enabledKeywords };
 }
 
+function validateAutoReportConfigReferences(input, {
+  getModel,
+  findKeywordPrompt,
+  getWeeklyPrompts,
+} = {}) {
+  const config = buildAutoReportConfig(input);
+  const errors = [];
+
+  for (const item of config.enabledKeywords) {
+    try {
+      if (typeof getModel !== 'function') throw new Error('模型解析器未配置');
+      getModel(item.modelKey);
+    } catch (error) {
+      errors.push(`${item.keyword} 引用了无效模型 ${item.modelKey || '(空)'}：${error.message}`);
+    }
+
+    if (item.promptId) {
+      const prompt = typeof findKeywordPrompt === 'function'
+        ? findKeywordPrompt(item.keyword, item.promptId)
+        : null;
+      if (!prompt?.systemPrompt || !prompt?.userPrompt) {
+        errors.push(`${item.keyword} 引用了不存在或不完整的 Prompt：${item.promptId}`);
+      }
+    } else {
+      const weekly = typeof getWeeklyPrompts === 'function' ? getWeeklyPrompts() : null;
+      if (!weekly?.systemPrompt || !weekly?.userPrompt) {
+        errors.push(`${item.keyword} 使用全局 Prompt，但全局 System/User Prompt 不完整`);
+      }
+    }
+  }
+
+  if (errors.length) {
+    const error = new Error(`自动周报配置引用校验失败：${errors.join('；')}`);
+    error.code = 'AUTO_REPORT_REFERENCE_INVALID';
+    throw error;
+  }
+  return config;
+}
+
 function getYmdInTimeZone(date, timeZone = 'Asia/Shanghai') {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone,
@@ -98,9 +138,9 @@ function getAutoReportWeekRange(referenceDate = new Date(), timeZone = 'Asia/Sha
 }
 
 function extractPromptSection(content, title) {
-  const regex = new RegExp(`## ${title}\\s*\\n\\s*\`\`\`\\s*\\n([\\s\\S]*?)\\n\\s*\`\`\``, 'i');
-  const match = content.match(regex);
-  return match ? match[1].trim() : '';
+  // 复用 promptStore 的统一解析实现（与全项目其他解析点保持一致）
+  const value = sharedExtractSection(content, title);
+  return value === null ? '' : value.trim();
 }
 
 function loadPromptPair({ keyword, promptId, promptConfigPath, fallbackPromptsPath }) {
@@ -118,8 +158,12 @@ function loadPromptPair({ keyword, promptId, promptConfigPath, fallbackPromptsPa
         };
       }
     } catch (error) {
-      console.warn('读取自动周报关键词 Prompt 失败，使用默认 Prompt:', error.message);
+      throw new Error(`自动周报 Prompt ${keyword}/${promptId} 读取失败：${error.message}`);
     }
+  }
+
+  if (promptId) {
+    throw new Error(`自动周报 Prompt 不存在或内容不完整：${keyword}/${promptId}`);
   }
 
   let content;
@@ -206,6 +250,8 @@ function createAutoReportService(options) {
     pool,
     config,
     configPath,
+    loadConfig,
+    promptStore,
     promptConfigPath = path.join(__dirname, '../config/keyword-prompts.json'),
     fallbackPromptsPath = path.join(__dirname, '../config/prompts.md'),
     outputDir = path.join(__dirname, '../data/auto-report-pdfs'),
@@ -220,9 +266,39 @@ function createAutoReportService(options) {
   if (!pool) throw new Error('pool is required');
 
   function readConfig() {
+    if (typeof loadConfig === 'function') return buildAutoReportConfig(loadConfig());
     if (config) return buildAutoReportConfig(config);
     if (!configPath || !fs.existsSync(configPath)) return buildAutoReportConfig(null);
     return buildAutoReportConfig(JSON.parse(fs.readFileSync(configPath, 'utf-8')));
+  }
+
+  // 优先走 promptStore（默认层+运行时层合并后的生效配置）；未注入时退回旧的文件路径模式（测试兼容）
+  function resolvePromptPair(keyword, promptId) {
+    if (promptStore) {
+      const selected = promptStore.findKeywordPrompt(keyword, promptId);
+      if (selected?.systemPrompt && selected?.userPrompt) {
+        return {
+          promptId: selected.id,
+          promptName: selected.name || selected.id,
+          systemPrompt: selected.systemPrompt,
+          userPromptTemplate: selected.userPrompt,
+        };
+      }
+      if (promptId) {
+        throw new Error(`自动周报 Prompt 不存在或内容不完整：${keyword}/${promptId}`);
+      }
+      const weekly = promptStore.getWeeklyPrompts();
+      if (!weekly.systemPrompt || !weekly.userPrompt) {
+        throw new Error('Fallback prompt file is not readable');
+      }
+      return {
+        promptId: '',
+        promptName: '默认 Prompt',
+        systemPrompt: weekly.systemPrompt,
+        userPromptTemplate: weekly.userPrompt,
+      };
+    }
+    return loadPromptPair({ keyword, promptId, promptConfigPath, fallbackPromptsPath });
   }
 
   async function ensureLogTable() {
@@ -346,6 +422,9 @@ function createAutoReportService(options) {
       triggerType = 'manual',
     } = params;
 
+    // 先解析模型和 Prompt；即使本周期没有新闻，也不能把损坏的显式引用静默记为 skipped。
+    const modelConfig = getWeeklyReportModel(modelKey);
+    const promptPair = resolvePromptPair(keyword, promptId);
     const newsRows = await queryNews({ keyword, startDate, endDate, minScore });
     if (newsRows.length === 0) {
       const skipped = {
@@ -370,8 +449,6 @@ function createAutoReportService(options) {
       return skipped;
     }
 
-    const modelConfig = getWeeklyReportModel(modelKey);
-    const promptPair = loadPromptPair({ keyword, promptId, promptConfigPath, fallbackPromptsPath });
     const userPrompt = buildFinalUserPrompt({
       template: promptPair.userPromptTemplate,
       keyword,
@@ -412,7 +489,7 @@ function createAutoReportService(options) {
       if (!renderPdf) throw new Error('PDF renderer is not configured');
       fs.mkdirSync(outputDir, { recursive: true });
       pdfFilename = buildPdfFilename({ keyword, modelName, includeContact: true, date: now() });
-      pdfPath = path.join(outputDir, pdfFilename);
+      const pdfFilePath = path.join(outputDir, pdfFilename);
       const pdfBuffer = await renderPdf({
         keyword,
         startDate,
@@ -422,7 +499,9 @@ function createAutoReportService(options) {
         reportContent,
         includeContact: true,
       });
-      fs.writeFileSync(pdfPath, pdfBuffer);
+      fs.writeFileSync(pdfFilePath, pdfBuffer);
+      // 持久化 release 相对引用：新版本按文件名映射到 shared，旧版本回滚时也能沿 data 符号链接读取。
+      pdfPath = path.join('data', 'auto-report-pdfs', pdfFilename);
       pdfStatus = 'success';
     } catch (error) {
       pdfStatus = 'error';
@@ -443,7 +522,7 @@ function createAutoReportService(options) {
       pdfFilename,
       pdfErrorMessage,
       modelKey: modelConfig.key || modelKey,
-      promptId: promptPair.promptId || promptId || '',
+      promptId: promptPair.promptId || '',
       promptName: promptPair.promptName || '',
       minScore,
       summaryVersion,
@@ -559,4 +638,5 @@ module.exports = {
   loadPromptPair,
   normalizeAutoReportConfig,
   sanitizeAutoReportRecord,
+  validateAutoReportConfigReferences,
 };

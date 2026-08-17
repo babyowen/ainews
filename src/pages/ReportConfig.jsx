@@ -1,11 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import PasswordProtection from '../components/PasswordProtection';
+import { useAuth } from '../auth/AuthContext';
 import './ReportConfig.css';
 
 const CONFIG_SECTIONS = [
   { key: 'keyword', label: '关键词 Prompt' },
   { key: 'policy', label: '政策相关 Prompt' },
-  { key: 'regionReport', label: '地区政策报告 Prompt' }
+  { key: 'regionReport', label: '地区政策报告 Prompt' },
+  { key: 'runtime', label: '运行时配置' }
 ];
 
 const EMPTY_KEYWORD_FORM = {
@@ -28,7 +30,14 @@ const EMPTY_REGION_FORM = {
   isDefault: false
 };
 
+const responseError = async (response, fallback) => {
+  const data = await response.json().catch(() => ({}));
+  return new Error(data.error || data.details || `${fallback}（HTTP ${response.status}）`);
+};
+
 const ReportConfig = () => {
+  const { authHeaders } = useAuth();
+  const importFileRef = useRef(null);
   const [configData, setConfigData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -48,6 +57,14 @@ const ReportConfig = () => {
   const [regionSaving, setRegionSaving] = useState(false);
   const [regionDeletingId, setRegionDeletingId] = useState('');
   const [regionEditForm, setRegionEditForm] = useState({ ...EMPTY_REGION_FORM });
+
+  const [runtimeStatus, setRuntimeStatus] = useState(null);
+  const [runtimeLoading, setRuntimeLoading] = useState(false);
+  const [runtimeMessage, setRuntimeMessage] = useState('');
+  const [importingBundle, setImportingBundle] = useState(false);
+  const [resettingFile, setResettingFile] = useState('');
+  const [resettingEntry, setResettingEntry] = useState('');
+  const [versionsTick, setVersionsTick] = useState(0);
 
   useEffect(() => {
     fetchConfigData();
@@ -133,7 +150,7 @@ const ReportConfig = () => {
       setEditForm({ ...EMPTY_KEYWORD_FORM, keyword: selectedKeyword });
     };
     loadKeywordPrompts();
-  }, [selectedKeyword]);
+  }, [selectedKeyword, versionsTick]);
 
   const estimateTokens = (text) => {
     if (!text) return 0;
@@ -161,21 +178,28 @@ const ReportConfig = () => {
     try {
       const r = await fetch('/api/config/keyword-prompts', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify(body)
       });
-      if (r.ok) {
-        const j = await r.json();
-        const next = [...promptVersions];
-        const idx = next.findIndex(x => x.id === j.prompt.id);
-        if (idx >= 0) next[idx] = j.prompt; else next.push(j.prompt);
-        setPromptVersions(next);
-        if (!keywordList.includes(body.keyword)) {
-          setKeywordList([...keywordList, body.keyword]);
-        }
-        setSelectedKeyword(body.keyword);
-        fetchKeywordConfig();
+      if (r.status === 401 || r.status === 403) {
+        alert('保存失败：需要 admin 登录状态（请先以 admin 账号登录后再修改配置）');
+        return;
       }
+      if (!r.ok) throw await responseError(r, '保存关键词 Prompt 失败');
+      const j = await r.json();
+      const next = [...promptVersions];
+      const idx = next.findIndex(x => x.id === j.prompt.id);
+      if (idx >= 0) next[idx] = j.prompt; else next.push(j.prompt);
+      setPromptVersions(next);
+      if (!keywordList.includes(body.keyword)) {
+        setKeywordList([...keywordList, body.keyword]);
+      }
+      setSelectedKeyword(body.keyword);
+      fetchKeywordConfig();
+      // 保存返回值不含 source 字段，重拉当前关键词列表避免「已自定义」徽标丢失/状态过期
+      setVersionsTick((t) => t + 1);
+    } catch (e) {
+      alert('保存失败: ' + e.message);
     } finally {
       setSaving(false);
     }
@@ -186,12 +210,17 @@ const ReportConfig = () => {
     try {
       const r = await fetch(
         `/api/config/keyword-prompts/${encodeURIComponent(selectedKeyword)}/${encodeURIComponent(promptId)}`,
-        { method: 'DELETE' }
+        { method: 'DELETE', headers: { ...authHeaders() } }
       );
-      if (r.ok) {
-        setPromptVersions(promptVersions.filter(x => x.id !== promptId));
-        fetchKeywordConfig();
+      if (r.status === 401 || r.status === 403) {
+        alert('删除失败：需要 admin 登录状态');
+        return;
       }
+      if (!r.ok) throw await responseError(r, '删除关键词 Prompt 失败');
+      setPromptVersions(promptVersions.filter(x => x.id !== promptId));
+      fetchKeywordConfig();
+    } catch (e) {
+      alert('删除失败: ' + e.message);
     } finally {
       setDeletingId('');
     }
@@ -200,11 +229,16 @@ const ReportConfig = () => {
   const handleSavePolicyPrompt = async (type, prompt) => {
     setSaving(true);
     try {
-      await fetch('/api/config/policy-prompt', {
+      const r = await fetch('/api/config/policy-prompt', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ prompt, type })
       });
+      if (r.status === 401 || r.status === 403) {
+        alert('保存失败：需要 admin 登录状态');
+        return;
+      }
+      if (!r.ok) throw await responseError(r, '保存政策 Prompt 失败');
       alert(type === 'extraction' ? '周报抽取提示词已保存' : '政策对比提示词已保存');
     } catch (e) {
       alert('保存失败: ' + e.message);
@@ -231,26 +265,31 @@ const ReportConfig = () => {
     try {
       const r = await fetch('/api/config/region-policy-report-prompts', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify(body)
       });
-      if (r.ok) {
-        const j = await r.json();
-        const next = [...regionPromptVersions];
-        const idx = next.findIndex(item => item.id === j.prompt.id);
-        if (idx >= 0) next[idx] = j.prompt; else next.push(j.prompt);
-        setRegionPromptVersions(next);
-        setRegionEditForm({
-          promptId: j.prompt.id,
-          name: j.prompt.name,
-          description: j.prompt.description || '',
-          systemPrompt: j.prompt.systemPrompt || '',
-          userPromptSingle: j.prompt.userPromptSingle || '',
-          userPromptMulti: j.prompt.userPromptMulti || '',
-          isDefault: !!j.prompt.isDefault
-        });
-        fetchRegionPromptConfig();
+      if (r.status === 401 || r.status === 403) {
+        alert('保存失败：需要 admin 登录状态');
+        return;
       }
+      if (!r.ok) throw await responseError(r, '保存地区政策报告 Prompt 失败');
+      const j = await r.json();
+      const next = [...regionPromptVersions];
+      const idx = next.findIndex(item => item.id === j.prompt.id);
+      if (idx >= 0) next[idx] = j.prompt; else next.push(j.prompt);
+      setRegionPromptVersions(next);
+      setRegionEditForm({
+        promptId: j.prompt.id,
+        name: j.prompt.name,
+        description: j.prompt.description || '',
+        systemPrompt: j.prompt.systemPrompt || '',
+        userPromptSingle: j.prompt.userPromptSingle || '',
+        userPromptMulti: j.prompt.userPromptMulti || '',
+        isDefault: !!j.prompt.isDefault
+      });
+      fetchRegionPromptConfig();
+    } catch (e) {
+      alert('保存失败: ' + e.message);
     } finally {
       setRegionSaving(false);
     }
@@ -261,16 +300,162 @@ const ReportConfig = () => {
     try {
       const r = await fetch(
         `/api/config/region-policy-report-prompts/${encodeURIComponent(promptId)}`,
-        { method: 'DELETE' }
+        { method: 'DELETE', headers: { ...authHeaders() } }
       );
-      if (r.ok) {
-        setRegionPromptVersions(regionPromptVersions.filter(item => item.id !== promptId));
-        if (regionEditForm.promptId === promptId) {
-          setRegionEditForm({ ...EMPTY_REGION_FORM });
-        }
+      if (r.status === 401 || r.status === 403) {
+        alert('删除失败：需要 admin 登录状态');
+        return;
       }
+      if (!r.ok) throw await responseError(r, '删除地区政策报告 Prompt 失败');
+      setRegionPromptVersions(regionPromptVersions.filter(item => item.id !== promptId));
+      if (regionEditForm.promptId === promptId) {
+        setRegionEditForm({ ...EMPTY_REGION_FORM });
+      }
+    } catch (e) {
+      alert('删除失败: ' + e.message);
     } finally {
       setRegionDeletingId('');
+    }
+  };
+
+  // ===== 运行时配置（默认层 + 运行时层）=====
+
+  const fetchRuntimeStatus = async () => {
+    setRuntimeLoading(true);
+    setRuntimeMessage('');
+    try {
+      const r = await fetch('/api/config/runtime-status', { headers: { ...authHeaders() } });
+      if (r.ok) {
+        setRuntimeStatus(await r.json());
+      } else {
+        setRuntimeMessage('获取运行时配置状态失败（需要 admin 登录状态）');
+      }
+    } catch {
+      setRuntimeMessage('获取运行时配置状态失败');
+    } finally {
+      setRuntimeLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeSection === 'runtime' && !runtimeStatus && !runtimeLoading) {
+      fetchRuntimeStatus();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSection]);
+
+  const handleExportBundle = async () => {
+    setRuntimeMessage('');
+    try {
+      const r = await fetch('/api/config/prompt-export', { headers: { ...authHeaders() } });
+      if (!r.ok) throw new Error(r.status === 401 || r.status === 403 ? '需要 admin 登录状态' : `HTTP ${r.status}`);
+      const bundle = await r.json();
+      const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `prompt-runtime-bundle-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setRuntimeMessage('导出失败: ' + e.message);
+    }
+  };
+
+  const handleImportBundle = async (file) => {
+    if (!file) return;
+    setImportingBundle(true);
+    setRuntimeMessage('');
+    try {
+      const bundle = JSON.parse(await file.text());
+      const previewResponse = await fetch('/api/config/prompt-import?dryRun=1', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify(bundle)
+      });
+      const preview = await previewResponse.json().catch(() => ({}));
+      if (!previewResponse.ok) throw new Error(preview.error || preview.details || `HTTP ${previewResponse.status}`);
+      const previewFiles = preview.files || [];
+      if (!previewFiles.length) {
+        setRuntimeMessage('导入包中没有可导入的 Prompt 覆盖');
+        return;
+      }
+      if (!window.confirm(`将导入以下 Prompt 运行时覆盖：\n${previewFiles.join('\n')}\n\n是否继续？`)) return;
+
+      const r = await fetch('/api/config/prompt-import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify(bundle)
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || data.details || `HTTP ${r.status}`);
+      setRuntimeMessage(`导入成功：${(data.imported || []).join('、') || '没有需要导入的文件'}`);
+      fetchRuntimeStatus();
+      fetchKeywordConfig();
+      fetchRegionPromptConfig();
+      fetchConfigData();
+      setVersionsTick((t) => t + 1);
+    } catch (e) {
+      setRuntimeMessage('导入失败: ' + e.message);
+    } finally {
+      setImportingBundle(false);
+      if (importFileRef.current) importFileRef.current.value = '';
+    }
+  };
+
+  const handleResetDefault = async (file) => {
+    if (!window.confirm(`确定要恢复「${file}」的出厂默认吗？该文件在运行时层的自定义内容将被删除。`)) return;
+    setResettingFile(file);
+    setRuntimeMessage('');
+    try {
+      const r = await fetch('/api/config/reset-default', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ file })
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || data.details || `HTTP ${r.status}`);
+      setRuntimeMessage(`已恢复默认：${(data.reset || []).join('、') || '该文件本就没有运行时覆盖'}`);
+      fetchRuntimeStatus();
+      fetchKeywordConfig();
+      fetchRegionPromptConfig();
+      fetchConfigData();
+      setVersionsTick((t) => t + 1);
+    } catch (e) {
+      setRuntimeMessage('恢复默认失败: ' + e.message);
+    } finally {
+      setResettingFile('');
+    }
+  };
+
+  // 条目级恢复默认：只清除该条目的运行时层覆盖，不影响其他生产定制
+  const handleResetEntry = async (file, keyword, promptId) => {
+    if (!window.confirm(`恢复该条目的出厂默认？「${keyword || promptId} / ${promptId}」的运行时层自定义将被清除，其他条目不受影响。`)) return;
+    const entryKey = `${keyword || ''}::${promptId}`;
+    setResettingEntry(entryKey);
+    try {
+      const r = await fetch('/api/config/reset-default', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ file, keyword, promptId })
+      });
+      const data = await r.json().catch(() => ({}));
+      if (r.status === 401 || r.status === 403) {
+        alert('恢复默认失败：需要 admin 登录状态');
+        return;
+      }
+      if (!r.ok) throw new Error(data.error || data.details || `HTTP ${r.status}`);
+      if (file === 'keyword-prompts.json') {
+        setVersionsTick((t) => t + 1);
+        fetchKeywordConfig();
+      } else {
+        fetchRegionPromptConfig();
+      }
+      fetchConfigData();
+    } catch (e) {
+      alert('恢复默认失败: ' + e.message);
+    } finally {
+      setResettingEntry('');
     }
   };
 
@@ -408,6 +593,7 @@ const ReportConfig = () => {
                           <div className="config-version-headline">
                             <span className="config-version-name">{p.name}</span>
                             {p.isDefault && <span className="config-version-badge">默认</span>}
+                            {p.source === 'runtime' && <span className="config-version-badge config-version-badge-runtime">已自定义</span>}
                           </div>
                           <div className="config-version-actions">
                             <button
@@ -425,6 +611,16 @@ const ReportConfig = () => {
                             >
                               编辑
                             </button>
+                            {p.source === 'runtime' && (
+                              <button
+                                type="button"
+                                className="config-btn-link"
+                                disabled={resettingEntry === `${selectedKeyword}::${p.id}`}
+                                onClick={() => handleResetEntry('keyword-prompts.json', selectedKeyword, p.id)}
+                              >
+                                {resettingEntry === `${selectedKeyword}::${p.id}` ? '恢复中…' : '恢复默认'}
+                              </button>
+                            )}
                             <button
                               type="button"
                               className="config-btn-link danger"
@@ -683,6 +879,9 @@ const ReportConfig = () => {
                       {p.isDefault && (
                         <span className="config-version-badge config-version-badge-tight">默认</span>
                       )}
+                      {p.source === 'runtime' && (
+                        <span className="config-version-badge config-version-badge-tight config-version-badge-runtime">自定义</span>
+                      )}
                     </button>
                   ))}
                 </div>
@@ -713,6 +912,7 @@ const ReportConfig = () => {
                           <div className="config-version-headline">
                             <span className="config-version-name">{p.name}</span>
                             {p.isDefault && <span className="config-version-badge">默认</span>}
+                            {p.source === 'runtime' && <span className="config-version-badge config-version-badge-runtime">已自定义</span>}
                           </div>
                           <div className="config-version-actions">
                             <button
@@ -730,6 +930,16 @@ const ReportConfig = () => {
                             >
                               编辑
                             </button>
+                            {p.source === 'runtime' && (
+                              <button
+                                type="button"
+                                className="config-btn-link"
+                                disabled={resettingEntry === `::${p.id}`}
+                                onClick={() => handleResetEntry('region-policy-report-prompts.json', null, p.id)}
+                              >
+                                {resettingEntry === `::${p.id}` ? '恢复中…' : '恢复默认'}
+                              </button>
+                            )}
                             <button
                               type="button"
                               className="config-btn-link danger"
@@ -857,9 +1067,100 @@ const ReportConfig = () => {
           </section>
         )}
 
+        {activeSection === 'runtime' && (
+          <section className="config-section">
+            <header className="config-section-header">
+              <div className="config-section-headline">
+                <h2 className="config-section-title">运行时配置</h2>
+                <p className="config-section-desc">
+                  在本页保存的修改只写入 <code>config/runtime/</code> 运行时层，代码部署不会覆盖；
+                  Prompt 和模型/自动周报覆盖可恢复出厂默认；用户账号由“用户管理”页维护，不在此处重置。
+                </p>
+              </div>
+              <div className="config-section-meta">
+                <button type="button" className="config-btn-ghost" onClick={fetchRuntimeStatus} disabled={runtimeLoading}>
+                  {runtimeLoading ? '刷新中…' : '刷新状态'}
+                </button>
+              </div>
+            </header>
+
+            <div className="config-detail-panel kd-panel">
+              <div className="config-panel-header">
+                <h3 className="config-panel-title">配置文件覆盖状态</h3>
+                <div className="config-panel-header-actions" style={{ display: 'flex', gap: 8 }}>
+                  <button type="button" className="config-btn-secondary" onClick={handleExportBundle}>
+                    导出 Prompt 包
+                  </button>
+                  <button
+                    type="button"
+                    className="config-btn-secondary"
+                    disabled={importingBundle}
+                    onClick={() => importFileRef.current && importFileRef.current.click()}
+                  >
+                    {importingBundle ? '导入中…' : '导入 Prompt 包'}
+                  </button>
+                  <input
+                    ref={importFileRef}
+                    type="file"
+                    accept="application/json"
+                    style={{ display: 'none' }}
+                    onChange={(e) => handleImportBundle(e.target.files && e.target.files[0])}
+                  />
+                </div>
+              </div>
+
+              {runtimeMessage && <p className="config-form-tip">{runtimeMessage}</p>}
+
+              <div className="config-version-list">
+                {(!runtimeStatus || !(runtimeStatus.files || []).length) && !runtimeLoading && (
+                  <div className="config-empty-block">暂无状态数据</div>
+                )}
+                {(runtimeStatus ? runtimeStatus.files : []).map(f => (
+                  <div key={f.name} className={`config-version-card ${f.overridden ? 'is-default' : ''}`}>
+                    <div className="config-version-header">
+                      <div className="config-version-headline">
+                        <span className="config-version-name">{f.label || f.name}</span>
+                        {f.overridden ? (
+                          <span className="config-version-badge config-version-badge-runtime">运行时已自定义</span>
+                        ) : (
+                          <span className="config-version-badge">默认</span>
+                        )}
+                      </div>
+                      <div className="config-version-actions">
+                        {f.name === 'users.json' ? (
+                          <span className="config-version-badge">用户管理页维护</span>
+                        ) : (
+                          <button
+                            type="button"
+                            className="config-btn-link danger"
+                            disabled={!f.overridden || resettingFile === f.name}
+                            onClick={() => handleResetDefault(f.name)}
+                          >
+                            {resettingFile === f.name ? '恢复中…' : '恢复默认'}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    <div className="config-version-meta">
+                      <span><code>{f.name}</code></span>
+                      {f.type === 'json' && f.promptCount !== undefined && (
+                        <span>Prompt 条目 {f.promptCount} 条{f.runtimeOverrideCount ? `（自定义 ${f.runtimeOverrideCount}）` : ''}{f.deletedCount ? `（墓碑 ${f.deletedCount}）` : ''}</span>
+                      )}
+                      {f.overridden && f.runtimeLastModified && (
+                        <span>最近修改 {new Date(f.runtimeLastModified).toLocaleString('zh-CN')}</span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+        )}
+
         <footer className="config-footer kd-panel">
           <p className="config-footer-info">
-            默认提示词存储于 <code>config/prompts.md</code>；关键词提示词存储于 <code>config/keyword-prompts.json</code>；地区政策报告提示词存储于 <code>config/region-policy-report-prompts.json</code>。
+            出厂默认存于 <code>config/</code>（随代码部署）；生产端自定义存于 <code>config/runtime/</code>（部署永不覆盖）。
+            导出「Prompt 包」只包含 Prompt 覆盖，不包含用户密码、自动周报或模型配置。
           </p>
           <button
             type="button"

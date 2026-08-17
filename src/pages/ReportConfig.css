@@ -313,6 +313,10 @@
   font-size: 10px;
 }
 
+.config-container .config-version-badge-runtime {
+  background: #b45309;
+}
+
 .config-container .config-version-actions {
   display: flex;
   gap: 6px;
