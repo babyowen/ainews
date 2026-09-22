@@ -54,7 +54,7 @@ node --test test/auto-report-service.test.cjs
 
 - **Frontend**: React 19, React Router DOM 7, ECharts, html2canvas, html2pdf.js, docx, dayjs, react-markdown, TanStack Query.
 - **Backend**: Express 4, mysql2 (Promise-based pool), CORS.
-- **AI/LLM**: DeepSeek R1 (primary), KIMI K2 (fallback), SiliconFlow (fallback), Google Custom Search API.
+- **AI/LLM**: Agent Router DeepSeek V4.1 Flash (single model, no provider fallback), Google Custom Search API.
 - **PDF Rendering**: Playwright (server-side) for report and policy comparison PDFs.
 
 ### High-Level Structure
@@ -62,8 +62,8 @@ node --test test/auto-report-service.test.cjs
 ```
 Frontend (React + Vite)  ←→  Backend (Express + MySQL)
                                     │
-                                    ├─ LLMService (services/LLMService.js)
-                                    │   ├─ config/llm-config.json
+                                    ├─ LLMService (services/llmService.cjs)
+                                    │   ├─ config/weekly-report-models.json
                                     │   ├─ config/prompts.md
                                     │   └─ config/keyword-prompts.json
                                     │
@@ -75,7 +75,7 @@ Frontend (React + Vite)  ←→  Backend (Express + MySQL)
 ### Key Architectural Patterns
 
 1. **Single-file backend**: `server.cjs` is a monolithic Express file containing all routes, DB pool initialization, and business logic. It is not split into controllers or middleware directories.
-2. **LLM abstraction**: `services/LLMService.js` encapsulates all AI calls. It reads `config/llm-config.json` for model endpoints and `config/prompts.md` for prompt templates. Configuration reloads at runtime via `/api/llm/reload-config`.
+2. **LLM abstraction**: `services/llmService.cjs` encapsulates all AI calls. All generation paths use `services/modelClient.cjs` and `config/weekly-report-models.json` for the single Agent Router model; `services/llmService.cjs` loads prompt templates from `config/prompts.md`. Configuration reloads at runtime via `/api/llm/reload-config`.
 3. **Streaming reports**: Report generation endpoints (`/api/generate-report`, `/api/generate-kimi-report`, etc.) use SSE (text/event-stream) to stream LLM chunks to the frontend.
 4. **Server-side PDF rendering**: Report and policy comparison PDFs are rendered via Playwright in `server/pdf/`, not in the browser. The frontend posts HTML to the backend, which returns a PDF buffer.
 5. **Keyword-specific prompts**: `config/keyword-prompts.json` allows overriding default prompts per keyword. The config UI at `/config` manages these.
@@ -103,9 +103,7 @@ Required in `.env`:
 ```
 DB_HOST, DB_USER, DB_PASS, DB_NAME, DB_PORT
 API_PORT=3456
-DEEPSEEK_API_KEY
-KIMI_API_KEY
-SILICONFLOW_API_KEY
+AGENT_ROUTER_API_KEY
 GOOGLE_API_KEY
 GOOGLE_SEARCH_ENGINE_ID
 VITE_ADMIN_PASSWORD
@@ -162,9 +160,11 @@ Frontend route visibility is filtered by `src/config/userAccess.js`. `yzgjj` see
 ### Important File Locations
 
 - `server.cjs` — all backend routes and DB logic
-- `services/LLMService.js` — LLM abstraction layer
+- `services/llmService.cjs` — CommonJS compatibility service for LLM management
+- `services/modelClient.cjs` — unified model discovery, generation, SSE parsing and response validation
+- `services/policyExtraction.cjs` — validated policy JSON extraction with one format repair
 - `services/loginAudit.cjs` — JSON-backed successful login audit helpers
-- `services/weeklyReportModelConfig.cjs` — DeepSeek V4 weekly report model config helpers
+- `services/weeklyReportModelConfig.cjs` — Unified Agent Router model config and legacy-key compatibility helpers
 - `services/autoReportService.cjs` — automatic weekly report cycle, logging, LLM call, and PDF generation
 - `src/auth/AuthContext.jsx` — frontend session user context
 - `src/config/userAccess.js` — frontend user route and keyword permissions
@@ -173,8 +173,7 @@ Frontend route visibility is filtered by `src/config/userAccess.js`. `yzgjj` see
 - `server/pdf/renderReportPdf.cjs` — Playwright report PDF renderer
 - `server/pdf/renderPolicyComparisonPdf.cjs` — policy comparison PDF renderer
 - `server/pdf/renderRegionPolicyReportPdf.cjs` — region policy PDF renderer
-- `config/llm-config.json` — model endpoints and settings
-- `config/weekly-report-models.json` — weekly report model choices used by manual and automatic reports
+- `config/weekly-report-models.json` — single shared model used by every generation workflow
 - `config/auto-report-config.json` — automatic weekly report runtime configuration
 - `config/prompts.md` — system/user/modify prompt templates
 - `config/keyword-prompts.json` — keyword-specific prompt overrides

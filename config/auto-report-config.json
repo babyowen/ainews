@@ -1,7 +1,7 @@
 {
   "enabled": true,
   "defaults": {
-    "modelKey": "deepseek-v4-flash",
+    "modelKey": "deepseek-v4.1-flash",
     "promptId": "",
     "minScore": 3,
     "summaryVersion": "short"

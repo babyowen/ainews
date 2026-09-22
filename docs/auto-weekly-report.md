@@ -16,7 +16,7 @@
 admin 在页面中为每个关键词单独配置：
 
 - 是否启用自动运行
-- 使用哪个周报模型
+- 统一使用 DeepSeek V4.1 Flash（用户无需选择模型）
 - 使用哪个 Prompt
 - 最低新闻分数
 - 使用短摘要还是全文
@@ -113,4 +113,4 @@ NODE
 1. `config/auto-report-config.json` 中关键词项的 `enabled`。
 2. 关键词是否仍存在于 `config/users.json` 的 admin `keywords` 中。
 3. 对应 `promptId` 是否存在于 `config/keyword-prompts.json`。
-4. `modelKey` 是否存在于 `config/weekly-report-models.json`。
+4. `AGENT_ROUTER_API_KEY` 是否已配置，`config/weekly-report-models.json` 的精确模型 ID 是否在供应商实时列表中；旧模型 key 会兼容映射到统一模型。

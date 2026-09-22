@@ -20,7 +20,6 @@ const {
   renderRegionPolicyReportPdf,
 } = require('./server/pdf/renderRegionPolicyReportPdf.cjs');
 const {
-  buildDeepSeekChatPayload,
   getWeeklyReportModel,
   listWeeklyReportModels,
 } = require('./services/weeklyReportModelConfig.cjs');
@@ -59,7 +58,8 @@ function buildAttachmentDisposition(filename) {
 
 const REGION_POLICY_REPORT_PROMPTS_PATH = path.join(__dirname, 'config/region-policy-report-prompts.json');
 const REGION_POLICY_REPORT_KEYWORD = '公积金';
-const REGION_POLICY_REPORT_MODEL = 'deepseek-reasoner';
+const { completeChat, streamChat, redactError } = require('./services/modelClient.cjs');
+const { extractPolicy, countPolicyDetails } = require('./services/policyExtraction.cjs');
 const LOGIN_AUDIT_PATH = path.join(__dirname, 'data/login-audit.json');
 const USERS_CONFIG_PATH = path.join(__dirname, 'config/users.json');
 const AUTO_REPORT_CONFIG_PATH = path.join(__dirname, 'config/auto-report-config.json');
@@ -251,7 +251,6 @@ const autoReportService = createAutoReportService({
   configPath: AUTO_REPORT_CONFIG_PATH,
   outputDir: AUTO_REPORT_PDF_DIR,
   getWeeklyReportModel,
-  buildChatPayload: buildDeepSeekChatPayload,
   renderPdf: renderReportPdf,
   buildPdfFilename: buildReportPdfFilename,
 });
@@ -1087,7 +1086,7 @@ app.post('/api/preview-modify-message', async (req, res) => {
       debug: {
         systemPrompt: modifySystemPrompt,
         userPrompt: finalModifyUserPrompt,
-        model: 'deepseek-reasoner (modify)',
+        model: getWeeklyReportModel().label,
         totalChars,
         estimatedTokens: estimateTokens(totalContent)
       }
@@ -1107,6 +1106,7 @@ app.post('/api/modify-report', async (req, res) => {
   }
   
   try {
+    const modelConfig = getWeeklyReportModel();
     const fs = require('fs');
     const path = require('path');
     
@@ -1142,157 +1142,38 @@ app.post('/api/modify-report', async (req, res) => {
     const totalContent = modifySystemPrompt + finalModifyUserPrompt;
     const totalChars = totalContent.length;
     
+    const messages = [
+      { role: 'system', content: modifySystemPrompt },
+      { role: 'user', content: finalModifyUserPrompt },
+    ];
+    const debug = {
+      systemPrompt: modifySystemPrompt, userPrompt: finalModifyUserPrompt,
+      model: modelConfig.label, modelKey: modelConfig.key, modelId: modelConfig.model,
+      totalChars, estimatedTokens: estimateTokens(totalContent),
+    };
     if (stream) {
-      // 设置流式响应头
       res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
       res.setHeader('Cache-Control', 'no-cache');
-      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('X-Accel-Buffering', 'no');
       res.flushHeaders();
-
-      // 发送初始调试信息
-      const debugInfo = {
-        systemPrompt: modifySystemPrompt,
-        userPrompt: finalModifyUserPrompt,
-        model: 'deepseek-reasoner (modify)',
-        totalChars,
-        estimatedTokens: estimateTokens(totalContent)
-      };
-      
-      res.write(`data: ${JSON.stringify({ type: 'debug', data: debugInfo })}\n\n`);
-      res.write(`data: ${JSON.stringify({ type: 'status', message: '🔗 正在连接DeepSeek R1...' })}\n\n`);
-      console.log('DeepSeek API Request - Token estimate:', estimateTokens(totalContent));
-
-      // 调用DeepSeek API with stream
-      console.log('Calling DeepSeek API...');
-      const response = await fetch('https://api.deepseek.com/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}`
-        },
-        body: JSON.stringify({
-          model: 'deepseek-reasoner',
-          messages: [
-            {
-              role: 'system',
-              content: modifySystemPrompt
-            },
-            {
-              role: 'user',
-              content: finalModifyUserPrompt
-            }
-          ],
-          temperature: 0.7,
-          stream: true
-        })
-      });
-      
-      if (!response.ok) {
-        res.write(`data: ${JSON.stringify({ type: 'error', message: `DeepSeek API error: ${response.status} ${response.statusText}` })}\n\n`);
-        res.end();
-        return;
-      }
-      
-      res.write(`data: ${JSON.stringify({ type: 'status', message: '🤖 DeepSeek R1 开始修改...' })}\n\n`);
-      
-      let fullReport = '';
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split('\n');
-        
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6);
-            if (data === '[DONE]') {
-              res.write(`data: ${JSON.stringify({ type: 'done', report: fullReport })}\n\n`);
-              res.end();
-              return;
-            }
-            
-            try {
-              const parsed = JSON.parse(data);
-              if (parsed.choices && parsed.choices[0]?.delta?.content) {
-                const content = parsed.choices[0].delta.content;
-                fullReport += content;
-                res.write(`data: ${JSON.stringify({ type: 'content', content })}\n\n`);
-              } else if (parsed.choices && parsed.choices[0]?.delta?.reasoning_content) {
-                // DeepSeek R1的思考过程
-                const reasoning = parsed.choices[0].delta.reasoning_content;
-                res.write(`data: ${JSON.stringify({ type: 'reasoning', content: reasoning })}\n\n`);
-              }
-            } catch (e) {
-              // 忽略解析错误
-            }
-          }
-        }
-      }
-    } else {
-      // 非流式模式，保持原有逻辑
-      const response = await fetch('https://api.deepseek.com/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}`
-        },
-        body: JSON.stringify({
-          model: 'deepseek-reasoner',
-          messages: [
-            {
-              role: 'system',
-              content: modifySystemPrompt
-            },
-            {
-              role: 'user',
-              content: finalModifyUserPrompt
-            }
-          ],
-          temperature: 0.7
-        })
-      });
-      
-      if (!response.ok) {
-        throw new Error(`DeepSeek API error: ${response.status} ${response.statusText}`);
-      }
-      
-      const data = await response.json();
-      const report = data.choices?.[0]?.message?.content || '修改周报失败';
-      
-      // 返回结果，包含调试信息
-      res.json({ 
-        report,
-        debug: {
-          systemPrompt: modifySystemPrompt,
-          userPrompt: finalModifyUserPrompt,
-          model: 'deepseek-reasoner (modify)',
-          totalChars,
-          estimatedTokens: estimateTokens(totalContent)
-        }
-      });
-    }
-  } catch (err) {
-    console.error('Modify report error:', err);
-    let errorMessage = '⚠️ DeepSeek服务暂时不可用，请稍后重试';
-    
-    // 检查具体错误类型
-    if (err.message.includes('API key') || err.message.includes('authentication')) {
-      errorMessage = '⚠️ DeepSeek API密钥配置错误，请检查配置';
-    } else if (err.message.includes('network') || err.message.includes('ENOTFOUND') || err.message.includes('timeout')) {
-      errorMessage = '⚠️ 网络连接失败，请检查网络连接后重试';
-    } else if (err.message.includes('rate limit') || err.message.includes('quota')) {
-      errorMessage = '⚠️ DeepSeek API调用频率超限，请稍后重试';
-    }
-    
-    if (stream) {
-      res.write(`data: ${JSON.stringify({ type: 'error', message: errorMessage })}\n\n`);
+      res.write(`data: ${JSON.stringify({ type: 'debug', data: debug })}\n\n`);
+      const report = await streamChat(messages, (type, content) => {
+        res.write(`data: ${JSON.stringify({ type, content })}\n\n`);
+      }, { modelConfig });
+      res.write(`data: ${JSON.stringify({ type: 'done', report })}\n\n`);
       res.end();
     } else {
-      res.status(500).json({ error: 'DeepSeek修改服务错误', message: errorMessage, details: err.message });
+      const report = await completeChat(messages, { modelConfig });
+      res.json({ report, debug });
+    }
+  } catch (error) {
+    const message = redactError(error.message);
+    console.error('Modify report error:', message);
+    if (res.headersSent) {
+      res.write(`data: ${JSON.stringify({ type: 'error', message })}\n\n`);
+      res.end();
+    } else {
+      res.status(500).json({ error: '修改周报失败', details: message });
     }
   }
 });
@@ -1361,7 +1242,7 @@ app.post('/api/preview-report-message', async (req, res) => {
         systemPrompt,
         userPrompt: finalUserPrompt,
         newsCount: selectedNews.length,
-        model: 'deepseek-reasoner',
+        model: getWeeklyReportModel().label,
         totalChars,
         estimatedTokens: estimateTokens(totalContent)
       }
@@ -1554,7 +1435,7 @@ app.get('/api/auto-report/download/:logId', async (req, res) => {
 });
 
 // 生成周报（实际调用大模型）
-app.post('/api/generate-report', async (req, res) => {
+app.post(['/api/generate-report', '/api/generate-kimi-report', '/api/generate-siliconflow-report'], async (req, res) => {
   const { keyword, startDate, endDate, selectedNews, userPrompt, promptId, stream = false, summaryVersion, modelKey } = req.body;
   
   if (!keyword || !startDate || !endDate || !selectedNews || selectedNews.length === 0) {
@@ -1640,783 +1521,49 @@ app.post('/api/generate-report', async (req, res) => {
     const totalContent = systemPrompt + finalUserPrompt;
     const totalChars = totalContent.length;
     
-    if (stream) {
-      // 设置流式响应头
-      res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
-      res.setHeader('Cache-Control', 'no-cache');
-      res.setHeader('Connection', 'keep-alive');
-      res.flushHeaders();
-
-      // 发送初始调试信息
-      const debugInfo = {
-        systemPrompt,
-        userPrompt: finalUserPrompt,
-        newsCount: selectedNews.length,
-        model: modelConfig.label || modelConfig.model,
-        modelKey: modelConfig.key,
-        modelId: modelConfig.model,
-        totalChars,
-        estimatedTokens: estimateTokens(totalContent)
-      };
-      
-      res.write(`data: ${JSON.stringify({ type: 'debug', data: debugInfo })}\n\n`);
-      res.write(`data: ${JSON.stringify({ type: 'status', message: `🔗 正在连接${modelConfig.label || modelConfig.model}...` })}\n\n`);
-      console.log(`${modelConfig.model} API Request - Token estimate:`, estimateTokens(totalContent));
-      console.log(`Calling ${modelConfig.model} API...`);
-      
-      // 创建AbortController用于超时控制
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 60000); // 60秒超时
-      
-      try {
-        // 调用DeepSeek API with stream
-        const response = await fetch(modelConfig.endpoint, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${process.env[modelConfig.apiKey]}`
-          },
-          body: JSON.stringify(buildDeepSeekChatPayload(modelConfig, [
-              { role: 'system', content: systemPrompt },
-              { role: 'user', content: finalUserPrompt }
-            ], true)),
-          signal: controller.signal
-        });
-        
-        clearTimeout(timeoutId);
-        console.log('DeepSeek API Response received, status:', response.status);
-      
-        if (!response.ok) {
-        // 检查是否为token超限
-        const text = await response.text();
-        console.error('DeepSeek API Error Response:', {
-          status: response.status,
-          statusText: response.statusText,
-          headers: Object.fromEntries(response.headers.entries()),
-          body: text
-        });
-        if (text.includes('context length') || text.includes('token limit') || text.includes('maximum context')) {
-          res.write(`data: ${JSON.stringify({ type: 'error', message: '⚠️ 输入内容超出DeepSeek token限制，请减少新闻数量或内容长度' })}\n\n`);
-          res.end();
-          return;
-        }
-        res.write(`data: ${JSON.stringify({ type: 'error', message: `DeepSeek API error: ${response.status} ${response.statusText} - ${text}` })}\n\n`);
-        res.end();
-        return;
-      }
-      
-      res.write(`data: ${JSON.stringify({ type: 'status', message: `🤖 ${modelConfig.label || modelConfig.model} 开始思考...` })}\n\n`);
-      
-      console.log('DeepSeek API Response OK, starting stream processing...');
-      let fullReport = '';
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let deepseekError = '';
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split('\n');
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6);
-            if (data === '[DONE]') {
-              // 保存报告到数据库
-              try {
-                await pool.query(
-                  `INSERT INTO weekly_reports (keyword, start_date, end_date, report_content, model_used, news_count)
-                   VALUES (?, ?, ?, ?, ?, ?)`,
-                  [keyword, startDate, endDate, fullReport, modelConfig.model, selectedNews.length]
-                );
-                console.log('✅ 周报已保存到数据库, keyword:', keyword, 'dates:', startDate, '-', endDate);
-              } catch (saveError) {
-                console.error('❌ 保存周报到数据库失败:', saveError);
-              }
-
-              res.write(`data: ${JSON.stringify({ type: 'done', report: fullReport })}\n\n`);
-              res.end();
-              return;
-            }
-            try {
-              const parsed = JSON.parse(data);
-              if (parsed.error && (parsed.error.message?.includes('context length') || parsed.error.message?.includes('token limit') || parsed.error.message?.includes('maximum context'))) {
-                // DeepSeek流式返回token超限
-                res.write(`data: ${JSON.stringify({ type: 'error', message: '⚠️ 输入内容超出DeepSeek token限制，请减少新闻数量或内容长度' })}\n\n`);
-                res.end();
-                return;
-              }
-              if (parsed.choices && parsed.choices[0]?.delta?.content) {
-                const content = parsed.choices[0].delta.content;
-                fullReport += content;
-                res.write(`data: ${JSON.stringify({ type: 'content', content })}\n\n`);
-              } else if (parsed.choices && parsed.choices[0]?.delta?.reasoning_content) {
-                const reasoning = parsed.choices[0].delta.reasoning_content;
-                res.write(`data: ${JSON.stringify({ type: 'reasoning', content: reasoning })}\n\n`);
-              } else if (parsed.error) {
-                deepseekError += parsed.error.message;
-              }
-            } catch (e) {
-              // 忽略解析错误
-            }
-          }
-        }
-      }
-      // 如果流式过程中 deepseekError 捕获到 token 超限
-      if (deepseekError && (deepseekError.includes('context length') || deepseekError.includes('token limit') || deepseekError.includes('maximum context'))) {
-        res.write(`data: ${JSON.stringify({ type: 'error', message: '⚠️ 输入内容超出DeepSeek token限制，请减少新闻数量或内容长度' })}\n\n`);
-        res.end();
-        return;
-      }
-      } catch (fetchError) {
-        clearTimeout(timeoutId);
-        console.error('DeepSeek API fetch error:', fetchError);
-        if (fetchError.name === 'AbortError') {
-          res.write(`data: ${JSON.stringify({ type: 'error', message: '⚠️ DeepSeek API请求超时，DeepSeek服务可能暂时不可用，请稍后重试或使用KIMI模型' })}\n\n`);
-        } else {
-          res.write(`data: ${JSON.stringify({ type: 'error', message: `⚠️ DeepSeek API连接失败，DeepSeek服务可能暂时不可用，请稍后重试或使用KIMI模型` })}\n\n`);
-        }
-        res.end();
-        return;
-      }
-    } else {
-      // 非流式模式
-      const response = await fetch(modelConfig.endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env[modelConfig.apiKey]}`
-        },
-        body: JSON.stringify(buildDeepSeekChatPayload(modelConfig, [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: finalUserPrompt }
-          ], false))
-      });
-      if (!response.ok) {
-        const text = await response.text();
-        if (text.includes('context length') || text.includes('token limit') || text.includes('maximum context')) {
-          res.status(400).json({ 
-            error: '输入内容超出DeepSeek token限制',
-            message: '⚠️ 输入内容超出DeepSeek token限制，请减少新闻数量或内容长度'
-          });
-          return;
-        }
-        throw new Error(`DeepSeek API error: ${response.status} ${response.statusText}`);
-      }
-      const data = await response.json();
-      if (data.error && (data.error.message?.includes('context length') || data.error.message?.includes('token limit') || data.error.message?.includes('maximum context'))) {
-        res.status(400).json({ 
-          error: '输入内容超出DeepSeek token限制',
-          message: '⚠️ 输入内容超出DeepSeek token限制，请减少新闻数量或内容长度'
-        });
-        return;
-      }
-      const report = data.choices?.[0]?.message?.content || '生成周报失败';
-
-      // 保存报告到数据库
-      try {
-        await pool.query(
-          `INSERT INTO weekly_reports (keyword, start_date, end_date, report_content, model_used, news_count)
-           VALUES (?, ?, ?, ?, ?, ?)`,
-          [keyword, startDate, endDate, report, modelConfig.model, selectedNews.length]
-        );
-        console.log('✅ 周报已保存到数据库 (非流式), keyword:', keyword, 'dates:', startDate, '-', endDate);
-      } catch (saveError) {
-        console.error('❌ 保存周报到数据库失败 (非流式):', saveError);
-      }
-
-      res.json({
-        report,
-        debug: {
-          systemPrompt,
-          userPrompt: finalUserPrompt,
-          newsCount: selectedNews.length,
-          model: modelConfig.label || modelConfig.model,
-          modelKey: modelConfig.key,
-          modelId: modelConfig.model,
-          totalChars,
-          estimatedTokens: estimateTokens(totalContent)
-        }
-      });
-    }
-  } catch (err) {
-    console.error('Generate report error:', err);
-    let errorMessage = '⚠️ DeepSeek服务暂时不可用，请稍后重试或使用其他模型';
-    
-    // 检查具体错误类型
-    if (err.message.includes('API key') || err.message.includes('authentication')) {
-      errorMessage = '⚠️ DeepSeek API密钥配置错误，请检查配置';
-    } else if (err.message.includes('network') || err.message.includes('ENOTFOUND') || err.message.includes('timeout')) {
-      errorMessage = '⚠️ 网络连接失败，请检查网络连接后重试';
-    } else if (err.message.includes('rate limit') || err.message.includes('quota')) {
-      errorMessage = '⚠️ DeepSeek API调用频率超限，请稍后重试';
-    }
-    
-    if (stream) {
-      res.write(`data: ${JSON.stringify({ type: 'error', message: errorMessage })}\n\n`);
-      res.end();
-    } else {
-      res.status(500).json({ error: 'DeepSeek服务错误', message: errorMessage, details: err.message });
-    }
-  }
-});
-
-// 硅基流动生成周报API
-app.post('/api/generate-siliconflow-report', async (req, res) => {
-  const { keyword, startDate, endDate, selectedNews, userPrompt, promptId, stream = false, summaryVersion } = req.body;
-  
-  if (!keyword || !startDate || !endDate || !selectedNews || selectedNews.length === 0) {
-    return res.status(400).json({ error: 'Missing required parameters' });
-  }
-
-  try {
-    const fs = require('fs');
-    const path = require('path');
-    
-    let systemPrompt = '';
-    let userPromptTemplate = '';
-    
-    // 如果指定了promptId，使用关键词特定的prompt配置
-    if (promptId) {
-      try {
-        const keywordPromptsPath = path.join(__dirname, 'config/keyword-prompts.json');
-        const keywordPromptsContent = fs.readFileSync(keywordPromptsPath, 'utf-8');
-        const keywordPrompts = JSON.parse(keywordPromptsContent);
-        
-        // 查找指定关键词的prompt配置
-        const keywordConfig = keywordPrompts.keywords[keyword];
-        if (keywordConfig && keywordConfig.prompts) {
-          const selectedPrompt = keywordConfig.prompts.find(p => p.id === promptId);
-          if (selectedPrompt) {
-            systemPrompt = selectedPrompt.systemPrompt;
-            userPromptTemplate = selectedPrompt.userPrompt;
-            console.log(`硅基流使用关键词 ${keyword} 的自定义prompt配置 (ID: ${promptId})`);
-          }
-        }
-      } catch (error) {
-        console.warn('硅基流读取关键词prompt配置失败，使用默认配置:', error);
-      }
-    }
-    
-    // 如果没有找到关键词特定的prompt，使用默认配置
-    if (!systemPrompt || !userPromptTemplate) {
-      const promptsPath = path.join(__dirname, 'config/prompts.md');
-      const promptsContent = fs.readFileSync(promptsPath, 'utf-8');
-      
-      // 解析system prompt和user prompt
-      const systemPromptMatch = promptsContent.match(/## System Prompt\s*\n\s*```\s*\n([\s\S]*?)\n\s*```/);
-      const userPromptMatch = promptsContent.match(/## User Prompt\s*\n\s*```\s*\n([\s\S]*?)\n\s*```/);
-      
-      systemPrompt = systemPromptMatch ? systemPromptMatch[1].trim() : '';
-      userPromptTemplate = userPromptMatch ? userPromptMatch[1].trim() : '';
-    }
-    
-    // 拼接新闻内容
-    const newsContent = selectedNews.map((news, index) => {
-      const text = summaryVersion === 'short' ? (news.short_summary || news.content || '内容不详') : (news.content || news.short_summary || '内容不详');
-      return `新闻${index + 1}标题:${news.title}\n新闻${index + 1}内容:${text}`;
-    }).join('\n\n');
-    
-    // 替换用户提示词中的变量
-    const finalUserPrompt = userPromptTemplate
-      .replace('{keyword}', keyword)
-      .replace('{startDate}', startDate)
-      .replace('{endDate}', endDate)
-      .replace('{news}', newsContent)
-      .replace('{usertopic}', userPrompt || '无特别要求');
-
-    // Token估算函数
-    const estimateTokens = (text) => {
-      if (!text) return 0;
-      const chineseChars = (text.match(/[\u4e00-\u9fff]/g) || []).length;
-      const englishChars = (text.match(/[a-zA-Z]/g) || []).length;
-      const otherChars = text.length - chineseChars - englishChars;
-      return Math.ceil(chineseChars * 0.6 + englishChars * 0.3 + otherChars * 0.5);
+    const messages = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: finalUserPrompt },
+    ];
+    const debug = {
+      systemPrompt, userPrompt: finalUserPrompt, newsCount: selectedNews.length,
+      model: modelConfig.label, modelKey: modelConfig.key, modelId: modelConfig.model,
+      totalChars, estimatedTokens: estimateTokens(totalContent),
     };
-
-    // 计算字数和Token估算
-    const totalContent = systemPrompt + finalUserPrompt;
-    const totalChars = totalContent.length;
-    
+    let report;
     if (stream) {
-      // 设置流式响应头
       res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
       res.setHeader('Cache-Control', 'no-cache');
-      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('X-Accel-Buffering', 'no');
       res.flushHeaders();
-
-      // 发送初始调试信息
-      const debugInfo = {
-        systemPrompt,
-        userPrompt: finalUserPrompt,
-        newsCount: selectedNews.length,
-        model: '硅基-deepseek-r1',
-        totalChars,
-        estimatedTokens: estimateTokens(totalContent)
-      };
-      
-      res.write(`data: ${JSON.stringify({ type: 'debug', data: debugInfo })}\n\n`);
-      res.write(`data: ${JSON.stringify({ type: 'status', message: '🔗 正在连接硅基流动...' })}\n\n`);
-      console.log('SiliconFlow API Request - Token estimate:', estimateTokens(totalContent));
-      console.log('Calling SiliconFlow API...');
-      
-      // 创建AbortController用于超时控制
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 60000); // 60秒超时
-      
-      try {
-        // 调用硅基流动API with stream
-        const response = await fetch('https://api.siliconflow.cn/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${process.env.SILICONFLOW_API_KEY}`
-          },
-          body: JSON.stringify({
-          model: 'deepseek-ai/DeepSeek-R1',
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: finalUserPrompt }
-          ],
-          temperature: 0.7,
-          stream: true
-        }),
-          signal: controller.signal
-        });
-        
-        clearTimeout(timeoutId);
-        console.log('SiliconFlow API Response received, status:', response.status);
-      
-        if (!response.ok) {
-          // 检查是否为token超限
-          const text = await response.text();
-          console.error('SiliconFlow API Error Response:', {
-            status: response.status,
-            statusText: response.statusText,
-            headers: Object.fromEntries(response.headers.entries()),
-            body: text
-          });
-          if (text.includes('context length') || text.includes('token limit') || text.includes('maximum context')) {
-            res.write(`data: ${JSON.stringify({ type: 'error', message: '⚠️ 输入内容超出硅基流动 token限制，请减少新闻数量或内容长度' })}\n\n`);
-            res.end();
-            return;
-          }
-          res.write(`data: ${JSON.stringify({ type: 'error', message: `硅基流动 API error: ${response.status} ${response.statusText} - ${text}` })}\n\n`);
-          res.end();
-          return;
-        }
-        
-        res.write(`data: ${JSON.stringify({ type: 'status', message: '🤖 硅基流动 DeepSeek-R1 开始思考...' })}\n\n`);
-
-        console.log('SiliconFlow API Response OK, starting stream processing...');
-        let fullReport = '';
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let siliconflowError = '';
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split('\n');
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              const data = line.slice(6);
-              if (data === '[DONE]') {
-                // 保存报告到数据库
-                try {
-                  await pool.query(
-                    `INSERT INTO weekly_reports (keyword, start_date, end_date, report_content, model_used, news_count)
-                     VALUES (?, ?, ?, ?, ?, ?)`,
-                    [keyword, startDate, endDate, fullReport, 'deepseek-ai/DeepSeek-R1', selectedNews.length]
-                  );
-                  console.log('✅ SiliconFlow周报已保存到数据库, keyword:', keyword, 'dates:', startDate, '-', endDate);
-                } catch (saveError) {
-                  console.error('❌ 保存SiliconFlow周报到数据库失败:', saveError);
-                }
-
-                res.write(`data: ${JSON.stringify({ type: 'done', report: fullReport })}\n\n`);
-                res.end();
-                return;
-              }
-              try {
-                const parsed = JSON.parse(data);
-                if (parsed.error && (parsed.error.message?.includes('context length') || parsed.error.message?.includes('token limit') || parsed.error.message?.includes('maximum context'))) {
-                  // 硅基流动流式返回token超限
-                  res.write(`data: ${JSON.stringify({ type: 'error', message: '⚠️ 输入内容超出硅基流动 token限制，请减少新闻数量或内容长度' })}\n\n`);
-                  res.end();
-                  return;
-                }
-                if (parsed.choices && parsed.choices[0]?.delta?.content) {
-                  const content = parsed.choices[0].delta.content;
-                  fullReport += content;
-                  res.write(`data: ${JSON.stringify({ type: 'content', content })}\n\n`);
-                } else if (parsed.choices && parsed.choices[0]?.delta?.reasoning_content) {
-                  const reasoning = parsed.choices[0].delta.reasoning_content;
-                  res.write(`data: ${JSON.stringify({ type: 'reasoning', content: reasoning })}\n\n`);
-                } else if (parsed.error) {
-                  siliconflowError += parsed.error.message;
-                }
-              } catch (e) {
-                // 忽略解析错误
-              }
-            }
-          }
-        }
-        // 如果流式过程中 siliconflowError 捕获到 token 超限
-        if (siliconflowError && (siliconflowError.includes('context length') || siliconflowError.includes('token limit') || siliconflowError.includes('maximum context'))) {
-          res.write(`data: ${JSON.stringify({ type: 'error', message: '⚠️ 输入内容超出硅基流动 token限制，请减少新闻数量或内容长度' })}\n\n`);
-          res.end();
-          return;
-        }
-      } catch (fetchError) {
-        clearTimeout(timeoutId);
-        console.error('SiliconFlow API fetch error:', fetchError);
-        if (fetchError.name === 'AbortError') {
-          res.write(`data: ${JSON.stringify({ type: 'error', message: '⚠️ 硅基流动 API请求超时，硅基流动服务可能暂时不可用，请稍后重试或使用其他模型' })}\n\n`);
-        } else {
-          res.write(`data: ${JSON.stringify({ type: 'error', message: `⚠️ 硅基流动 API连接失败，硅基流动服务可能暂时不可用，请稍后重试或使用其他模型` })}\n\n`);
-        }
-        res.end();
-        return;
-      }
+      res.write(`data: ${JSON.stringify({ type: 'debug', data: debug })}\n\n`);
+      res.write(`data: ${JSON.stringify({ type: 'status', message: `正在使用 ${modelConfig.label} 生成周报…` })}\n\n`);
+      report = await streamChat(messages, (type, content) => {
+        res.write(`data: ${JSON.stringify({ type, content })}\n\n`);
+      }, { modelConfig });
     } else {
-      // 非流式模式
-      const response = await fetch('https://api.siliconflow.cn/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.SILICONFLOW_API_KEY}`
-        },
-        body: JSON.stringify({
-          model: 'deepseek-ai/DeepSeek-R1',
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: finalUserPrompt }
-          ],
-          temperature: 0.7
-        })
-      });
-      if (!response.ok) {
-        const text = await response.text();
-        if (text.includes('context length') || text.includes('token limit') || text.includes('maximum context')) {
-          res.status(400).json({ 
-            error: '输入内容超出硅基流动 token限制',
-            message: '⚠️ 输入内容超出硅基流动 token限制，请减少新闻数量或内容长度'
-          });
-          return;
-        }
-        throw new Error(`SiliconFlow API error: ${response.status} ${response.statusText}`);
-      }
-      const data = await response.json();
-      if (data.error && (data.error.message?.includes('context length') || data.error.message?.includes('token limit') || data.error.message?.includes('maximum context'))) {
-        res.status(400).json({ 
-          error: '输入内容超出硅基流动 token限制',
-          message: '⚠️ 输入内容超出硅基流动 token限制，请减少新闻数量或内容长度'
-        });
-        return;
-      }
-      const report = data.choices?.[0]?.message?.content || '生成周报失败';
-
-      // 保存报告到数据库
-      try {
-        await pool.query(
-          `INSERT INTO weekly_reports (keyword, start_date, end_date, report_content, model_used, news_count)
-           VALUES (?, ?, ?, ?, ?, ?)`,
-          [keyword, startDate, endDate, report, 'deepseek-ai/DeepSeek-R1', selectedNews.length]
-        );
-        console.log('✅ SiliconFlow周报已保存到数据库 (非流式), keyword:', keyword, 'dates:', startDate, '-', endDate);
-      } catch (saveError) {
-        console.error('❌ 保存SiliconFlow周报到数据库失败 (非流式):', saveError);
-      }
-
-      res.json({
-        report,
-        debug: {
-          systemPrompt,
-          userPrompt: finalUserPrompt,
-          newsCount: selectedNews.length,
-          model: '硅基-deepseek-r1',
-          totalChars,
-          estimatedTokens: estimateTokens(totalContent)
-        }
-      });
+      report = await completeChat(messages, { modelConfig });
     }
-  } catch (err) {
-    console.error('Generate SiliconFlow report error:', err);
-    let errorMessage = '⚠️ 硅基流动服务暂时不可用，请稍后重试或使用其他模型';
-    
-    // 检查具体错误类型
-    if (err.message.includes('API key') || err.message.includes('authentication') || err.message.includes('401')) {
-      errorMessage = '⚠️ 硅基流动API密钥配置错误，请检查配置';
-    } else if (err.message.includes('network') || err.message.includes('ENOTFOUND') || err.message.includes('timeout')) {
-      errorMessage = '⚠️ 网络连接失败，请检查网络连接后重试';
-    } else if (err.message.includes('rate limit') || err.message.includes('quota') || err.message.includes('429')) {
-      errorMessage = '⚠️ 硅基流动API调用频率超限，请稍后重试';
-    } else if (err.message.includes('500') || err.message.includes('502') || err.message.includes('503')) {
-      errorMessage = '⚠️ 硅基流动服务器错误，请稍后重试';
-    }
-    
+    // 仅保存已完成且正文有效的报告，截断/空响应不会进入历史周报。
+    await pool.query(
+      `INSERT INTO weekly_reports (keyword, start_date, end_date, report_content, model_used, news_count)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [keyword, startDate, endDate, report, modelConfig.model, selectedNews.length]
+    );
     if (stream) {
-      res.write(`data: ${JSON.stringify({ type: 'error', message: errorMessage })}\n\n`);
+      res.write(`data: ${JSON.stringify({ type: 'done', report })}\n\n`);
       res.end();
     } else {
-      res.status(500).json({ error: '硅基流动服务错误', message: errorMessage, details: err.message });
+      res.json({ report, debug });
     }
-  }
-});
-
-// KIMI生成周报API
-app.post('/api/generate-kimi-report', async (req, res) => {
-  const { keyword, startDate, endDate, selectedNews, userPrompt, promptId, stream = false, summaryVersion } = req.body;
-  
-  if (!keyword || !startDate || !endDate || !selectedNews || selectedNews.length === 0) {
-    return res.status(400).json({ error: 'Missing required parameters' });
-  }
-
-  try {
-    const fs = require('fs');
-    const path = require('path');
-    
-    let systemPrompt = '';
-    let userPromptTemplate = '';
-    
-    // 如果指定了promptId，使用关键词特定的prompt配置
-    if (promptId) {
-      try {
-        const keywordPromptsPath = path.join(__dirname, 'config/keyword-prompts.json');
-        const keywordPromptsContent = fs.readFileSync(keywordPromptsPath, 'utf-8');
-        const keywordPrompts = JSON.parse(keywordPromptsContent);
-        
-        // 查找指定关键词的prompt配置
-        const keywordConfig = keywordPrompts.keywords[keyword];
-        if (keywordConfig && keywordConfig.prompts) {
-          const selectedPrompt = keywordConfig.prompts.find(p => p.id === promptId);
-          if (selectedPrompt) {
-            systemPrompt = selectedPrompt.systemPrompt;
-            userPromptTemplate = selectedPrompt.userPrompt;
-            console.log(`KIMI使用关键词 ${keyword} 的自定义prompt配置 (ID: ${promptId})`);
-          }
-        }
-      } catch (error) {
-        console.warn('KIMI读取关键词prompt配置失败，使用默认配置:', error);
-      }
-    }
-    
-    // 如果没有找到关键词特定的prompt，使用默认配置
-    if (!systemPrompt || !userPromptTemplate) {
-      const promptsPath = path.join(__dirname, 'config/prompts.md');
-      const promptsContent = fs.readFileSync(promptsPath, 'utf-8');
-      
-      // 解析system prompt和user prompt
-      const systemPromptMatch = promptsContent.match(/## System Prompt\s*\n\s*```\s*\n([\s\S]*?)\n\s*```/);
-      const userPromptMatch = promptsContent.match(/## User Prompt\s*\n\s*```\s*\n([\s\S]*?)\n\s*```/);
-      
-      systemPrompt = systemPromptMatch ? systemPromptMatch[1].trim() : '';
-      userPromptTemplate = userPromptMatch ? userPromptMatch[1].trim() : '';
-    }
-    
-    // 拼接新闻内容
-    const newsContent = selectedNews.map((news, index) => {
-      const text = summaryVersion === 'short' ? (news.short_summary || news.content || '内容不详') : (news.content || news.short_summary || '内容不详');
-      return `新闻${index + 1}标题:${news.title}\n新闻${index + 1}内容:${text}`;
-    }).join('\n\n');
-    
-    // 替换用户提示词中的变量
-    const finalUserPrompt = userPromptTemplate
-      .replace('{keyword}', keyword)
-      .replace('{startDate}', startDate)
-      .replace('{endDate}', endDate)
-      .replace('{news}', newsContent)
-      .replace('{usertopic}', userPrompt || '无特别要求');
-
-    // Token估算函数
-    const estimateTokens = (text) => {
-      if (!text) return 0;
-      const chineseChars = (text.match(/[\u4e00-\u9fff]/g) || []).length;
-      const englishChars = (text.match(/[a-zA-Z]/g) || []).length;
-      const otherChars = text.length - chineseChars - englishChars;
-      return Math.ceil(chineseChars * 0.6 + englishChars * 0.3 + otherChars * 0.5);
-    };
-
-    // 计算字数和Token估算
-    const totalContent = systemPrompt + finalUserPrompt;
-    const totalChars = totalContent.length;
-    
-    if (stream) {
-      // 设置流式响应头
-      res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
-      res.setHeader('Cache-Control', 'no-cache');
-      res.setHeader('Connection', 'keep-alive');
-      res.flushHeaders();
-
-      // 发送初始调试信息
-      const debugInfo = {
-        systemPrompt,
-        userPrompt: finalUserPrompt,
-        newsCount: selectedNews.length,
-        model: 'KIMI K2',
-        totalChars,
-        estimatedTokens: estimateTokens(totalContent)
-      };
-      
-      res.write(`data: ${JSON.stringify({ type: 'debug', data: debugInfo })}\n\n`);
-      res.write(`data: ${JSON.stringify({ type: 'status', message: '🔗 正在连接KIMI K2...' })}\n\n`);
-      // 调用KIMI API with stream
-      const response = await fetch('https://api.moonshot.cn/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.KIMI_API_KEY}`
-        },
-        body: JSON.stringify({
-          model: 'kimi-k2-0905-preview',
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: finalUserPrompt }
-          ],
-          temperature: 0.5,
-          max_tokens: 6000,
-          stream: true
-        })
-      });
-      
-      if (!response.ok) {
-        const text = await response.text();
-        console.error('KIMI API Error Response:', {
-          status: response.status,
-          statusText: response.statusText,
-          headers: Object.fromEntries(response.headers.entries()),
-          body: text
-        });
-        res.write(`data: ${JSON.stringify({ type: 'error', message: `KIMI API error: ${response.status} ${response.statusText} - ${text}` })}\n\n`);
-        res.end();
-        return;
-      }
-      
-      res.write(`data: ${JSON.stringify({ type: 'status', message: '🤖 KIMI K2 开始生成...' })}\n\n`);
-
-      let fullReport = '';
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split('\n');
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6);
-            if (data === '[DONE]') {
-              // 保存报告到数据库
-              try {
-                await pool.query(
-                  `INSERT INTO weekly_reports (keyword, start_date, end_date, report_content, model_used, news_count)
-                   VALUES (?, ?, ?, ?, ?, ?)`,
-                  [keyword, startDate, endDate, fullReport, 'kimi-k2-0905-preview', selectedNews.length]
-                );
-                console.log('✅ KIMI周报已保存到数据库, keyword:', keyword, 'dates:', startDate, '-', endDate);
-              } catch (saveError) {
-                console.error('❌ 保存KIMI周报到数据库失败:', saveError);
-              }
-
-              res.write(`data: ${JSON.stringify({ type: 'done', report: fullReport })}\n\n`);
-              res.end();
-              return;
-            }
-            try {
-              const parsed = JSON.parse(data);
-              if (parsed.choices && parsed.choices[0]?.delta?.content) {
-                const content = parsed.choices[0].delta.content;
-                fullReport += content;
-                res.write(`data: ${JSON.stringify({ type: 'content', content })}\n\n`);
-              } else if (parsed.error) {
-                res.write(`data: ${JSON.stringify({ type: 'error', message: parsed.error.message })}\n\n`);
-                res.end();
-                return;
-              }
-            } catch (e) {
-              // 忽略解析错误
-            }
-          }
-        }
-      }
-    } else {
-      // 非流式模式
-      const response = await fetch('https://api.moonshot.cn/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env.KIMI_API_KEY}`
-        },
-        body: JSON.stringify({
-          model: 'kimi-k2-0905-preview',
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: finalUserPrompt }
-          ],
-          temperature: 0.5,
-          max_tokens: 6000
-        })
-      });
-      
-      if (!response.ok) {
-        const text = await response.text();
-        console.error('KIMI API Error Response (non-stream):', {
-          status: response.status,
-          statusText: response.statusText,
-          headers: Object.fromEntries(response.headers.entries()),
-          body: text
-        });
-        throw new Error(`KIMI API error: ${response.status} ${response.statusText} - ${text}`);
-      }
-
-      const data = await response.json();
-      const report = data.choices?.[0]?.message?.content || '生成周报失败';
-
-      // 保存报告到数据库
-      try {
-        await pool.query(
-          `INSERT INTO weekly_reports (keyword, start_date, end_date, report_content, model_used, news_count)
-           VALUES (?, ?, ?, ?, ?, ?)`,
-          [keyword, startDate, endDate, report, 'kimi-k2-0905-preview', selectedNews.length]
-        );
-        console.log('✅ KIMI周报已保存到数据库 (非流式), keyword:', keyword, 'dates:', startDate, '-', endDate);
-      } catch (saveError) {
-        console.error('❌ 保存KIMI周报到数据库失败 (非流式):', saveError);
-      }
-
-      res.json({
-        report,
-        debug: {
-          systemPrompt,
-          userPrompt: finalUserPrompt,
-          newsCount: selectedNews.length,
-          model: 'KIMI K2',
-          totalChars,
-          estimatedTokens: estimateTokens(totalContent)
-        }
-      });
-    }
-  } catch (err) {
-    console.error('Generate KIMI report error:', err);
-    let errorMessage = '⚠️ KIMI服务暂时不可用，请稍后重试或使用其他模型';
-    
-    // 检查具体错误类型
-    if (err.message.includes('API key') || err.message.includes('authentication') || err.message.includes('401')) {
-      errorMessage = '⚠️ KIMI API密钥配置错误，请检查配置';
-    } else if (err.message.includes('network') || err.message.includes('ENOTFOUND') || err.message.includes('timeout')) {
-      errorMessage = '⚠️ 网络连接失败，请检查网络连接后重试';
-    } else if (err.message.includes('rate limit') || err.message.includes('quota') || err.message.includes('429')) {
-      errorMessage = '⚠️ KIMI API调用频率超限，请稍后重试';
-    } else if (err.message.includes('500') || err.message.includes('502') || err.message.includes('503')) {
-      errorMessage = '⚠️ KIMI服务器错误，请稍后重试';
-    }
-    
-    if (stream) {
-      res.write(`data: ${JSON.stringify({ type: 'error', message: errorMessage })}\n\n`);
+  } catch (error) {
+    const message = redactError(error.message);
+    console.error('Generate report error:', message);
+    if (res.headersSent) {
+      res.write(`data: ${JSON.stringify({ type: 'error', message })}\n\n`);
       res.end();
     } else {
-      res.status(500).json({ error: 'KIMI服务错误', message: errorMessage, details: err.message });
+      res.status(500).json({ error: '周报生成失败', details: message });
     }
   }
 });
@@ -2458,12 +1605,11 @@ app.get('/api/config/prompts', async (req, res) => {
       modifyUserPrompt: modifyUserPromptMatch ? modifyUserPromptMatch[1].trim() : '',
       policyComparisonPrompt: policyComparisonPromptMatch ? policyComparisonPromptMatch[1].trim() : '',
       policyExtractionPrompt: policyExtractionPromptMatch ? policyExtractionPromptMatch[1].trim() : defaultExtractionPrompt,
-      model: 'DeepSeek R1',
+      model: getWeeklyReportModel().label,
       modelConfig: {
-        type: 'deepseek-reasoner',
-        temperature: 0.7,
-        outputLimit: 'unlimited',
-        endpoint: 'api.deepseek.com'
+        type: getWeeklyReportModel().model,
+        outputLimit: getWeeklyReportModel().requestMaxTokens,
+        endpoint: getWeeklyReportModel().endpoint
       }
     });
   } catch (error) {
@@ -3034,162 +2180,8 @@ app.post('/api/policy/extract', async (req, res) => {
       .replace('{report}', contentToProcess)
       .replace('{template}', currentPolicyContent);
     
-    const sanitizeJsonLikeOutput = (s) => {
-      const input = String(s ?? '');
-      let out = '';
-      let inString = false;
-      let escaped = false;
-      for (let i = 0; i < input.length; i++) {
-        const ch = input[i];
-        if (inString) {
-          if (escaped) {
-            out += ch;
-            escaped = false;
-            continue;
-          }
-          if (ch === '\\') {
-            out += ch;
-            escaped = true;
-            continue;
-          }
-          if (ch === '"') {
-            out += ch;
-            inString = false;
-            continue;
-          }
-          if (ch === '\n') {
-            out += '\\n';
-            continue;
-          }
-          if (ch === '\r') {
-            continue;
-          }
-          out += ch;
-          continue;
-        }
+    const parsed = await extractPolicy(systemPrompt, finalUserPrompt, { modelConfig });
 
-        if (ch === '"') {
-          out += ch;
-          inString = true;
-          escaped = false;
-          continue;
-        }
-        out += ch;
-      }
-      return out;
-    };
-
-    const callDeepSeekJsonObject = async (userPrompt, options = {}) => {
-      const {
-        temperature = 0.3,
-        maxTokens = 4096
-      } = options || {};
-
-      const response = await fetch(modelConfig.endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${process.env[modelConfig.apiKey]}`
-        },
-        body: JSON.stringify(buildDeepSeekChatPayload(modelConfig, [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: userPrompt }
-          ], false, {
-          max_tokens: maxTokens,
-          response_format: { type: 'json_object' }
-        }))
-      });
-
-      if (!response.ok) {
-        let errorText = '';
-        try {
-          errorText = await response.text();
-        } catch (e) {
-          errorText = '';
-        }
-        const snippet = (errorText || '').slice(0, 800);
-        throw new Error(`DeepSeek API error: ${response.status} ${response.statusText}${snippet ? ` | ${snippet}` : ''}`);
-      }
-
-      const data = await response.json();
-      return data.choices?.[0]?.message?.content || '{}';
-    };
-
-    const tryParse = (raw) => {
-      const cleaned = sanitizeJsonLikeOutput(raw);
-      return JSON.parse(cleaned);
-    };
-
-    let parsed;
-    let firstResult = '';
-    try {
-      firstResult = await callDeepSeekJsonObject(finalUserPrompt, { temperature: 0.3, maxTokens: 4096 });
-      parsed = tryParse(firstResult);
-    } catch (e) {
-      const eMsg = String(e?.message || e || '');
-      const strictPrefix = [
-        '【强制约束：为避免超长/截断导致JSON不完整，请严格执行】',
-        '1) 仅输出一个JSON对象，且必须能被JSON.parse解析。',
-        '2) 每条“政策明细”的“内容”请控制在120字以内；禁止换行、禁止使用\\n；用分号/逗号表达要点。',
-        '3) 只保留关键数字与要素（对象/门槛/额度比例/期限/范围/流程关键点），不要写办理渠道/网址/过长材料清单。',
-        '4) 若同城同类信息重复，请合并为1条更精炼的政策明细；优先保留数字最明确的条目。',
-        '5) “依据文件”请尽量短（<=60字）。'
-      ].join('\n');
-      const strictPrompt = `${strictPrefix}\n\n${finalUserPrompt}`;
-
-      const repairSystem = '你是一个严格的JSON修复器。你只输出可被JSON.parse解析的单一JSON对象，不要任何解释或markdown。';
-      let strictResult = '';
-      try {
-        strictResult = await callDeepSeekJsonObject(strictPrompt, { temperature: 0.1, maxTokens: 4096 });
-        parsed = tryParse(strictResult);
-      } catch (strictErr) {
-        const strictMsg = String(strictErr?.message || strictErr || '');
-        const repairSource = strictResult || firstResult;
-        const repairUser = [
-          '请将下面文本修复为合法JSON对象：',
-          '要求：',
-          '1) 只输出一个JSON对象',
-          '2) 不要多余文字',
-          '3) 需要时将字符串中的换行转义为\\\\n，双引号转义为\\\"',
-          '',
-          '待修复文本：',
-          String(repairSource || '').slice(0, 12000)
-        ].join('\n');
-
-        const repairResp = await fetch(modelConfig.endpoint, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${process.env[modelConfig.apiKey]}`
-          },
-          body: JSON.stringify(buildDeepSeekChatPayload(modelConfig, [
-              { role: 'system', content: repairSystem },
-              { role: 'user', content: repairUser }
-            ], false, {
-            max_tokens: 2048,
-            response_format: { type: 'json_object' }
-          }))
-        });
-
-        if (repairResp.ok) {
-          try {
-            const repairData = await repairResp.json();
-            const repaired = repairData.choices?.[0]?.message?.content || '{}';
-            parsed = tryParse(repaired);
-          } catch (repairErr) {
-            const repairMsg = String(repairErr?.message || repairErr || '');
-            throw new Error(`DeepSeek returned non-JSON content | ${eMsg} | strict_failed: ${strictMsg} | repair_failed: ${repairMsg}`);
-          }
-        } else {
-          let repairText = '';
-          try {
-            repairText = await repairResp.text();
-          } catch {}
-          throw new Error(`DeepSeek returned non-JSON content | ${eMsg} | strict_failed: ${strictMsg} | repair_http_${repairResp.status}: ${(repairText || '').slice(0, 800)}`);
-        }
-      }
-    }
-    
     res.json({ 
       result: parsed,
       debug: {
@@ -3310,8 +2302,8 @@ app.post('/api/policy/preview-prompt', async (req, res) => {
 app.post('/api/policy/compare', async (req, res) => {
   const { extractedPolicy, currentPolicy, modelKey } = req.body;
   
-  if (!extractedPolicy) {
-    return res.status(400).json({ error: 'Missing extracted policy' });
+  if (!countPolicyDetails(extractedPolicy)) {
+    return res.status(400).json({ error: '没有可比对的政策', details: '请先成功提取至少一条政策后再进行比对' });
   }
   
   try {
@@ -3355,25 +2347,11 @@ app.post('/api/policy/compare', async (req, res) => {
       .replace('{current}', JSON.stringify(currentPolicyContent, null, 2))
       .replace('{extracted}', JSON.stringify(extractedPolicy, null, 2));
       
-    const response = await fetch(modelConfig.endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env[modelConfig.apiKey]}`
-      },
-      body: JSON.stringify(buildDeepSeekChatPayload(modelConfig, [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: finalUserPrompt }
-        ], false))
-    });
-    
-    if (!response.ok) {
-      throw new Error(`DeepSeek API error: ${response.status} ${response.statusText}`);
-    }
-    
-    const data = await response.json();
-    const markdown = data.choices?.[0]?.message?.content || '对比生成失败';
-    
+    const markdown = await completeChat([
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: finalUserPrompt },
+    ], { modelConfig });
+
     res.json({ 
       markdown,
       debug: {
@@ -3396,7 +2374,7 @@ app.post('/api/policy/compare', async (req, res) => {
 // 获取所有可用模型
 app.get('/api/llm/models', async (req, res) => {
   try {
-    const LLMService = require('./services/llmService');
+    const LLMService = require('./services/llmService.cjs');
     const llmService = new LLMService();
     
     const models = llmService.getAvailableModels();
@@ -3410,7 +2388,7 @@ app.get('/api/llm/models', async (req, res) => {
 // 获取当前活跃模型
 app.get('/api/llm/active-model', async (req, res) => {
   try {
-    const LLMService = require('./services/llmService');
+    const LLMService = require('./services/llmService.cjs');
     const llmService = new LLMService();
     
     const activeModel = llmService.getActiveModelConfig();
@@ -3430,7 +2408,7 @@ app.post('/api/llm/switch-model', async (req, res) => {
   }
   
   try {
-    const LLMService = require('./services/llmService');
+    const LLMService = require('./services/llmService.cjs');
     const llmService = new LLMService();
     
     const newActiveModel = llmService.switchModel(modelKey);
@@ -3447,7 +2425,7 @@ app.post('/api/llm/switch-model', async (req, res) => {
 // 获取自定义Prompt选项
 app.get('/api/llm/custom-prompts', async (req, res) => {
   try {
-    const LLMService = require('./services/llmService');
+    const LLMService = require('./services/llmService.cjs');
     const llmService = new LLMService();
     
     const customPrompts = llmService.getCustomPrompts();
@@ -3461,7 +2439,7 @@ app.get('/api/llm/custom-prompts', async (req, res) => {
 // 重新加载配置
 app.post('/api/llm/reload-config', async (req, res) => {
   try {
-    const LLMService = require('./services/llmService');
+    const LLMService = require('./services/llmService.cjs');
     const llmService = new LLMService();
     
     const config = llmService.reloadConfig();
@@ -4949,6 +3927,7 @@ app.get('/api/policy/region-report/news', async (req, res) => {
 
 app.post('/api/policy/region-report/generate', async (req, res) => {
   try {
+    const modelConfig = getWeeklyReportModel();
     const { startDate, endDate, regions, promptId, userPrompt, manualOverrides = {} } = req.body || {};
     const selections = normalizeRegionSelections(regions);
 
@@ -5029,42 +4008,10 @@ app.post('/api/policy/region-report/generate', async (req, res) => {
       regionBlocks,
     });
 
-    const deepseekResponse = await fetch('https://api.deepseek.com/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${process.env.DEEPSEEK_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: REGION_POLICY_REPORT_MODEL,
-        messages: [
-          { role: 'system', content: selectedPrompt.systemPrompt },
-          { role: 'user', content: finalUserPrompt },
-        ],
-        temperature: 0.35,
-        stream: false,
-      }),
-    });
-
-    if (!deepseekResponse.ok) {
-      const errorText = await deepseekResponse.text().catch(() => '');
-      if (isContextLengthErrorText(errorText)) {
-        return res.status(400).json({
-          error: '输入内容超出模型上下文限制',
-          details: '当前选择的地区、时间范围或纳入分析的新闻过多，导致模型无法完成生成。请缩短日期区间、减少地区数量，或适当取消部分纳入新闻后重试。',
-        });
-      }
-      throw new Error(`DeepSeek API error: ${deepseekResponse.status} ${deepseekResponse.statusText} ${errorText}`.trim());
-    }
-
-    const data = await deepseekResponse.json();
-    if (data?.error && isContextLengthErrorText(data.error.message || data.error.code || '')) {
-      return res.status(400).json({
-        error: '输入内容超出模型上下文限制',
-        details: '当前选择的地区、时间范围或纳入分析的新闻过多，导致模型无法完成生成。请缩短日期区间、减少地区数量，或适当取消部分纳入新闻后重试。',
-      });
-    }
-    const reportContent = data.choices?.[0]?.message?.content?.trim();
+    const reportContent = await completeChat([
+      { role: 'system', content: selectedPrompt.systemPrompt },
+      { role: 'user', content: finalUserPrompt },
+    ], { modelConfig });
 
     if (!reportContent) {
       throw new Error('DeepSeek 未返回有效报告内容');
@@ -5086,11 +4033,17 @@ app.post('/api/policy/region-report/generate', async (req, res) => {
         excludedNewsCount,
         promptVersion: selectedPrompt.name,
         promptId: selectedPrompt.id,
-        modelName: REGION_POLICY_REPORT_MODEL,
+        modelName: modelConfig.model,
       },
     });
   } catch (error) {
     console.error('生成地区政策报告失败:', error);
+    if (isContextLengthErrorText(error.message)) {
+      return res.status(400).json({
+        error: '输入内容超出模型上下文限制',
+        details: '请缩短日期区间、减少地区数量，或减少纳入分析的新闻后重试。',
+      });
+    }
     res.status(500).json({
       error: '生成地区政策报告失败',
       details: error.message,
@@ -5169,15 +4122,19 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 
-const port = process.env.API_PORT || 3000;
-app.listen(port, () => {
-  console.log(`API server running at http://localhost:${port}`);
-  autoReportService.ensureLogTable()
-    .then(() => {
-      startAutoReportCron();
-      console.log('自动周报调度已注册: Asia/Shanghai 每周日 05:00');
-    })
-    .catch(error => {
-      console.error('初始化自动周报失败:', error);
-    });
-});
+if (require.main === module) {
+  const port = process.env.API_PORT || 3000;
+  app.listen(port, () => {
+    console.log(`API server running at http://localhost:${port}`);
+    autoReportService.ensureLogTable()
+      .then(() => {
+        startAutoReportCron();
+        console.log('自动周报调度已注册: Asia/Shanghai 每周日 05:00');
+      })
+      .catch(error => {
+        console.error('初始化自动周报失败:', error);
+      });
+  });
+}
+
+module.exports = app;

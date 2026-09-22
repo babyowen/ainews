@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 
 const CONFIG_PATH = path.join(__dirname, '../config/weekly-report-models.json');
+const LEGACY_MODEL_KEYS = new Set(['deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-r1', 'kimi-k2', 'openai-gpt4', 'claude-3-opus']);
 
 function loadWeeklyReportModelConfig() {
   const raw = fs.readFileSync(CONFIG_PATH, 'utf8');
@@ -14,7 +15,8 @@ function loadWeeklyReportModelConfig() {
 
 function getWeeklyReportModel(modelKey) {
   const config = loadWeeklyReportModelConfig();
-  const key = modelKey || config.defaultModelKey;
+  // 已保存的自动任务和旧浏览器请求仍可能带旧 key，统一解析到当前模型。
+  const key = !modelKey || LEGACY_MODEL_KEYS.has(modelKey) ? config.defaultModelKey : modelKey;
   const model = config.models[key];
   if (!model) {
     throw new Error(`Unknown weekly report model: ${key}`);
@@ -41,7 +43,7 @@ function buildDeepSeekChatPayload(modelConfig, messages, stream = false, extra =
     model: modelConfig.model,
     messages,
     stream,
-    ...extra
+    max_tokens: modelConfig.requestMaxTokens || 32768
   };
 
   if (modelConfig.thinking) {
@@ -54,7 +56,7 @@ function buildDeepSeekChatPayload(modelConfig, messages, stream = false, extra =
     payload.reasoning_effort = modelConfig.reasoning_effort;
   }
 
-  return payload;
+  return { ...payload, ...extra, model: modelConfig.model, messages, stream };
 }
 
 module.exports = {

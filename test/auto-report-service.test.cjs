@@ -93,7 +93,7 @@ test('getAutoReportWeekRange handles Saturday and cross-year ranges', () => {
 test('normalizeAutoReportConfig supplies safe disabled defaults', () => {
   const config = normalizeAutoReportConfig(null);
   assert.equal(config.enabled, false);
-  assert.equal(config.defaults.modelKey, 'deepseek-v4-flash');
+  assert.equal(config.defaults.modelKey, 'deepseek-v4.1-flash');
   assert.equal(config.defaults.minScore, 3);
   assert.deepEqual(config.keywords, {});
 });
@@ -123,7 +123,7 @@ test('buildAutoReportConfig merges keyword overrides with defaults', () => {
   assert.deepEqual(config.enabledKeywords, [
     {
       keyword: '公积金',
-      modelKey: 'deepseek-v4-pro',
+      modelKey: 'deepseek-v4.1-flash',
       promptId: 'housing',
       minScore: 4.5,
       summaryVersion: 'short',

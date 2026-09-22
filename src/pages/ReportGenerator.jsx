@@ -6,7 +6,6 @@ import { KEYWORDS } from '../config/keywords';
 import { useAuth } from '../auth/AuthContext';
 import { finalizeStreamingReport } from '../utils/streamingReport';
 import { getRecentCompleteSaturdayRange } from '../utils/dateRanges';
-import { buildUnifiedWeeklyModelOptions, parseUnifiedWeeklyModelKey } from '../utils/modelOptions';
 // import PromptModal from '../components/PromptModal';
 import './ReportGenerator.css';
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, BorderStyle, WidthType, Table, TableRow, TableCell, ImageRun, ExternalHyperlink, PageBreak } from 'docx';
@@ -21,7 +20,8 @@ const ReportGenerator = () => {
   
   // 获取模型简称
   const getModelShortName = (modelName) => {
-    if (!modelName) return 'DeepSeek R1';
+    if (!modelName) return 'DeepSeek V4.1 Flash';
+    if (/deepseek[- ]v4\.1[- ]flash/i.test(modelName)) return 'DeepSeek V4.1 Flash';
     if (modelName.includes('deepseek-v4-flash')) return 'DeepSeek V4 Flash';
     if (modelName.includes('deepseek-v4-pro')) return 'DeepSeek V4 Pro';
     if (modelName.includes('deepseek')) return 'DeepSeek R1';
@@ -46,14 +46,7 @@ const ReportGenerator = () => {
   const [promptOptions, setPromptOptions] = useState([]);
   const [selectedPromptId, setSelectedPromptId] = useState('');
   const [weeklyReportModels, setWeeklyReportModels] = useState([]);
-  const [selectedWeeklyModelKey, setSelectedWeeklyModelKey] = useState('deepseek-v4-flash');
-  const [selectedUnifiedModelKey, setSelectedUnifiedModelKey] = useState('deepseek:deepseek-v4-flash');
-
-  const unifiedModelOptions = useMemo(
-    () => buildUnifiedWeeklyModelOptions(weeklyReportModels),
-    [weeklyReportModels]
-  );
-
+  const [selectedWeeklyModelKey, setSelectedWeeklyModelKey] = useState('');
   const selectedChars = useMemo(() => {
     return selectedNews.reduce((sum, news) => {
       const text = summaryVersion === 'short'
@@ -84,8 +77,7 @@ const ReportGenerator = () => {
   const [lastRawSseLine, setLastRawSseLine] = useState('');
   const [canRetry, setCanRetry] = useState(false);
   const [lastRequestParams, setLastRequestParams] = useState(null);
-  const [isGeneratingKimiReport, setIsGeneratingKimiReport] = useState(false);
-  const [currentModel, setCurrentModel] = useState('DeepSeek R1'); // 当前使用的模型
+  const [currentModel, setCurrentModel] = useState('DeepSeek V4.1 Flash'); // 当前使用的模型
   const eventSourceRef = useRef(null);
 
   // 测试用的模拟周报内容
@@ -202,11 +194,9 @@ const ReportGenerator = () => {
         if (!res.ok) return;
         const list = await res.json();
         setWeeklyReportModels(Array.isArray(list) ? list : []);
-        const v4Flash = list.find(model => model.key === 'deepseek-v4-flash');
-        const defaultModel = v4Flash || list.find(model => model.isDefault) || list[0];
+        const defaultModel = list.find(model => model.isDefault) || list[0];
         if (defaultModel?.key) {
           setSelectedWeeklyModelKey(defaultModel.key);
-          setSelectedUnifiedModelKey(`deepseek:${defaultModel.key}`);
         }
       } catch (error) {
         console.warn('加载周报模型配置失败:', error);
@@ -362,7 +352,8 @@ const ReportGenerator = () => {
       });
 
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.details || error.error || `HTTP ${response.status}`);
       }
 
       const reader = response.body.getReader();
@@ -408,6 +399,7 @@ const ReportGenerator = () => {
                 case 'error':
                   setStreamingStatus(`❌ 修改失败: ${parsed.message}`);
                   setLastSseError(parsed.message || '未知错误');
+                  setCanRetry(true);
                   return;
               }
             } catch (e) {
@@ -931,7 +923,7 @@ const ReportGenerator = () => {
       promptId: selectedPromptId,
       summaryVersion,
       modelKey: overrideModelKey,
-      provider: 'deepseek'
+      provider: 'agent-router'
     };
 
     setLastRequestParams(requestParams); // 保存请求参数以便重试
@@ -942,7 +934,7 @@ const ReportGenerator = () => {
     setStreamingContent('');
     setStreamingReasoning('');
     setStreamingStatus('🚀 准备开始生成周报...');
-    const modelName = selectedModel?.label || 'DeepSeek V4 Flash';
+    const modelName = selectedModel?.label || 'DeepSeek V4.1 Flash';
     setCurrentModel(modelName);
     setDebugInfo(null);
     setShowModelMessage(false);
@@ -963,7 +955,8 @@ const ReportGenerator = () => {
       });
 
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.details || error.error || `HTTP ${response.status}`);
       }
 
       const reader = response.body.getReader();
@@ -1014,6 +1007,7 @@ const ReportGenerator = () => {
                 case 'error':
                   setStreamingStatus(`❌ 生成失败: ${parsed.message}`);
                   setLastSseError(parsed.message || '未知错误');
+                  setCanRetry(true);
                   return;
               }
             } catch (e) {
@@ -1031,17 +1025,6 @@ const ReportGenerator = () => {
     }
   };
 
-  const handleGenerateUnifiedReport = async () => {
-    const parsed = parseUnifiedWeeklyModelKey(selectedUnifiedModelKey);
-    if (parsed.provider === 'kimi') {
-      await handleGenerateKimiReport();
-      return;
-    }
-    const nextModelKey = parsed.modelKey || 'deepseek-v4-flash';
-    setSelectedWeeklyModelKey(nextModelKey);
-    await handleGenerateReport(nextModelKey);
-  };
-
   // 重试生成周报
   const handleRetryGenerate = () => {
     if (lastRequestParams) {
@@ -1052,7 +1035,6 @@ const ReportGenerator = () => {
   // 使用指定参数生成周报（用于重试）
   const handleGenerateReportWithParams = async (params) => {
     const retryModel = weeklyReportModels.find(model => model.key === params?.modelKey);
-    const isKimiRetry = params?.provider === 'kimi';
     setCanRetry(false);
     setIsGeneratingReport(true);
     setGeneratedReport('');
@@ -1061,14 +1043,8 @@ const ReportGenerator = () => {
     setStreamingStatus('🔄 重新开始生成周报...');
     setDebugInfo(null);
     setShowModelMessage(false);
-    let retryModelName = 'DeepSeek R1';
-    if (isKimiRetry) {
-      setCurrentModel('KIMI K2');
-      retryModelName = 'KIMI K2';
-    } else if (retryModel?.label) {
-      setCurrentModel(retryModel.label);
-      retryModelName = retryModel.label;
-    }
+    const retryModelName = retryModel?.label || 'DeepSeek V4.1 Flash';
+    setCurrentModel(retryModelName);
     // 立即拼装模型消息并显示
     const localDebug = buildLocalDebugInfo(retryModelName);
     if (localDebug) {
@@ -1077,7 +1053,7 @@ const ReportGenerator = () => {
     }
 
     try {
-      const response = await fetch(isKimiRetry ? '/api/generate-kimi-report' : '/api/generate-report', {
+      const response = await fetch('/api/generate-report', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1086,7 +1062,8 @@ const ReportGenerator = () => {
       });
 
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.details || error.error || `HTTP ${response.status}`);
       }
 
       const reader = response.body.getReader();
@@ -1137,6 +1114,7 @@ const ReportGenerator = () => {
                 case 'error':
                   setStreamingStatus(`❌ 重试失败: ${parsed.message}`);
                   setLastSseError(parsed.message || '未知错误');
+                  setCanRetry(true);
                   return;
               }
             } catch (e) {
@@ -1151,121 +1129,6 @@ const ReportGenerator = () => {
       setCanRetry(true);
     } finally {
       setIsGeneratingReport(false);
-    }
-  };
-
-  // KIMI生成周报
-  const handleGenerateKimiReport = async () => {
-    if (selectedNews.length === 0) {
-      alert('请至少选择一条新闻');
-      return;
-    }
-
-    const requestParams = {
-      keyword: selectedKeyword,
-      startDate,
-      endDate,
-      selectedNews,
-      userPrompt,
-      stream: true,
-      promptId: selectedPromptId,
-      summaryVersion,
-      provider: 'kimi'
-    };
-
-    setLastRequestParams(requestParams);
-    setCanRetry(false);
-    setIsGeneratingKimiReport(true);
-    setShowReport(true);
-    setGeneratedReport('');
-    setStreamingContent('');
-    setStreamingReasoning('');
-    setStreamingStatus('🚀 准备开始生成周报...');
-    setCurrentModel('KIMI K2');
-    setDebugInfo(null);
-    setShowModelMessage(false);
-    // 立即拼装模型消息并显示
-    const localDebug = buildLocalDebugInfo('KIMI K2');
-    if (localDebug) {
-      setDebugInfo(localDebug);
-      setShowModelMessage(true);
-    }
-
-    try {
-      const response = await fetch('/api/generate-kimi-report', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestParams)
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      let accumulatedContent = '';
-
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop();
-
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6);
-            try {
-              const parsed = JSON.parse(data);
-              
-              switch (parsed.type) {
-                case 'debug':
-                  setDebugInfo(parsed.data);
-                  setShowModelMessage(true);
-                  break;
-                case 'status':
-                  setStreamingStatus(parsed.message);
-                  break;
-                case 'reasoning':
-                  setStreamingReasoning(prev => prev + parsed.content);
-                  break;
-                case 'content':
-                  accumulatedContent += parsed.content;
-                  setStreamingContent(prev => prev + parsed.content);
-                  setGeneratedReport(prev => prev + parsed.content);
-                  break;
-                case 'done':
-                  {
-                    const finalReport = finalizeStreamingReport(parsed.report, accumulatedContent);
-                    setGeneratedReport(finalReport);
-                    setOriginalReport(finalReport);
-                  }
-                  setStreamingStatus('✅ 周报生成完成！');
-                  setCanRetry(false);
-                  setShowModifyInput(false);
-                  return;
-                case 'error':
-                  setStreamingStatus(`❌ 生成失败: ${parsed.message}`);
-                  setLastSseError(parsed.message || '未知错误');
-                  return;
-              }
-            } catch (e) {
-              console.warn('解析SSE数据失败:', e, data);
-            }
-          }
-        }
-      }
-    } catch (error) {
-      console.error('生成KIMI周报失败:', error);
-      setStreamingStatus(`❌ 生成失败: ${error.message}`);
-      setCanRetry(true);
-    } finally {
-      setIsGeneratingKimiReport(false);
     }
   };
 
@@ -1505,7 +1368,8 @@ const ReportGenerator = () => {
 
       // 获取模型简称
       const getModelShortName = (modelName) => {
-        if (!modelName) return 'DeepSeek R1';
+        if (!modelName) return 'DeepSeek V4.1 Flash';
+    if (/deepseek[- ]v4\.1[- ]flash/i.test(modelName)) return 'DeepSeek V4.1 Flash';
         if (modelName.includes('deepseek-v4-flash')) return 'DeepSeek V4 Flash';
         if (modelName.includes('deepseek-v4-pro')) return 'DeepSeek V4 Pro';
         if (modelName.includes('deepseek')) return 'DeepSeek R1';
@@ -1753,7 +1617,7 @@ const ReportGenerator = () => {
         <div>
           <p className="kd-page-kicker">WEEKLY REPORT</p>
           <h1 className="kd-page-title">周报生成</h1>
-          <p className="kd-page-subtitle">默认最近周六至今天，筛选新闻后统一选择模型生成周报。</p>
+          <p className="kd-page-subtitle">默认最近周六至今天，筛选新闻后生成周报。</p>
         </div>
         <div className="report-header-stats">
           <span>{selectedKeyword}</span>
@@ -1905,7 +1769,7 @@ const ReportGenerator = () => {
               <div className="generate-section-header">
                 <div>
                   <h2>生成设置</h2>
-                  <p>选定提示词版本和生成模型后，一键生成周报。</p>
+                  <p>选定提示词版本后，一键生成周报。</p>
                 </div>
               </div>
               <div className="generate-sub-panel">
@@ -1930,26 +1794,13 @@ const ReportGenerator = () => {
               <div className="generate-sub-panel">
                 <div className="generate-sub-title">生成模型</div>
                 <div className="model-action-row">
-                  <select
-                    className="model-select"
-                    value={selectedUnifiedModelKey}
-                    onChange={(e) => {
-                      setSelectedUnifiedModelKey(e.target.value);
-                      const parsed = parseUnifiedWeeklyModelKey(e.target.value);
-                      if (parsed.provider === 'deepseek') setSelectedWeeklyModelKey(parsed.modelKey);
-                    }}
-                    disabled={isGeneratingReport || isGeneratingKimiReport}
-                  >
-                    {unifiedModelOptions.map(model => (
-                      <option key={model.key} value={model.key}>{model.label}</option>
-                    ))}
-                  </select>
+                  <span>{weeklyReportModels.find(model => model.isDefault)?.label || 'DeepSeek V4.1 Flash'}</span>
                   <button
-                    onClick={handleGenerateUnifiedReport}
-                    disabled={isGeneratingReport || isGeneratingKimiReport || selectedNews.length === 0}
+                    onClick={() => handleGenerateReport()}
+                    disabled={isGeneratingReport || selectedNews.length === 0}
                     className="generate-btn kd-btn-primary"
                   >
-                    {(isGeneratingReport || isGeneratingKimiReport) ? '生成中...' : '生成周报'}
+                    {(isGeneratingReport) ? '生成中...' : '生成周报'}
                   </button>
                 </div>
               </div>
@@ -2038,7 +1889,7 @@ const ReportGenerator = () => {
                   <span>🔑 关键词: {selectedKeyword}</span>
                   <span>📅 时间范围: {formatDate(startDate)} ~ {formatDate(endDate)}</span>
                   <span>📰 新闻数量: {selectedNews.length} 条</span>
-                  <span>🤖 模型: {debugInfo?.model || 'DeepSeek R1'}</span>
+                  <span>🤖 模型: {debugInfo?.model || 'DeepSeek V4.1 Flash'}</span>
                   {debugInfo && (
                     <button 
                       className="view-prompts-btn"
