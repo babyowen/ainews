@@ -1,0 +1,33 @@
+{
+  "defaultModelKey": "deepseek-v4-pro",
+  "models": {
+    "deepseek-v4-flash": {
+      "label": "DeepSeek V4 Flash",
+      "provider": "deepseek",
+      "model": "deepseek-v4-flash",
+      "apiKey": "DEEPSEEK_API_KEY",
+      "endpoint": "https://api.deepseek.com/chat/completions",
+      "contextWindow": 1000000,
+      "maxOutputTokens": 384000,
+      "thinking": {
+        "type": "enabled"
+      },
+      "reasoning_effort": "high",
+      "description": "1M上下文，速度优先，适合日常周报生成"
+    },
+    "deepseek-v4-pro": {
+      "label": "DeepSeek V4 Pro",
+      "provider": "deepseek",
+      "model": "deepseek-v4-pro",
+      "apiKey": "DEEPSEEK_API_KEY",
+      "endpoint": "https://api.deepseek.com/chat/completions",
+      "contextWindow": 1000000,
+      "maxOutputTokens": 384000,
+      "thinking": {
+        "type": "enabled"
+      },
+      "reasoning_effort": "high",
+      "description": "1M上下文，质量优先，适合复杂周报分析"
+    }
+  }
+}
