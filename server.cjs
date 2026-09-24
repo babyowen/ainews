@@ -127,7 +127,6 @@ const AUTH_USERS = {
     role: 'admin',
     defaultPath: '/summary',
     passwordEnv: 'KEYDIGEST_ADMIN_PASSWORD',
-    fallbackPasswordEnv: 'VITE_ADMIN_PASSWORD',
     keywords: ['养老', '公积金', '数字政务', '政府基金', '中国烟草', '烟草服务银行', '江苏省国资委'],
     routes: [
       '/summary',
@@ -179,7 +178,7 @@ function getPublicUserProfile(user) {
 }
 
 function getConfiguredPassword(user) {
-  return process.env[user.passwordEnv] || (user.fallbackPasswordEnv ? process.env[user.fallbackPasswordEnv] : '');
+  return process.env[user.passwordEnv] || '';
 }
 
 function loadJsonFile(filePath, fallbackValue) {
@@ -230,18 +229,22 @@ function getUserFromRequest(req) {
 }
 
 function loadUsersConfig() {
-  let users = configStore.readEffectiveJson('users.json');
-  if (!Array.isArray(users)) {
-    users = Object.values(AUTH_USERS).map(u => ({
+  // Passwords are trusted only in the private runtime layer. Repository defaults
+  // contain permissions, never usable credentials (including legacy defaults).
+  let users = configStore.readRuntimeJson('users.json');
+  if (users === null) {
+    const defaults = configStore.readDefaultJson('users.json');
+    const templates = Array.isArray(defaults) ? defaults : Object.values(AUTH_USERS);
+    users = templates.map(u => ({
       username: u.username,
       displayName: u.displayName,
       role: u.role,
-      password: getConfiguredPassword(u),
-      keywords: [...u.keywords],
-      routes: [...u.routes],
+      password: AUTH_USERS[u.username] ? getConfiguredPassword(AUTH_USERS[u.username]) : '',
+      keywords: [...(u.keywords || [])],
+      routes: [...(u.routes || [])],
     }));
-    configStore.commitJson('users.json', users);
-    return users;
+  } else if (!Array.isArray(users)) {
+    throw new Error('私有用户配置必须是数组');
   }
   // Lightweight migration: ensure built-in users have routes from AUTH_USERS
   let changed = false;
@@ -344,7 +347,7 @@ function assertPromptStateReady({
 }
 
 function assertRuntimeConfigurationReady() {
-  const users = configStore.readEffectiveJson('users.json');
+  const users = loadUsersConfig();
   if (!Array.isArray(users) || users.length === 0) throw new Error('生产用户配置必须是非空数组');
   const usernames = new Set();
   for (const user of users) {
@@ -531,7 +534,7 @@ app.post('/api/auth/login', (req, res) => {
     return res.status(401).json({ error: '用户名或密码错误' });
   }
 
-  if (String(password) !== user.password) {
+  if (typeof user.password !== 'string' || !user.password || String(password) !== user.password) {
     return res.status(401).json({ error: '用户名或密码错误' });
   }
 

@@ -9,7 +9,7 @@ const actualRequire = createRequire(path.join(root, 'server.cjs'));
 
 // Execute the real Express handlers with test-owned files and SQL. Never load .env,
 // listen on a port, register cron jobs, or connect to a real database/model provider.
-function createIsolatedApp({ configDir, dataDir, readiness = false }) {
+function createIsolatedApp({ configDir, dataDir, readiness = false, env = {} }) {
   const pool = { async query(sql) {
     if (sql.includes('SELECT DISTINCT keyword FROM scored_news')) return [[{ keyword: '公积金' }, { keyword: '养老' }]];
     if (readiness && (/CREATE TABLE IF NOT EXISTS auto_report_log|SHOW COLUMNS FROM auto_report_log|ALTER TABLE auto_report_log|SELECT 1 AS ready/.test(sql))) return [[]];
@@ -39,7 +39,7 @@ function createIsolatedApp({ configDir, dataDir, readiness = false }) {
   const module = { exports: {} };
   vm.runInNewContext(fs.readFileSync(path.join(root, 'server.cjs'), 'utf8'), {
     require: isolatedRequire, module, __dirname: path.dirname(configDir), Buffer,
-    process: { env: { KEYDIGEST_DATA_DIR: dataDir, KEYDIGEST_SESSION_SECRET: randomUUID() } },
+    process: { env: { KEYDIGEST_DATA_DIR: dataDir, KEYDIGEST_SESSION_SECRET: randomUUID(), ...env } },
     console: { log() {}, warn() {}, error() {} },
   }, { filename: 'server.cjs' });
   const app = module.exports;

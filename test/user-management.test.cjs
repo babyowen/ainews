@@ -27,7 +27,8 @@ test.before(async () => {
   });
   const users = JSON.parse(fs.readFileSync(path.join(configDir, 'users.json'), 'utf8'));
   for (const user of users) user.password = passwords[user.username] || randomUUID();
-  fs.writeFileSync(path.join(configDir, 'users.json'), JSON.stringify(users));
+  fs.mkdirSync(path.join(configDir, 'runtime'), { recursive: true });
+  fs.writeFileSync(path.join(configDir, 'runtime/users.json'), JSON.stringify(users));
   request = createIsolatedApp({ configDir, dataDir: path.join(tempDir, 'data') });
   const login = await request('POST', '/api/auth/login', { username: 'admin', password: passwords.admin });
   assert.equal(login.status, 200);
