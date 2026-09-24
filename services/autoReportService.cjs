@@ -1,11 +1,13 @@
 const fs = require('fs');
 const path = require('path');
 const { extractSection: sharedExtractSection } = require('./promptStore.cjs');
+const { completeChat } = require('./modelClient.cjs');
+const { getWeeklyReportModel: getUnifiedModel } = require('./weeklyReportModelConfig.cjs');
 
 const DEFAULT_AUTO_REPORT_CONFIG = {
   enabled: false,
   defaults: {
-    modelKey: 'deepseek-v4-flash',
+    modelKey: 'deepseek-v4.1-flash',
     promptId: '',
     minScore: 3,
     summaryVersion: 'short',
@@ -26,7 +28,7 @@ function normalizeAutoReportConfig(input) {
   return {
     enabled: Boolean(raw.enabled),
     defaults: {
-      modelKey: String(defaults.modelKey || DEFAULT_AUTO_REPORT_CONFIG.defaults.modelKey),
+      modelKey: getUnifiedModel().key,
       promptId: String(defaults.promptId || DEFAULT_AUTO_REPORT_CONFIG.defaults.promptId),
       minScore: toFiniteScore(defaults.minScore, DEFAULT_AUTO_REPORT_CONFIG.defaults.minScore),
       summaryVersion: defaults.summaryVersion === 'full' ? 'full' : 'short',
@@ -36,7 +38,7 @@ function normalizeAutoReportConfig(input) {
         const item = cfg && typeof cfg === 'object' ? cfg : {};
         return [keyword, {
           enabled: Boolean(item.enabled),
-          modelKey: item.modelKey ? String(item.modelKey) : '',
+          modelKey: getUnifiedModel().key,
           promptId: item.promptId ? String(item.promptId) : '',
           minScore: item.minScore === '' || item.minScore === undefined ? '' : toFiniteScore(item.minScore, ''),
           summaryVersion: item.summaryVersion === 'full' ? 'full' : (item.summaryVersion === 'short' ? 'short' : ''),
@@ -256,7 +258,6 @@ function createAutoReportService(options) {
     fallbackPromptsPath = path.join(__dirname, '../config/prompts.md'),
     outputDir = path.join(__dirname, '../data/auto-report-pdfs'),
     getWeeklyReportModel,
-    buildChatPayload,
     callLlm,
     renderPdf,
     buildPdfFilename = defaultBuildPdfFilename,
@@ -470,7 +471,11 @@ function createAutoReportService(options) {
         newsRows,
       });
     } else {
-      reportContent = await defaultCallLlm({ modelConfig, buildChatPayload, systemPrompt: promptPair.systemPrompt, userPrompt });
+      reportContent = await defaultCallLlm({ modelConfig, systemPrompt: promptPair.systemPrompt, userPrompt });
+    }
+
+    if (typeof reportContent !== 'string' || !reportContent.trim()) {
+      throw new Error('模型未返回有效报告内容');
     }
 
     const [insertResult] = await pool.query(
@@ -589,42 +594,11 @@ function createAutoReportService(options) {
   };
 }
 
-async function defaultCallLlm({ modelConfig, buildChatPayload, systemPrompt, userPrompt, timeoutMs = 180000, fetchImpl = fetch }) {
-  if (!buildChatPayload) throw new Error('buildChatPayload is required');
-  const apiKey = process.env[modelConfig.apiKey];
-  if (!apiKey) throw new Error(`环境变量 ${modelConfig.apiKey} 未配置`);
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-  let response;
-  try {
-    response = await fetchImpl(modelConfig.endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify(buildChatPayload(modelConfig, [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
-      ], false)),
-      signal: controller.signal,
-    });
-  } catch (error) {
-    if (error.name === 'AbortError') {
-      throw new Error(`LLM API request timed out after ${timeoutMs}ms`);
-    }
-    throw error;
-  } finally {
-    clearTimeout(timeoutId);
-  }
-
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`LLM API error: ${response.status} ${response.statusText} ${text}`);
-  }
-
-  const data = await response.json();
-  return data.choices?.[0]?.message?.content || '';
+async function defaultCallLlm({ modelConfig, systemPrompt, userPrompt, timeoutMs = 180000, fetchImpl = fetch }) {
+  return completeChat([
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: userPrompt },
+  ], { modelConfig, timeoutMs, fetchImpl });
 }
 
 module.exports = {

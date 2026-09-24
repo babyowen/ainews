@@ -163,44 +163,17 @@ test('configStore: region prompts id 列表合并与差异往返', () => {
   assert.deepEqual(strip(merged), strip(effective));
 });
 
-test('configStore: 浅合并（llm-config）+ 深层墓碑', () => {
+test('configStore: 自动周报浅合并和关键词删除标记', () => {
   const dir = makeTempConfigDir();
-  const defaults = {
-    activeModel: 'deepseek-r1',
-    models: {
-      'deepseek-r1': { provider: 'deepseek', model: 'deepseek-reasoner' },
-      'kimi-k2': { provider: 'moonshot', model: 'kimi-k2' },
-    },
-    settings: { temperature: 0.7 },
-  };
-  writeDefaults(dir, { 'llm-config.json': JSON.stringify(defaults, null, 2) });
+  const defaults = { enabled: false, defaults: { minScore: 3 }, keywords: { 养老: { enabled: true }, 公积金: { enabled: true } } };
+  writeDefaults(dir, { 'auto-report-config.json': JSON.stringify(defaults) });
   const store = createConfigStore({ configDir: dir });
-
-  // 只切换 activeModel → 运行时层仅含 activeModel
-  const diff = store.diffAgainstDefault('llm-config.json', { ...defaults, activeModel: 'kimi-k2' });
-  assert.deepEqual(diff, { activeModel: 'kimi-k2' });
-
-  // 历史遗留的多余键（如 switchModel 曾误写入的 prompts）不应进入运行时层
-  const polluted = { ...defaults, activeModel: 'kimi-k2', prompts: { systemPrompt: '污染' } };
-  const diff2 = store.diffAgainstDefault('llm-config.json', polluted);
-  assert.deepEqual(diff2, { activeModel: 'kimi-k2' });
-
-  // 深层删除：删除 kimi-k2 模型 → 子项墓碑 null
-  const removed = { ...defaults, activeModel: 'deepseek-r1', models: { 'deepseek-r1': defaults.models['deepseek-r1'] } };
-  const diff3 = store.diffAgainstDefault('llm-config.json', removed);
-  assert.deepEqual(diff3, { models: { 'kimi-k2': null } });
-  fs.mkdirSync(path.join(dir, 'runtime'), { recursive: true });
-  fs.writeFileSync(path.join(dir, 'runtime', 'llm-config.json'), JSON.stringify(diff3), 'utf-8');
-  const merged = store.readEffectiveJson('llm-config.json');
-  assert.deepEqual(Object.keys(merged.models), ['deepseek-r1']);
-
-  // auto-report keywords 子对象合并
-  const arDir = makeTempConfigDir();
-  const arDefaults = { enabled: false, defaults: { modelKey: 'deepseek-v4-flash' }, keywords: { 养老: { enabled: true } } };
-  writeDefaults(arDir, { 'auto-report-config.json': JSON.stringify(arDefaults) });
-  const arStore = createConfigStore({ configDir: arDir });
-  const arDiff = arStore.diffAgainstDefault('auto-report-config.json', { ...arDefaults, enabled: true });
-  assert.deepEqual(arDiff, { enabled: true });
+  assert.deepEqual(store.diffAgainstDefault('auto-report-config.json', { ...defaults, enabled: true }), { enabled: true });
+  assert.deepEqual(store.diffAgainstDefault('auto-report-config.json', { ...defaults, enabled: true, obsolete: 'ignored' }), { enabled: true });
+  store.commitJson('auto-report-config.json', { ...defaults, keywords: { 养老: defaults.keywords.养老 } });
+  assert.deepEqual(store.readRuntimeJson('auto-report-config.json'), { keywords: { 公积金: null } });
+  assert.deepEqual(Object.keys(store.readEffectiveJson('auto-report-config.json').keywords), ['养老']);
+  assert.throws(() => store.readEffectiveJson('llm-config.json'), /未纳入管理/);
 });
 
 test('configStore: users.json 整文件覆盖', () => {

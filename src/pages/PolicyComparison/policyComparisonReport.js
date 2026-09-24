@@ -399,6 +399,20 @@ const parseModernMarkerMarkdown = (markdown) => {
       return;
     }
 
+    // Some models close category/block groups even though the template uses
+    // implicit boundaries. Consume them as structure, never as report prose.
+    if (line === '[[/CATEGORY]]') {
+      flushCard();
+      currentCategory = '';
+      currentMode = '';
+      return;
+    }
+
+    if (line === '[[/BLOCK]]') {
+      currentMode = '';
+      return;
+    }
+
     const cardMatch = line.match(/^\[\[CARD\|(.*)\]\]$/);
     if (cardMatch) {
       flushCard();

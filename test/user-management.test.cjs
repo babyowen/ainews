@@ -1,93 +1,41 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const http = require('node:http');
+const os = require('node:os');
 const path = require('node:path');
+const { randomUUID } = require('node:crypto');
 const test = require('node:test');
+const { createIsolatedApp } = require('./helpers/isolatedApp.cjs');
 
-const USERS_CONFIG_PATH = path.join(__dirname, '..', 'config', 'users.json');
-const RUNTIME_USERS_PATH = path.join(__dirname, '..', 'config', 'runtime', 'users.json');
-const TEST_API_PORT = Number(process.env.TEST_API_PORT || 3456);
-const BASE_URL = `http://127.0.0.1:${TEST_API_PORT}`;
+const root = path.join(__dirname, '..');
+let tempDir;
+let configDir;
+let request;
+let adminToken;
+const passwords = { admin: randomUUID(), yzgjj: randomUUID(), created: randomUUID(), updated: randomUUID() };
 
-let originalConfig;
-let originalRuntimeConfig;
-let serverProc;
-let adminToken = '';
-
-function backupConfig() {
-  originalConfig = fs.readFileSync(USERS_CONFIG_PATH, 'utf-8');
-  originalRuntimeConfig = fs.existsSync(RUNTIME_USERS_PATH) ? fs.readFileSync(RUNTIME_USERS_PATH, 'utf-8') : null;
-}
-
-function restoreConfig() {
-  fs.writeFileSync(USERS_CONFIG_PATH, originalConfig, 'utf-8');
-  if (originalRuntimeConfig === null) {
-    if (fs.existsSync(RUNTIME_USERS_PATH)) fs.unlinkSync(RUNTIME_USERS_PATH);
-  } else {
-    fs.writeFileSync(RUNTIME_USERS_PATH, originalRuntimeConfig, 'utf-8');
-  }
-}
-
-// 生效配置 = config/runtime/users.json（若存在）整文件覆盖 config/users.json
 function readEffectiveUsers() {
-  const filePath = fs.existsSync(RUNTIME_USERS_PATH) ? RUNTIME_USERS_PATH : USERS_CONFIG_PATH;
-  return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+  const runtime = path.join(configDir, 'runtime/users.json');
+  return JSON.parse(fs.readFileSync(fs.existsSync(runtime) ? runtime : path.join(configDir, 'users.json'), 'utf8'));
 }
 
-function request(method, urlPath, body, token) {
-  return new Promise((resolve, reject) => {
-    const url = new URL(urlPath, BASE_URL);
-    const options = { method, hostname: url.hostname, port: url.port, path: `${url.pathname}${url.search}`, headers: {} };
-    if (token) options.headers.Authorization = `Bearer ${token}`;
-    let payload;
-    if (body) {
-      payload = JSON.stringify(body);
-      options.headers['Content-Type'] = 'application/json';
-      options.headers['Content-Length'] = Buffer.byteLength(payload);
-    }
-    const req = http.request(options, (res) => {
-      let data = '';
-      res.on('data', (chunk) => { data += chunk; });
-      res.on('end', () => {
-        resolve({ status: res.statusCode, body: JSON.parse(data) });
-      });
-    });
-    req.on('error', reject);
-    if (payload) req.write(payload);
-    req.end();
-  });
-}
-
-// 启动 server
 test.before(async () => {
-  backupConfig();
-  // 需要设置环境变量让 server 能启动
-  if (!process.env.DB_HOST) {
-    require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
-  }
-  // 以子进程方式启动较复杂，直接 require server（它会 listen）
-  // 但 server 已经在运行中的情况下会报端口冲突，所以用 spawn
-  const { spawn } = require('child_process');
-  serverProc = spawn(process.execPath, [path.join(__dirname, '..', 'server.cjs')], {
-    stdio: 'pipe',
-    env: { ...process.env, API_PORT: String(TEST_API_PORT) },
+  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'keydigest-users-test-'));
+  configDir = path.join(tempDir, 'config');
+  fs.cpSync(path.join(root, 'config'), configDir, {
+    recursive: true,
+    filter: source => !path.relative(path.join(root, 'config'), source).split(path.sep).includes('runtime'),
   });
-  await new Promise((resolve) => {
-    serverProc.stdout.on('data', (chunk) => {
-      if (chunk.toString().includes('running')) resolve();
-    });
-    setTimeout(resolve, 4000);
-  });
-  // 以 admin 登录获取 token（管理接口现已要求 admin 鉴权）
-  const login = await request('POST', '/api/auth/login', { username: 'admin', password: 'citic3104' });
-  if (login.status === 200 && login.body.token) {
-    adminToken = login.body.token;
-  }
+  const users = JSON.parse(fs.readFileSync(path.join(configDir, 'users.json'), 'utf8'));
+  for (const user of users) user.password = passwords[user.username] || randomUUID();
+  fs.writeFileSync(path.join(configDir, 'users.json'), JSON.stringify(users));
+  request = createIsolatedApp({ configDir, dataDir: path.join(tempDir, 'data') });
+  const login = await request('POST', '/api/auth/login', { username: 'admin', password: passwords.admin });
+  assert.equal(login.status, 200);
+  adminToken = login.body.token;
 });
 
 test.after(() => {
-  restoreConfig();
-  if (serverProc) serverProc.kill();
+  if (tempDir) fs.rmSync(tempDir, { recursive: true, force: true });
 });
 
 // ===== 测试 1: GET /api/admin/users 返回正确结构 =====
@@ -129,7 +77,7 @@ test('POST /api/admin/users creates a new user', async () => {
   const res = await request('POST', '/api/admin/users', {
     username: 'autotest',
     displayName: 'AutoTest',
-    password: 'test123',
+    password: passwords.created,
     role: 'restricted',
     keywords: ['公积金'],
     routes: ['/summary', '/report'],
@@ -150,7 +98,7 @@ test('prompt bundle export never includes users and import rejects users.json', 
   const exported = await request('GET', '/api/config/prompt-export', null, adminToken);
   assert.equal(exported.status, 200);
   assert.equal(Object.prototype.hasOwnProperty.call(exported.body.files, 'users.json'), false);
-  assert.equal(JSON.stringify(exported.body).includes('test123'), false);
+  assert.equal(JSON.stringify(exported.body).includes(passwords.created), false);
 
   const rejected = await request('POST', '/api/config/prompt-import', {
     formatVersion: 1,
@@ -167,7 +115,7 @@ test('prompt bundle export never includes users and import rejects users.json', 
 });
 
 test('policy prompt endpoint rejects nested Markdown fences without changing the file', async () => {
-  const runtimePath = path.join(__dirname, '..', 'config/runtime/policy_prompts.md');
+  const runtimePath = path.join(configDir, 'runtime/policy_prompts.md');
   const before = fs.existsSync(runtimePath) ? fs.readFileSync(runtimePath, 'utf8') : null;
   const rejected = await request('POST', '/api/config/policy-prompt', {
     type: 'extraction',
@@ -181,7 +129,7 @@ test('policy prompt endpoint rejects nested Markdown fences without changing the
 });
 
 test('prompt bundle dry-run rejects nested Markdown fences before import', async () => {
-  const defaultPolicyPath = path.join(__dirname, '..', 'config/policy_prompts.md');
+  const defaultPolicyPath = path.join(configDir, 'policy_prompts.md');
   const unsafePolicy = fs.readFileSync(defaultPolicyPath, 'utf8').replace(
     '```\n',
     '```\n示例：\n```json\n{"ok":true}\n```\n',
@@ -232,12 +180,12 @@ test('PUT /api/admin/users updates display name and keywords', async () => {
 
 // ===== 测试 6: PUT 更新密码后可用新密码登录 =====
 test('Password update allows login with new password', async () => {
-  await request('PUT', '/api/admin/users/autotest', { password: 'newpass999' }, adminToken);
-  const login = await request('POST', '/api/auth/login', { username: 'autotest', password: 'newpass999' });
+  await request('PUT', '/api/admin/users/autotest', { password: passwords.updated }, adminToken);
+  const login = await request('POST', '/api/auth/login', { username: 'autotest', password: passwords.updated });
   assert.equal(login.status, 200);
   assert.equal(login.body.user.username, 'autotest');
   // 旧密码应失败
-  const oldLogin = await request('POST', '/api/auth/login', { username: 'autotest', password: 'test123' });
+  const oldLogin = await request('POST', '/api/auth/login', { username: 'autotest', password: passwords.created });
   assert.equal(oldLogin.status, 401);
 });
 
@@ -268,14 +216,14 @@ test('DELETE /api/admin/users/admin prevents admin deletion', async () => {
 // ===== 测试 10: 登录返回的 profile 包含动态关键词和路由 =====
 test('Login returns dynamic keywords and routes from config', async () => {
   // 先确认 admin 的 routes 包含 /user-management
-  const login = await request('POST', '/api/auth/login', { username: 'admin', password: 'citic3104' });
+  const login = await request('POST', '/api/auth/login', { username: 'admin', password: passwords.admin });
   assert.equal(login.status, 200);
   const profile = login.body.user;
   assert.ok(profile.keywords.length > 0, 'admin should have keywords');
   assert.ok(profile.routes.includes('/user-management'), 'admin routes should include /user-management');
   assert.ok(profile.routes.includes('/summary'), 'admin routes should include /summary');
   // yzgjj 不应包含 /user-management
-  const yzgjj = await request('POST', '/api/auth/login', { username: 'yzgjj', password: 'yzgjj' });
+  const yzgjj = await request('POST', '/api/auth/login', { username: 'yzgjj', password: passwords.yzgjj });
   assert.equal(yzgjj.status, 200);
   assert.ok(!yzgjj.body.user.routes.includes('/user-management'), 'yzgjj should not have /user-management');
   assert.ok(yzgjj.body.user.routes.includes('/summary'), 'yzgjj should have /summary');

@@ -1,43 +1,19 @@
 {
-  "defaultModelKey": "deepseek-v4-pro",
+  "defaultModelKey": "deepseek-v4.1-flash",
   "models": {
-    "deepseek-v4-flash": {
-      "label": "DeepSeek V4 Flash",
-      "provider": "deepseek",
-      "model": "deepseek-v4-flash",
-      "apiKey": "DEEPSEEK_API_KEY",
-      "endpoint": "https://api.deepseek.com/chat/completions",
+    "deepseek-v4.1-flash": {
+      "label": "DeepSeek V4.1 Flash",
+      "provider": "agent-router",
+      "model": "DeepSeek-V4.1-Flash",
+      "apiKey": "AGENT_ROUTER_API_KEY",
+      "endpoint": "http://api.agent-router.cn/v1/chat/completions",
       "contextWindow": 1000000,
-      "maxOutputTokens": 384000,
+      "maxOutputTokens": 393216,
+      "requestMaxTokens": 32768,
       "thinking": {
-        "type": "enabled"
+        "type": "disabled"
       },
-      "reasoning_effort": "high",
-      "description": "1M上下文，速度优先，适合日常周报生成"
-    },
-    "deepseek-v4-pro": {
-      "label": "DeepSeek V4 Pro",
-      "provider": "deepseek",
-      "model": "deepseek-v4-pro",
-      "apiKey": "DEEPSEEK_API_KEY",
-      "endpoint": "https://api.deepseek.com/chat/completions",
-      "contextWindow": 1000000,
-      "maxOutputTokens": 384000,
-      "thinking": {
-        "type": "enabled"
-      },
-      "reasoning_effort": "high",
-      "description": "1M上下文，质量优先，适合复杂周报分析"
-    },
-    "deepseek-reasoner": {
-      "label": "DeepSeek Reasoner (R1)",
-      "provider": "deepseek",
-      "model": "deepseek-reasoner",
-      "apiKey": "DEEPSEEK_API_KEY",
-      "endpoint": "https://api.deepseek.com/chat/completions",
-      "contextWindow": 64000,
-      "maxOutputTokens": 8192,
-      "description": "原 modify-report / 地区政策报告默认模型，模型与端点原为代码硬编码，现收进配置"
+      "description": "全站统一模型，由 Agent Router 提供"
     }
   }
 }

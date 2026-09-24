@@ -703,7 +703,6 @@ const WeeklyComparison = () => {
   const [error, setError] = useState('');
   const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [policyModels, setPolicyModels] = useState([]);
-  const [selectedPolicyModelKey, setSelectedPolicyModelKey] = useState('deepseek-v4-pro');
   const reportRef = useRef(null);
   const structuredReport = useMemo(
     () => buildStructuredPolicyComparisonReport(comparisonResult),
@@ -722,8 +721,6 @@ const WeeklyComparison = () => {
       if (!res.ok) return;
       const list = await res.json();
       setPolicyModels(Array.isArray(list) ? list : []);
-      const defaultModel = list.find(model => model.isDefault) || list[0];
-      if (defaultModel?.key) setSelectedPolicyModelKey(defaultModel.key);
     } catch (err) {
       console.warn('加载政策对比模型配置失败:', err);
     }
@@ -950,7 +947,6 @@ const WeeklyComparison = () => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ 
             type: 'extraction',
-            modelKey: selectedPolicyModelKey,
             ...(useNewsMode ? { reportContent: previewContent } : { reportId: selectedReport.id })
           })
         });
@@ -967,7 +963,7 @@ const WeeklyComparison = () => {
         const res = await fetch('/api/policy/extract', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ reportId: selectedReport.id, modelKey: selectedPolicyModelKey })
+          body: JSON.stringify({ reportId: selectedReport.id })
         });
 
         if (!res.ok) {
@@ -980,6 +976,7 @@ const WeeklyComparison = () => {
         }
         
         const data = await res.json();
+        if (!countPolicyDetails(data.result)) throw new Error('未提取到有效政策，请检查周报内容后重试');
         setExtractedPolicy(data.result);
         if (data.debug) {
           setDebugInfo(prev => ({ ...prev, extraction: data.debug }));
@@ -1015,7 +1012,7 @@ const WeeklyComparison = () => {
           const res = await fetch('/api/policy/extract', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ reportContent: groupDigest, modelKey: selectedPolicyModelKey })
+            body: JSON.stringify({ reportContent: groupDigest })
           });
           if (!res.ok) {
             let details = '';
@@ -1067,6 +1064,7 @@ const WeeklyComparison = () => {
         }
 
         setExtractionBatchTotal(queue.length);
+        if (!countPolicyDetails(merged)) throw new Error('未提取到有效政策，请检查新闻内容后重试');
         setExtractedPolicy(merged);
         if (lastDebug) setDebugInfo(prev => ({ ...prev, extraction: lastDebug }));
       }
@@ -1096,7 +1094,6 @@ const WeeklyComparison = () => {
           body: JSON.stringify({ 
             type: 'comparison',
             extractedPolicy: extractedPolicy,
-            modelKey: selectedPolicyModelKey
           })
         });
         if (previewRes.ok) {
@@ -1111,12 +1108,16 @@ const WeeklyComparison = () => {
       const res = await fetch('/api/policy/compare', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ extractedPolicy, modelKey: selectedPolicyModelKey })
+        body: JSON.stringify({ extractedPolicy })
       });
 
-      if (!res.ok) throw new Error('对比失败');
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        throw new Error(error.details || error.error || `HTTP ${res.status}`);
+      }
       
       const data = await res.json();
+      if (!data.markdown?.trim() || data.markdown === '对比生成失败') throw new Error('模型未返回有效比对结果，请重试');
       setComparisonResult(data.markdown);
       if (data.debug) {
         setDebugInfo(prev => ({ ...prev, comparison: data.debug }));
@@ -1434,21 +1435,7 @@ const WeeklyComparison = () => {
       {renderStepIndicator()}
       {renderExportCapabilityBar()}
       <div className="policy-model-selector">
-        <label htmlFor="policy-model-select">DeepSeek模型</label>
-        <select
-          id="policy-model-select"
-          value={selectedPolicyModelKey}
-          onChange={(e) => setSelectedPolicyModelKey(e.target.value)}
-          disabled={loading}
-        >
-          {(policyModels.length > 0 ? policyModels : [
-            { key: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro' },
-            { key: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash' }
-          ]).map(model => (
-            <option key={model.key} value={model.key}>{model.label || model.model}</option>
-          ))}
-        </select>
-        <span>用于政策 JSON 提取和后续对比分析</span>
+        <span>分析模型：{policyModels.find(model => model.isDefault)?.label || 'DeepSeek V4.1 Flash'}</span>
       </div>
 
       {error && (

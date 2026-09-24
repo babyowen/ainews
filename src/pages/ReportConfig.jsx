@@ -1074,7 +1074,7 @@ const ReportConfig = () => {
                 <h2 className="config-section-title">运行时配置</h2>
                 <p className="config-section-desc">
                   在本页保存的修改只写入 <code>config/runtime/</code> 运行时层，代码部署不会覆盖；
-                  Prompt 和模型/自动周报覆盖可恢复出厂默认；用户账号由“用户管理”页维护，不在此处重置。
+                  Prompt 和自动周报覆盖可恢复出厂默认；用户账号由“用户管理”页维护，不在此处重置。
                 </p>
               </div>
               <div className="config-section-meta">

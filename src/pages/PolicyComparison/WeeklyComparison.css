@@ -1291,3 +1291,13 @@
     font-size: 24px;
   }
 }
+
+/* Web preview only: ReportGenerator's global .report-header flex layout
+   collapses the empty background element. Image export clones the report
+   outside this shell; PDF export uses its own server-side template. */
+.weekly-comparison-container .report-preview-shell .comparison-report > .report-header {
+  display: block;
+  padding: 0;
+  border-top: 0;
+  background: #09162f;
+}

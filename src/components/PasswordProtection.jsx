@@ -22,23 +22,25 @@ const PasswordProtection = ({ children, onAuthenticated, title = '管理员验�
     setLoading(true);
     setError('');
 
-    // 模拟验证延迟，增加真实感
-    await new Promise(resolve => setTimeout(resolve, 800));
-
-    const correctPassword = import.meta.env.VITE_ADMIN_PASSWORD;
-    const targetPassword = correctPassword || 'keydigest2024';
-    
-    if (password === targetPassword) {
+    try {
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'admin', password }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || data.user?.role !== 'admin') {
+        setError('密码错误，请重试');
+        return;
+      }
       localStorage.setItem('admin_auth_time', Date.now().toString());
       setIsAuthenticated(true);
-      if (onAuthenticated) {
-        onAuthenticated();
-      }
-    } else {
-      setError('密码错误，请重试');
+      onAuthenticated?.();
+    } catch {
+      setError('验证服务暂时不可用，请稍后重试');
+    } finally {
+      setLoading(false);
     }
-    
-    setLoading(false);
   };
 
   const handleLogout = () => {
@@ -47,18 +49,10 @@ const PasswordProtection = ({ children, onAuthenticated, title = '管理员验�
     setPassword('');
   };
 
-  // 调试密码输入框
+  // 设置密码输入框的显示样式
   useEffect(() => {
     if (passwordInputRef.current) {
       const input = passwordInputRef.current;
-      console.log('密码输入框调试信息:');
-      console.log('- 类型:', input.type);
-      console.log('- 值:', input.value);
-      console.log('- 字体:', getComputedStyle(input).fontFamily);
-      console.log('- 字符间距:', getComputedStyle(input).letterSpacing);
-      console.log('- WebKit text security:', getComputedStyle(input).webkitTextSecurity);
-      console.log('- 计算后的样式:', getComputedStyle(input));
-      
       // 强制设置密码输入框属性
       input.type = 'password';
       input.style.webkitTextSecurity = 'disc';

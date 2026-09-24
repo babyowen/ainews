@@ -17,7 +17,6 @@ const MANAGED_FILES = {
   'keyword-prompts.json': { type: 'json', merge: 'keyword-prompts', label: '关键词 Prompt 库' },
   'region-policy-report-prompts.json': { type: 'json', merge: 'id-list', label: '地区政策报告 Prompt' },
   'auto-report-config.json': { type: 'json', merge: 'shallow', deepKeys: ['keywords'], label: '自动周报配置' },
-  'llm-config.json': { type: 'json', merge: 'shallow', deepKeys: ['models'], label: 'LLM 模型配置' },
   'users.json': { type: 'json', merge: 'replace', label: '用户账号' },
 };
 
@@ -150,10 +149,9 @@ function diffIdList(effective, base) {
   return { prompts: changed, metadata: mergeMetadata(null, effective, deletedIds) };
 }
 
-// ---- 浅合并（llm-config.json / auto-report-config.json）----
+// ---- 浅合并（auto-report-config.json）----
 // 深层子对象（deepKeys）按键合并，子项值为 null 表示「删除该子项」。
-// 只对默认层已有的顶层键做差异比较，历史遗留的多余键（如曾被 switchModel
-// 误写入 llm-config.json 的 prompts 对象）不会进入运行时层。
+// 只对默认层已有的顶层键做差异比较，历史遗留的多余键不会进入运行时层。
 
 function mergeShallow(base, override, deepKeys) {
   const merged = { ...base };

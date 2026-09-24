@@ -57,7 +57,7 @@ node --test test/auto-report-service.test.cjs
 
 - **Frontend**: React 19, React Router DOM 7, ECharts, html2canvas, html2pdf.js, docx, dayjs, react-markdown, TanStack Query.
 - **Backend**: Express 4, mysql2 (Promise-based pool), CORS.
-- **AI/LLM**: DeepSeek R1 (primary), KIMI K2 (fallback), SiliconFlow (fallback), Google Custom Search API.
+- **AI/LLM**: Agent Router DeepSeek V4.1 Flash (single model, no provider fallback), Google Custom Search API.
 - **PDF Rendering**: Playwright (server-side) for report and policy comparison PDFs.
 
 ### High-Level Structure
@@ -80,7 +80,7 @@ Frontend (React + Vite)  ←→  Backend (Express + MySQL)
 
 1. **Single-file backend**: `server.cjs` is a monolithic Express file containing all routes, DB pool initialization, and business logic. It is not split into controllers or middleware directories.
 2. **Layered runtime configuration**: `services/configStore.cjs` reads Git defaults from `config/` and merges ignored production differences from `config/runtime/`. `services/promptStore.cjs` is the only prompt parsing/CRUD entry point. Admin writes never modify Git defaults.
-3. **LLM abstraction**: `services/llmService.cjs` encapsulates AI calls and reads the effective layered model/prompt configuration on construction. The former no-op reload endpoint was removed.
+3. **LLM abstraction**: `services/llmService.cjs` encapsulates AI calls and uses services/modelClient.cjs and the fixed Agent Router model from config/weekly-report-models.json; prompts come from promptStore. The compatibility reload endpoint requires admin authentication.
 4. **Streaming reports**: Report generation endpoints (`/api/generate-report`, `/api/generate-kimi-report`, etc.) use SSE (text/event-stream) to stream LLM chunks to the frontend.
 5. **Server-side PDF rendering**: Report and policy comparison PDFs are rendered via Playwright in `server/pdf/`, not in the browser. The frontend posts HTML to the backend, which returns a PDF buffer.
 6. **Keyword-specific prompts**: `config/keyword-prompts.json` contains defaults. The config UI at `/config` manages runtime overrides and shows each entry's source.
@@ -108,9 +108,7 @@ Required in `.env`:
 ```
 DB_HOST, DB_USER, DB_PASS, DB_NAME, DB_PORT
 API_PORT=3456
-DEEPSEEK_API_KEY
-KIMI_API_KEY
-SILICONFLOW_API_KEY
+AGENT_ROUTER_API_KEY
 GOOGLE_API_KEY
 GOOGLE_SEARCH_ENGINE_ID
 VITE_ADMIN_PASSWORD
@@ -173,8 +171,11 @@ Frontend route visibility is filtered by `src/config/userAccess.js`. `yzgjj` see
 - `services/configStore.cjs` — default/runtime merge engine and atomic runtime writes
 - `services/promptStore.cjs` — unified prompt parsing and CRUD
 - `services/llmService.cjs` — LLM abstraction layer
+- `services/llmService.cjs` — CommonJS compatibility service for LLM management
+- `services/modelClient.cjs` — unified model discovery, generation, SSE parsing and response validation
+- `services/policyExtraction.cjs` — validated policy JSON extraction with one format repair
 - `services/loginAudit.cjs` — JSON-backed successful login audit helpers
-- `services/weeklyReportModelConfig.cjs` — DeepSeek V4 weekly report model config helpers
+- `services/weeklyReportModelConfig.cjs` — Unified Agent Router model config and legacy-key compatibility helpers
 - `services/autoReportService.cjs` — automatic weekly report cycle, logging, LLM call, and PDF generation
 - `services/appDataPaths.cjs` — stable shared-data and historical PDF path resolution
 - `src/auth/AuthContext.jsx` — frontend session user context
@@ -184,10 +185,9 @@ Frontend route visibility is filtered by `src/config/userAccess.js`. `yzgjj` see
 - `server/pdf/renderReportPdf.cjs` — Playwright report PDF renderer
 - `server/pdf/renderPolicyComparisonPdf.cjs` — policy comparison PDF renderer
 - `server/pdf/renderRegionPolicyReportPdf.cjs` — region policy PDF renderer
-- `config/llm-config.json` — model endpoints and settings
-- `config/weekly-report-models.json` — weekly report model choices used by manual and automatic reports
 - `config/auto-report-config.json` — automatic weekly report Git defaults
 - `config/runtime/` — ignored production overrides; shared across releases
+- `config/weekly-report-models.json` — single shared model used by every generation workflow
 - `config/prompts.md` — system/user/modify prompt templates
 - `config/keyword-prompts.json` — keyword-specific prompt overrides
 - `config/region-policy-report-prompts.json` — region policy prompt configs
