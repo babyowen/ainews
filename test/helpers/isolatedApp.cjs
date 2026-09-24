@@ -9,15 +9,19 @@ const actualRequire = createRequire(path.join(root, 'server.cjs'));
 
 // Execute the real Express handlers with test-owned files and SQL. Never load .env,
 // listen on a port, register cron jobs, or connect to a real database/model provider.
-function createIsolatedApp({ configDir, dataDir }) {
+function createIsolatedApp({ configDir, dataDir, readiness = false }) {
   const pool = { async query(sql) {
     if (sql.includes('SELECT DISTINCT keyword FROM scored_news')) return [[{ keyword: '公积金' }, { keyword: '养老' }]];
+    if (readiness && (/CREATE TABLE IF NOT EXISTS auto_report_log|SHOW COLUMNS FROM auto_report_log|ALTER TABLE auto_report_log|SELECT 1 AS ready/.test(sql))) return [[]];
     throw new Error(`Unexpected SQL in isolated test: ${sql}`);
   } };
   function isolatedRequire(name) {
     if (name === 'dotenv') return { config() {} };
     if (name === 'mysql2/promise') return { createPool: () => pool };
-    if (name === 'node-cron') return { schedule() { throw new Error('Tests must not register cron jobs'); } };
+    if (name === 'node-cron') return { schedule() {
+      if (readiness) return { stop() {} }; // Fake scheduler; no timers or jobs.
+      throw new Error('Tests must not register cron jobs');
+    } };
     if (name === './services/configStore.cjs') return {
       createConfigStore: () => actualRequire(name).createConfigStore({ configDir }),
     };
@@ -34,7 +38,7 @@ function createIsolatedApp({ configDir, dataDir }) {
   }
   const module = { exports: {} };
   vm.runInNewContext(fs.readFileSync(path.join(root, 'server.cjs'), 'utf8'), {
-    require: isolatedRequire, module, __dirname: root, Buffer,
+    require: isolatedRequire, module, __dirname: path.dirname(configDir), Buffer,
     process: { env: { KEYDIGEST_DATA_DIR: dataDir, KEYDIGEST_SESSION_SECRET: randomUUID() } },
     console: { log() {}, warn() {}, error() {} },
   }, { filename: 'server.cjs' });

@@ -6,7 +6,7 @@
 
 原始生产快照保存在本地 `.production-snapshot/` 下。该目录被 `.gitignore` 排除，必须保持只读，不得进入提交、部署包或代码审查附件。
 
-## 核对结论
+## 2026-08-17 历史核对结论
 
 - 生产 `server.cjs`、`services/`、`package.json` 和 `package-lock.json` 与基线提交 `22bece11` 一致。
 - 生产侧不同的前端和 PDF 文件都能匹配到 Git 历史 blob，没有发现服务器独有的代码热修改。
@@ -14,7 +14,7 @@
 - `policy_prompts.md`、`region-policy-report-prompts.json`、`llm-config.json` 和 `weekly-report-models.json` 与生产一致。
 - 生产修改过的“中国烟草”和“江苏地区银行”Prompt 已提升为 Git 默认配置。
 - “烟草服务银行”Prompt 正文与开发版本相同；采用生产 ID `v1`，并将自动周报引用从不存在的 `default` 修正为 `v1`，避免静默回退到全局 Prompt。
-- 自动周报保留生产实际启用的 6 个关键词及各自模型、Prompt、最低分数和摘要版本。
+- 当时自动周报保留生产实际启用的 6 个关键词及各自模型、Prompt、最低分数和摘要版本。
 - “潜在招标客户”唯一 Prompt 的 `isDefault` 从生产快照中的 `false` 规范化为 `true`，使每个非空 Prompt 库满足“恰好一个默认版本”的运行不变式；Prompt 正文未改动。
 - `yzgjj` 的关键词权限按生产恢复为仅“公积金”。生产密码不进入 Git；首次上线时完整生产 `users.json` 写入 runtime 层。
 - 生产的时间戳政策快照属于运行时历史数据，首次上线时原样保留，但不进入 Git 默认层或部署包。
@@ -35,7 +35,9 @@
 
 `users.json` 的哈希对应脱敏的 Git 默认文件，不对应包含真实生产密码的运行时文件。
 
-上表记录重构前的独立基线 commit `cfc1705d`。后续架构提交允许在 `weekly-report-models.json` 中新增原先硬编码的 `deepseek-reasoner`，校验脚本会显式验证该唯一允许的模型配置收口；其他生产基线内容仍须保持一致。
+上表只记录历史基线 commit `cfc1705d`，不是当前发布文件哈希。整合 `d816c489` 后，模型统一为 Agent Router / DeepSeek V4.1 Flash，`llm-config.json` 已移除，自动周报的模型引用也已同步。
+
+当前审计器 `services/productionConfigAudit.cjs` 只允许已确认的旧模型元数据、模型引用和默认 Prompt 修正；其他源配置差异必须在首次迁移写入前中止。历史快照无法证明上线时生产仍一致，必须使用新快照重新校验。
 
 ## 可复现校验
 
@@ -54,10 +56,10 @@ node --test test/production-config-baseline.test.cjs
 
 ## 后续架构约束
 
-1. Git 默认层以本基线为重构前行为真值。
+1. 保留历史基线记录，同时以上线时重新审计的配置和 main 已确认的模型迁移为准。
 2. `config/runtime/` 只保存生产相对默认层的运行时覆盖，不得进入 Git 或部署包。
 3. 所有配置读取和管理界面写入必须经过统一存储入口。
-4. 重构后的自动周报必须继续解析 6 个启用关键词，并精确命中对应 Prompt 和模型。
+4. 自动周报必须保留本次审计确认的启停、关键词和 Prompt 配置；模型统一使用 DeepSeek V4.1 Flash。
 5. 用户密码、政策时间戳快照、数据库、PDF 和日志属于服务器共享运行时数据。
 6. 后续若修改 Prompt，必须在独立提交中更新对应行为测试或哈希说明，不与无关架构改动混合。
 

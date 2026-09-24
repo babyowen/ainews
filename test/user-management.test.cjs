@@ -228,3 +228,16 @@ test('Login returns dynamic keywords and routes from config', async () => {
   assert.ok(!yzgjj.body.user.routes.includes('/user-management'), 'yzgjj should not have /user-management');
   assert.ok(yzgjj.body.user.routes.includes('/summary'), 'yzgjj should have /summary');
 });
+
+
+test('readiness uses the fixed model and shared configuration without retired llm-config.json', async () => {
+  assert.equal(fs.existsSync(path.join(configDir, 'llm-config.json')), false);
+  fs.mkdirSync(path.join(tempDir, 'dist'));
+  fs.writeFileSync(path.join(tempDir, 'dist/index.html'), '<!doctype html><title>Test</title>');
+  fs.writeFileSync(path.join(tempDir, '.release-commit'), 'test-commit');
+  fs.writeFileSync(path.join(tempDir, '.release-id'), 'test-release');
+  const readyRequest = createIsolatedApp({ configDir, dataDir: path.join(tempDir, 'data'), readiness: true });
+  const res = await readyRequest('GET', '/api/readiness');
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body, { status: 'ready', releaseCommit: 'test-commit', releaseId: 'test-release' });
+});

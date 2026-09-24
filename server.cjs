@@ -2390,7 +2390,7 @@ app.get('/api/llm/custom-prompts', async (req, res) => {
   try {
     const LLMService = require('./services/llmService.cjs');
     const llmService = new LLMService();
-    
+
     const customPrompts = llmService.getCustomPrompts();
     res.json(customPrompts);
   } catch (err) {
@@ -2405,9 +2405,9 @@ app.post('/api/llm/reload-config', async (req, res) => {
   try {
     const LLMService = require('./services/llmService.cjs');
     const llmService = new LLMService();
-    
+
     const config = llmService.reloadConfig();
-    res.json({ 
+    res.json({
       message: 'Configuration reloaded successfully',
       activeModel: config.activeModel
     });
@@ -2420,7 +2420,7 @@ app.post('/api/llm/reload-config', async (req, res) => {
 // 质量分析API - 获取各轮次总结数据
 app.get('/api/quality-analysis', async (req, res) => {
   const { keyword, date } = req.query;
-  
+
   if (!keyword || !date) {
     return res.status(400).json({ error: 'Missing required parameters: keyword and date' });
   }

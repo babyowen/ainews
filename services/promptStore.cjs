@@ -430,6 +430,11 @@ function createPromptStore(options = {}) {
     if (!touched) return null;
     const hasContent = (runtime.prompts || []).length > 0 || (runtime.metadata.deletedIds || []).length > 0;
     const effective = configStore.previewRuntimeJson('region-policy-report-prompts.json', hasContent ? runtime : null);
+    if (!effective?.prompts?.length) {
+      const error = new Error('至少保留一个 prompt 版本；请先恢复出厂版本或新增其他版本');
+      error.status = 400;
+      throw error;
+    }
     ensureSingleDefault(
       effective?.prompts || [],
       factoryDefaultId,

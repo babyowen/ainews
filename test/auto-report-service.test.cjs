@@ -547,3 +547,39 @@ test('sanitizeAutoReportRecord hides pdfPath from API responses', () => {
   assert.equal(Object.hasOwn(record, 'pdf_path'), false);
   assert.equal(record.pdf_filename, 'report.pdf');
 });
+
+test('automatic cycles reload runtime enablement and prompts while retaining the fixed model', async () => {
+  const { createConfigStore } = require('../services/configStore.cjs');
+  const { createPromptStore } = require('../services/promptStore.cjs');
+  const { getWeeklyReportModel } = require('../services/weeklyReportModelConfig.cjs');
+  const dir = makeTempDir();
+  try {
+    const configDir = path.join(dir, 'config');
+    fs.cpSync(path.join(__dirname, '../config'), configDir, { recursive: true, filter: p => !path.relative(path.join(__dirname, '../config'), p).split(path.sep).includes('runtime') });
+    const configStore = createConfigStore({ configDir });
+    const promptStore = createPromptStore({ configStore });
+    const selected = promptStore.getKeywordLibrary().keywords['公积金'].prompts[0];
+    promptStore.saveKeywordPrompt({ ...selected, keyword: '公积金', promptId: selected.id, systemPrompt: 'AUTO_RUNTIME' });
+    const config = {
+      enabled: false,
+      defaults: { modelKey: 'deepseek-v4-pro', promptId: selected.id, minScore: 4, summaryVersion: 'short' },
+      keywords: { 公积金: { enabled: true } },
+    };
+    configStore.commitJson('auto-report-config.json', config);
+    const pool = makePool({ 公积金: [{ id: 1, title: '测试新闻', content: '全文', short_summary: '摘要' }] });
+    const calls = [];
+    const service = createAutoReportService({
+      pool, loadConfig: () => configStore.readEffectiveJson('auto-report-config.json'), promptStore, getWeeklyReportModel,
+      callLlm: async args => { calls.push(args); return '完整报告'; },
+      renderPdf: async () => Buffer.from('%PDF-test'), outputDir: path.join(dir, 'pdf'),
+    });
+    assert.equal((await service.runAutoReportCycle()).status, 'disabled');
+    assert.equal(pool.calls.length, 0);
+    configStore.commitJson('auto-report-config.json', { ...config, enabled: true });
+    const result = await service.runAutoReportCycle();
+    assert.equal(result.results.length, 1);
+    assert.equal(result.results[0].status, 'success');
+    assert.equal(calls[0].systemPrompt, 'AUTO_RUNTIME');
+    assert.equal(calls[0].modelConfig.model, 'DeepSeek-V4.1-Flash');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

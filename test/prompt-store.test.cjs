@@ -244,3 +244,22 @@ test('promptStore: 地区报告条目级恢复默认', () => {
   assert.equal(summaries[0].isDefault, true);
   assert.equal(fs.existsSync(path.join(dir, 'runtime', 'region-policy-report-prompts.json')), false);
 });
+
+test('resetting the last custom region prompt preserves the usable library and runtime bytes', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'last-region-prompt-'));
+  try {
+    const factory = { id: 'factory', name: 'factory', description: 'd', systemPrompt: 's', userPromptSingle: 'u', userPromptMulti: 'u', isDefault: true };
+    fs.writeFileSync(path.join(dir, 'region-policy-report-prompts.json'), JSON.stringify({ prompts: [factory], metadata: {} }));
+    const store = createPromptStore({ configDir: dir });
+    store.saveRegionPrompt({ ...factory, promptId: 'custom', name: 'custom' });
+    store.deleteRegionPrompt('factory');
+    const runtime = path.join(dir, 'runtime/region-policy-report-prompts.json');
+    const before = fs.readFileSync(runtime, 'utf8');
+    assert.throws(() => store.resetRegionPrompt('custom'), /至少保留一个/);
+    assert.equal(fs.readFileSync(runtime, 'utf8'), before);
+    assert.equal(store.getRegionLibrary().prompts[0].id, 'custom');
+    store.resetRegionPrompt('factory');
+    store.resetRegionPrompt('custom');
+    assert.deepEqual(store.getRegionLibrary().prompts.map(p => p.id), ['factory']);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

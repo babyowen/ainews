@@ -23,8 +23,6 @@ Issue #22 之后，配置分为两层：
 
 生产首次迁移和 Gitee 部署见 [`docs/deployment-gitee.md`](../docs/deployment-gitee.md)。不要手工创建版本基线目录，也不要引入 `RELEASE_VERSION`；精确版本由 Git commit 标识。
 
-## 配置文件结构
-
 ## 唯一模型配置
 
 `config/weekly-report-models.json` 是所有生成入口的模型配置来源，包括手动/自动周报、周报修改、政策提取/比对、地区政策报告及通用 LLM 服务。原 `llm-config.json` 已移除，避免配置互不生效。

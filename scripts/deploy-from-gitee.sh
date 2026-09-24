@@ -63,7 +63,7 @@ if ((APP_PORT < 1 || APP_PORT > 65535 || TEST_PORT < 1 || TEST_PORT > 65535 || A
   exit 2
 fi
 
-for command_name in git node npm tar curl mktemp; do
+for command_name in git node npm tar mktemp; do
   command -v "$command_name" >/dev/null || { echo "缺少命令：$command_name" >&2; exit 1; }
 done
 if [[ "$SKIP_RESTART" == '0' ]]; then
@@ -193,31 +193,9 @@ rollback() {
 
 if [[ "$SKIP_RESTART" == '0' ]]; then
   activate_pm2 || rollback 'PM2 启动失败'
-  HEALTH_OK='0'
-  for _attempt in {1..20}; do
-    if curl --fail --silent --show-error "http://127.0.0.1:$APP_PORT/api/readiness" \
-      | node -e '
-          let body = "";
-          process.stdin.setEncoding("utf8");
-          process.stdin.on("data", chunk => { body += chunk; });
-          process.stdin.on("end", () => {
-            try {
-              const payload = JSON.parse(body);
-              const matchesTarget = payload.status === "ready"
-                && payload.releaseCommit === process.argv[1]
-                && payload.releaseId === process.argv[2];
-              process.exit(matchesTarget ? 0 : 1);
-            } catch {
-              process.exit(1);
-            }
-          });
-        ' "$DEPLOY_COMMIT" "$RELEASE_NAME"; then
-      HEALTH_OK='1'
-      break
-    fi
-    sleep 2
-  done
-  [[ "$HEALTH_OK" == '1' ]] || rollback '40 秒内未确认目标 commit 的生产就绪状态'
+  node "$CURRENT_LINK/scripts/wait-for-readiness.cjs" \
+    "http://127.0.0.1:$APP_PORT/api/readiness" "$DEPLOY_COMMIT" "$RELEASE_NAME" \
+    || rollback '40 秒内未确认目标 commit 的生产就绪状态'
 else
   echo '已跳过 PM2 重启和生产就绪检查；current 已切换，请人工启动并验证。'
 fi

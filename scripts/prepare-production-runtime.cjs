@@ -4,6 +4,7 @@
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
+const { auditProductionConfig } = require('../services/productionConfigAudit.cjs');
 
 function usage() {
   return [
@@ -13,7 +14,7 @@ function usage() {
     '    [--source-data /旧生产目录/data] \\',
     '    --target-root /部署根目录/shared [--dry-run] [--force-users]',
     '',
-    '迁移 users.json、config/policies、登录审计和自动周报 PDF。Prompt 已进入 Git 默认基线，不重复导入。',
+    '先审计生产配置差异，再迁移 users.json、config/policies、登录审计和自动周报 PDF；未知差异会在写入前中止。',
   ].join('\n');
 }
 
@@ -161,6 +162,8 @@ function prepareProductionRuntime(options) {
   assertSafeDirectory(targetPolicies, '目标 policies');
   assertSafeDirectory(targetData, '目标 data');
 
+  const configAudit = auditProductionConfig({ sourceConfig });
+
   const userPlan = planFile({
     sourcePath: path.join(sourceConfig, 'users.json'),
     targetPath: path.join(targetRuntime, 'users.json'),
@@ -236,6 +239,7 @@ function prepareProductionRuntime(options) {
 
   return {
     dryRun: options.dryRun === true,
+    configAudit,
     sourceConfig,
     sourceData,
     targetRoot,
