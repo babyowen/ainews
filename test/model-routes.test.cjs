@@ -10,7 +10,7 @@ const actualPolicy = actualRequire('./services/policyExtraction.cjs');
 const policy = { 政策领域: [{ 政策类别: [{ 政策明细: [{ 内容: '额度80万元' }] }] }] };
 
 // Execute actual registered routes with isolated SQL and model clients; never connect to production DB.
-function loadApp({ failure, completion = '完整报告' } = {}) {
+function loadApp({ failure, completion = '完整报告', configDir } = {}) {
   const calls = [];
   const writes = [];
   const model = {
@@ -36,6 +36,7 @@ function loadApp({ failure, completion = '完整报告' } = {}) {
     throw new Error(`Unexpected SQL in model route test: ${sql}`);
   } };
   function isolatedRequire(name) {
+    if (name === './services/configStore.cjs' && configDir) return { createConfigStore: () => actualRequire(name).createConfigStore({ configDir }) };
     if (name === 'dotenv') return { config() {} };
     if (name === 'mysql2/promise') return { createPool: () => fakePool };
     if (name === 'node-cron') return { schedule() { throw new Error('Tests must not start scheduled jobs'); } };
@@ -138,4 +139,44 @@ test('region reports retain filtering and route the actual generation to the uni
   assert.equal(res.statusCode, 200, JSON.stringify(res.data));
   assert.equal(res.data.meta.modelName, 'DeepSeek-V4.1-Flash');
   assert.equal(app.calls[0].options.modelConfig.provider, 'agent-router');
+});
+
+test('unified generation routes consume runtime prompts without modifying Git defaults', async () => {
+  const os = require('node:os');
+  const { createConfigStore } = require('../services/configStore.cjs');
+  const { createPromptStore, upsertSection } = require('../services/promptStore.cjs');
+  const configDir = fs.mkdtempSync(path.join(os.tmpdir(), 'model-runtime-config-'));
+  try {
+    fs.cpSync(path.join(root, 'config'), configDir, { recursive: true, filter: p => !path.relative(path.join(root, 'config'), p).split(path.sep).includes('runtime') });
+    const configStore = createConfigStore({ configDir });
+    const promptStore = createPromptStore({ configStore });
+    const defaultWeekly = fs.readFileSync(path.join(configDir, 'prompts.md'), 'utf8');
+    let weekly = upsertSection(defaultWeekly, 'System Prompt', 'RUNTIME_WEEKLY');
+    weekly = upsertSection(weekly, 'Modify System Prompt', 'RUNTIME_MODIFY');
+    configStore.commitText('prompts.md', weekly);
+    promptStore.savePolicyPrompt('extraction', 'RUNTIME_EXTRACT {report}');
+    promptStore.savePolicyPrompt('comparison', 'RUNTIME_COMPARE {current} {extracted}');
+    const keywordPrompt = promptStore.getKeywordLibrary().keywords['公积金'].prompts[0];
+    promptStore.saveKeywordPrompt({ ...keywordPrompt, keyword: '公积金', promptId: keywordPrompt.id, systemPrompt: 'RUNTIME_KEYWORD' });
+    const regionPrompt = promptStore.getRegionLibrary().prompts.find(p => p.isDefault);
+    promptStore.saveRegionPrompt({ ...regionPrompt, promptId: regionPrompt.id, systemPrompt: 'RUNTIME_REGION' });
+    const app = loadApp({ configDir });
+    for (const route of ['/api/generate-report', '/api/generate-kimi-report', '/api/generate-siliconflow-report']) {
+      const response = await app.request(route, reportBody);
+      assert.equal(response.statusCode, 200);
+      assert.equal(app.calls.at(-1).messages[0].content, 'RUNTIME_WEEKLY');
+    }
+    await app.request('/api/generate-report', { ...reportBody, promptId: keywordPrompt.id });
+    assert.equal(app.calls.at(-1).messages[0].content, 'RUNTIME_KEYWORD');
+    await app.request('/api/modify-report', { ...reportBody, originalReport: '报告', modifyRequest: '精简' });
+    assert.equal(app.calls.at(-1).messages[0].content, 'RUNTIME_MODIFY');
+    await app.request('/api/policy/extract', { reportContent: '正文' });
+    assert.match(app.calls.at(-1).messages[1].content, /RUNTIME_EXTRACT/);
+    await app.request('/api/policy/compare', { extractedPolicy: policy, currentPolicy: policy });
+    assert.match(app.calls.at(-1).messages[1].content, /RUNTIME_COMPARE/);
+    await app.request('/api/policy/region-report/generate', { startDate: '2026-09-13', endDate: '2026-09-19', regions: [{ name: '南京', level: 'city' }], manualOverrides: { 1: true } });
+    assert.equal(app.calls.at(-1).messages[0].content, 'RUNTIME_REGION');
+    assert.ok(app.calls.every(call => call.options.modelConfig.model === 'DeepSeek-V4.1-Flash'));
+    assert.equal(fs.readFileSync(path.join(configDir, 'prompts.md'), 'utf8'), defaultWeekly);
+  } finally { fs.rmSync(configDir, { recursive: true, force: true }); }
 });

@@ -3,7 +3,6 @@
     "username": "admin",
     "displayName": "Admin",
     "role": "admin",
-    "password": "citic3104",
     "keywords": [
       "养老",
       "公积金",
@@ -34,10 +33,8 @@
     "username": "yzgjj",
     "displayName": "YZGJJ",
     "role": "restricted",
-    "password": "yzgjj",
     "keywords": [
-      "公积金",
-      "养老"
+      "公积金"
     ],
     "routes": [
       "/summary",
@@ -54,7 +51,6 @@
   {
     "username": "test",
     "displayName": "test",
-    "password": "test",
     "role": "restricted",
     "keywords": [
       "国家数据局",

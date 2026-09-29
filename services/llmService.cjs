@@ -1,5 +1,4 @@
-const fs = require('fs');
-const path = require('path');
+const { createPromptStore } = require('./promptStore.cjs');
 const { getWeeklyReportModel, listWeeklyReportModels, loadWeeklyReportModelConfig } = require('./weeklyReportModelConfig.cjs');
 const { completeChat } = require('./modelClient.cjs');
 
@@ -28,43 +27,13 @@ class LLMService {
       { role: 'user', content: prompts.userPrompt },
     ]);
   }
-  // 从markdown文件加载提示词
+  // 读取生效 Prompt，管理页面的 runtime 修改无需重启即可被新实例读取。
   loadPromptsFromMarkdown(config) {
-    try {
-      const promptsPath = path.join(__dirname, '../config/prompts.md');
-      if (fs.existsSync(promptsPath)) {
-        const promptsContent = fs.readFileSync(promptsPath, 'utf8');
-
-        // 初始化prompts对象（如果不存在）
-        if (!config.prompts) {
-          config.prompts = {};
-        }
-
-        // 解析System Prompt
-        const systemPromptMatch = promptsContent.match(/## System Prompt\s*```\s*([\s\S]*?)\s*```/);
-        if (systemPromptMatch) {
-          config.prompts.systemPrompt = systemPromptMatch[1].trim();
-          console.log('System prompt loaded from markdown file');
-        }
-
-        // 解析User Prompt
-        const userPromptMatch = promptsContent.match(/## User Prompt\s*```\s*([\s\S]*?)\s*```/);
-        if (userPromptMatch) {
-          config.prompts.userPrompt = userPromptMatch[1].trim();
-          console.log('User prompt loaded from markdown file');
-        }
-
-        // 检查是否成功加载了提示词
-        if (!config.prompts.systemPrompt || !config.prompts.userPrompt) {
-          throw new Error('Failed to parse prompts from markdown file');
-        }
-      } else {
-        throw new Error('Prompts markdown file not found');
-      }
-    } catch (error) {
-      console.error('Failed to load prompts from markdown file:', error.message);
+    const weekly = createPromptStore().getWeeklyPrompts();
+    if (!weekly.systemPrompt || !weekly.userPrompt) {
       throw new Error('Prompt configuration is required but not found');
     }
+    config.prompts = { systemPrompt: weekly.systemPrompt, userPrompt: weekly.userPrompt };
   }
 
   // 构建完整的Prompt

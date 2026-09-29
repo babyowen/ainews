@@ -8,6 +8,8 @@
     "dev": "concurrently -k -n api,web -c green,blue \"API_PORT=${API_PORT:-3456} node --watch server.cjs\" \"vite\"",
     "build": "vite build",
     "lint": "eslint .",
+    "test": "node --test test/*.test.*",
+    "verify:production-baseline": "node scripts/verify-production-baseline.cjs --snapshot .production-snapshot/incoming/production-current",
     "preview": "vite preview",
     "pdf:install-browser": "playwright install chromium"
   },

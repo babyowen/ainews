@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { useAuth } from '../../auth/AuthContext';
 import {
   Calendar,
   ChevronDown,
@@ -54,6 +55,7 @@ const getSelectionLabel = (item) => (item.level === 'provincial' ? `${item.name}
 const serializeSelection = (item) => buildSelectionKey(item);
 
 const RegionPolicyReport = () => {
+  const { authHeaders } = useAuth();
   const [regionTree, setRegionTree] = useState({ national: null, provinces: {}, municipalities: {} });
   const [expandedProvinces, setExpandedProvinces] = useState(new Set());
   const [selectedRegions, setSelectedRegions] = useState([]);
@@ -575,6 +577,7 @@ const RegionPolicyReport = () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...authHeaders(),
         },
         body: JSON.stringify(body),
       });
@@ -610,6 +613,7 @@ const RegionPolicyReport = () => {
     try {
       const res = await fetch(`/api/config/region-policy-report-prompts/${encodeURIComponent(promptId)}`, {
         method: 'DELETE',
+        headers: { ...authHeaders() },
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {

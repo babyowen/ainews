@@ -2,6 +2,27 @@
 
 全站统一使用 Agent Router 提供的 **DeepSeek V4.1 Flash**，用户无需选择模型。
 
+## 默认层与运行时层
+
+Issue #22 之后，配置分为两层：
+
+- `config/`：Git 追踪的出厂默认值，部署时随代码更新。
+- `config/runtime/`：服务器上的生产自定义差异，Git 忽略，部署时通过共享目录持久化。
+
+应用读取“默认值 + 运行时差异”的生效结果；管理页面保存时只写 `config/runtime/`，不会改写 Git 默认文件。运行时内容与默认值完全相同时，对应覆盖文件会自动删除。
+
+| 文件 | 合并方式 |
+|---|---|
+| `prompts.md`、`policy_prompts.md` | 运行时整文件覆盖 |
+| `keyword-prompts.json` | 按关键词和 Prompt ID 合并，支持删除墓碑 |
+| `region-policy-report-prompts.json` | 按 Prompt ID 合并，支持删除墓碑 |
+| `auto-report-config.json` | 顶层浅合并，`keywords` 按关键词深合并 |
+| `users.json` | 运行时整文件覆盖；含明文密码，不允许通过网页 Prompt 包导入导出 |
+
+`weekly-report-models.json` 是代码随附的模型能力清单，不属于可在线编辑的运行时配置。
+
+生产首次迁移和 Gitee 部署见 [`docs/deployment-gitee.md`](../docs/deployment-gitee.md)。不要手工创建版本基线目录，也不要引入 `RELEASE_VERSION`；精确版本由 Git commit 标识。
+
 ## 唯一模型配置
 
 `config/weekly-report-models.json` 是所有生成入口的模型配置来源，包括手动/自动周报、周报修改、政策提取/比对、地区政策报告及通用 LLM 服务。原 `llm-config.json` 已移除，避免配置互不生效。

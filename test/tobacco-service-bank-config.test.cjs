@@ -18,7 +18,7 @@ test('tobacco service bank keyword is available to admin and frontend keyword co
 
 test('tobacco service bank has default prompt with two-section report guidance', () => {
   const config = JSON.parse(fs.readFileSync(path.join(rootDir, 'config/keyword-prompts.json'), 'utf8'));
-  const prompt = config.keywords?.[keyword]?.prompts?.find((item) => item.id === 'default');
+  const prompt = config.keywords?.[keyword]?.prompts?.find((item) => item.id === 'v1');
 
   assert.ok(prompt);
   assert.equal(prompt.isDefault, true);
@@ -34,7 +34,7 @@ test('tobacco service bank auto report is enabled with score threshold four', ()
 
   assert.equal(config.enabled, true);
   assert.equal(item.enabled, true);
-  assert.equal(item.promptId, 'default');
+  assert.equal(item.promptId, 'v1');
   assert.equal(item.minScore, 4);
   assert.equal(item.summaryVersion, 'short');
 });

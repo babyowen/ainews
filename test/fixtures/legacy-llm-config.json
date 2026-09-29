@@ -1,0 +1,40 @@
+{
+  "activeModel": "deepseek-r1",
+  "models": {
+    "deepseek-r1": {
+      "provider": "deepseek",
+      "model": "deepseek-reasoner",
+      "apiKey": "DEEPSEEK_API_KEY",
+      "endpoint": "https://api.deepseek.com/v1/chat/completions",
+      "description": "DeepSeek R1 - 推理能力强，适合复杂分析"
+    },
+    "kimi-k2": {
+      "provider": "kimi",
+      "model": "kimi-k2-0905-preview",
+      "apiKey": "KIMI_API_KEY",
+      "endpoint": "https://api.moonshot.cn/v1/chat/completions",
+      "description": "KIMI K2 - 128k上下文智能对话模型"
+    },
+    "openai-gpt4": {
+      "provider": "openai",
+      "model": "gpt-4-turbo-preview",
+      "apiKey": "OPENAI_API_KEY",
+      "endpoint": "https://api.openai.com/v1/chat/completions",
+      "description": "OpenAI GPT-4 - 全能型模型"
+    },
+    "claude-3-opus": {
+      "provider": "anthropic",
+      "model": "claude-3-opus-20240229",
+      "apiKey": "ANTHROPIC_API_KEY",
+      "endpoint": "https://api.anthropic.com/v1/messages",
+      "description": "Claude 3 Opus - 长文本分析专家"
+    }
+  },
+
+  "settings": {
+    "temperature": 0.7,
+    "timeout": 30000,
+    "retryAttempts": 3,
+    "fallbackModel": "deepseek-r1"
+  }
+}

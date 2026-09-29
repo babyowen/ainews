@@ -4,7 +4,7 @@ import reactHooks from 'eslint-plugin-react-hooks';
 import reactRefresh from 'eslint-plugin-react-refresh';
 
 export default [
-  { ignores: ['dist/', 'server/pdf/'] },
+  { ignores: ['dist/', 'server/pdf/', '.production-snapshot/'] },
   {
     files: ['**/*.{js,jsx}'],
     languageOptions: {
