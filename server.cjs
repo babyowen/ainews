@@ -1881,6 +1881,7 @@ app.delete('/api/config/region-policy-report-prompts/:promptId', async (req, res
 
 // 获取地区政策报告 prompt 列表（前台使用）
 app.get('/api/policy/region-report/prompts', async (req, res) => {
+  if (!requirePageRequest(req,res,['/policy/region-report','/provident-fund/business-report'])) return;
   try {
     res.json(promptStore.getRegionPromptSummaries());
   } catch (error) {
@@ -3049,313 +3050,6 @@ app.get('/api/reports/keywords/list', async (req, res) => {
 // 地域政策相关 API
 // ============================================
 
-const { provinceNameMap, provinceCityMap, municipalities, classifyRegion, splitMultiRegion, getCityProvince, getSelectionDisplayName, normalizeRegionSelections, getMatchedRegionsForSelection } = require('./services/newsRegions.cjs');
-
-function splitTextIntoSentences(text = '') {
-  return String(text || '')
-    .replace(/\r/g, '\n')
-    .split(/[。！？!?；;\n]/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
-function formatPolicyDateYmd(value) {
-  if (!value) return '';
-  const date = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    const raw = String(value);
-    return raw.length >= 10 ? raw.slice(0, 10) : raw;
-  }
-  return date.toISOString().slice(0, 10);
-}
-
-const REGION_POLICY_NOISE_PATTERNS = [
-  /问答/,
-  /答疑/,
-  /知识问答/,
-  /热点问答/,
-  /常见问题/,
-  /知识库/,
-  /政策科普/,
-  /办事指南/,
-  /操作指南/,
-  /办理指南/,
-  /办理流程/,
-  /服务指南/,
-  /攻略/,
-  /流程说明/,
-  /使用说明/,
-  /图解/,
-  /一图读懂/,
-  /指引/,
-  /手把手/,
-  /如何/,
-  /怎么/,
-  /FAQ/i,
-];
-
-const REGION_POLICY_FINANCIAL_RESERVE_PATTERNS = [
-  /弥补亏损/,
-  /盈余公积/,
-  /债权人/,
-  /证券代码/,
-  /公司公告/,
-  /董事会/,
-  /股东/,
-  /上市公司/,
-];
-
-const REGION_POLICY_OLD_POLICY_PATTERNS = [
-  /政策回顾/,
-  /历史政策/,
-  /旧政策/,
-  /政策沿革/,
-  /盘点/,
-  /梳理/,
-  /汇总/,
-  /合集/,
-  /历年来/,
-  /此前政策/,
-  /既有政策/,
-];
-
-const REGION_POLICY_INTERPRETATION_PATTERNS = [
-  /政策解读/,
-  /权威解读/,
-  /专家解读/,
-  /媒体解读/,
-  /条文解读/,
-];
-
-const REGION_POLICY_ACTION_PATTERNS = [
-  /发布/,
-  /印发/,
-  /通知/,
-  /通告/,
-  /出台/,
-  /实施/,
-  /执行/,
-  /调整/,
-  /优化/,
-  /提高/,
-  /降低/,
-  /上调/,
-  /下调/,
-  /放宽/,
-  /收紧/,
-  /修订/,
-  /明确/,
-  /细化/,
-  /延长/,
-  /缩短/,
-  /取消/,
-  /支持/,
-  /推进/,
-  /推出/,
-  /新增/,
-  /恢复/,
-  /阶段性/,
-  /暂行/,
-  /办法/,
-  /措施/,
-  /新政/,
-];
-
-function getRegionPolicySourceText(news = {}) {
-  return [news.title, news.short_summary, news.content].filter(Boolean).join('\n');
-}
-
-function extractPolicySnippet(news = {}, maxLength = 150) {
-  const summary = String(news.short_summary || '').trim();
-  if (summary) {
-    return summary.length > maxLength ? `${summary.slice(0, maxLength)}...` : summary;
-  }
-  const sourceText = getRegionPolicySourceText(news);
-  const sentences = splitTextIntoSentences(sourceText);
-  const actionSentences = sentences.filter((sentence) =>
-    REGION_POLICY_ACTION_PATTERNS.some((pattern) => pattern.test(sentence))
-  );
-  const chosen = (actionSentences.length > 0 ? actionSentences : sentences).slice(0, 3).join('；');
-  const compact = chosen.replace(/\s+/g, ' ').trim();
-  if (!compact) return '未提取到有效摘要';
-  return compact.length > maxLength ? `${compact.slice(0, maxLength)}...` : compact;
-}
-
-function analyzeRegionPolicyNews(news = {}) {
-  const title = String(news.title || '').trim();
-  const sourceText = getRegionPolicySourceText(news);
-  const compactText = sourceText.replace(/\s+/g, ' ').trim();
-  const hasAction = REGION_POLICY_ACTION_PATTERNS.some((pattern) => pattern.test(compactText));
-  const titleAndSummary = `${title}\n${String(news.short_summary || '')}`;
-
-  if (REGION_POLICY_FINANCIAL_RESERVE_PATTERNS.some((pattern) => pattern.test(titleAndSummary))) {
-    return { includedInAnalysis: false, filterReason: '企业财务公积金/公告类内容' };
-  }
-
-  if (REGION_POLICY_NOISE_PATTERNS.some((pattern) => pattern.test(titleAndSummary))) {
-    return { includedInAnalysis: false, filterReason: '政策问答/指南类内容' };
-  }
-
-  if (REGION_POLICY_INTERPRETATION_PATTERNS.some((pattern) => pattern.test(titleAndSummary)) && !hasAction) {
-    return { includedInAnalysis: false, filterReason: '政策解读但无明确新政动作' };
-  }
-
-  if (REGION_POLICY_OLD_POLICY_PATTERNS.some((pattern) => pattern.test(titleAndSummary)) && !hasAction) {
-    return { includedInAnalysis: false, filterReason: '历史政策回顾或汇总' };
-  }
-
-  if (!hasAction) {
-    return { includedInAnalysis: false, filterReason: '缺少明确政策动作信号' };
-  }
-
-  return { includedInAnalysis: true, filterReason: '纳入分析' };
-}
-
-function applyRegionPolicyManualOverride(row, manualOverrides = {}) {
-  const overrideValue = manualOverrides?.[String(row.id)];
-  if (typeof overrideValue !== 'boolean') {
-    return row;
-  }
-
-  return {
-    ...row,
-    includedInAnalysis: overrideValue,
-    filterReason: overrideValue ? '人工纳入' : '人工排除',
-    filterSource: 'manual',
-  };
-}
-
-function summarizeRegionPolicyNews(newsList = [], maxLength = 500) {
-  if (!Array.isArray(newsList) || newsList.length === 0) {
-    return '当前筛选周期内暂无可纳入分析的政策新闻。';
-  }
-
-  const ordered = [...newsList].sort((a, b) => new Date(a.fetchdate || 0) - new Date(b.fetchdate || 0));
-  const parts = [];
-
-  for (const news of ordered) {
-    const dateText = news.fetchdate ? formatPolicyDateYmd(news.fetchdate) : '日期不详';
-    const fullSummary = String(news.short_summary || '').trim();
-    const snippet = fullSummary || extractPolicySnippet(news, 120);
-    const part = `${dateText} ${news.title || '未命名新闻'}：${snippet}`;
-    parts.push(part);
-  }
-
-  const summary = parts.join('\n').trim();
-  if (!summary) {
-    const fallback = extractPolicySnippet(ordered[0], 480);
-    return fallback;
-  }
-  return summary;
-}
-
-function formatRegionCoverage(newsList = []) {
-  if (!Array.isArray(newsList) || newsList.length === 0) return '无';
-  const sorted = [...newsList]
-    .map((item) => item.fetchdate ? formatPolicyDateYmd(item.fetchdate) : '')
-    .filter(Boolean)
-    .sort();
-  if (sorted.length === 0) return '无';
-  return `${sorted[0]} 至 ${sorted[sorted.length - 1]}`;
-}
-
-function buildRegionBlock(selection, newsList = []) {
-  const header = [
-    `地区名称：${getSelectionDisplayName(selection)}`,
-    `政策新闻数量：${newsList.length}`,
-    `时间覆盖：${formatRegionCoverage(newsList)}`,
-    `地区政策摘要（<=500字）：`,
-    summarizeRegionPolicyNews(newsList, 500),
-    '政策新闻清单：',
-  ];
-
-  const lines = newsList.map((news) => {
-    const dateText = news.fetchdate ? formatPolicyDateYmd(news.fetchdate) : '日期不详';
-    const fullSummary = String(news.short_summary || '').trim();
-    const snippet = fullSummary || extractPolicySnippet(news, 140);
-    return `- ${dateText}｜${news.title || '未命名新闻'}｜来源：${news.source || '未知'}｜地区：${news.region || selection.name}｜摘要：${snippet}`;
-  });
-
-  return `## ${getSelectionDisplayName(selection)}\n${header.join('\n')}\n${lines.join('\n')}`;
-}
-
-function fillPromptTemplate(template, variables) {
-  return String(template || '').replace(/\{(\w+)\}/g, (_, key) => {
-    if (Object.prototype.hasOwnProperty.call(variables, key)) {
-      return variables[key];
-    }
-    return '';
-  });
-}
-
-
-function isContextLengthErrorText(text = '') {
-  const content = String(text || '').toLowerCase();
-  return (
-    content.includes('context length') ||
-    content.includes('token limit') ||
-    content.includes('maximum context') ||
-    content.includes('context window') ||
-    content.includes('too many tokens')
-  );
-}
-
-async function fetchRegionPolicyRows({ startDate, endDate, selections }) {
-  const params = [REGION_POLICY_REPORT_KEYWORD];
-  let whereClause = `WHERE keyword = ? AND region IS NOT NULL AND region != '' AND score >= 3`;
-
-  if (startDate) {
-    whereClause += ' AND fetchdate >= ?';
-    params.push(startDate);
-  }
-  if (endDate) {
-    whereClause += ' AND fetchdate < ?';
-    params.push(getNextDateYmd(endDate));
-  }
-
-  const [rows] = await pool.query(`
-    SELECT
-      id, title, content, link, source, score,
-      keyword, search_keyword, fetchdate, wordcount,
-      sourceapi, short_summary, region
-    FROM scored_news
-    ${whereClause}
-    ORDER BY fetchdate DESC, id DESC
-  `, params);
-
-  const filtered = rows
-    .map((row) => {
-      const matchedSelections = selections
-        .map((selection) => ({
-          selection,
-          matchedRegions: getMatchedRegionsForSelection(row.region, selection),
-        }))
-        .filter((item) => item.matchedRegions.length > 0);
-
-      if (matchedSelections.length === 0) return null;
-
-      return {
-        ...row,
-        matchedSelections: matchedSelections.map((item) => ({
-          name: item.selection.name,
-          level: item.selection.level,
-          label: item.selection.label,
-          matchedRegions: item.matchedRegions,
-        })),
-      };
-    })
-    .filter(Boolean);
-
-  const deduped = new Map();
-  filtered.forEach((row) => {
-    if (!deduped.has(row.id)) {
-      deduped.set(row.id, row);
-    }
-  });
-
-  return Array.from(deduped.values());
-}
-
 const {createPolicyNewsQuery} = require('./services/policyNewsQuery.cjs');
 const policyNewsQuery = createPolicyNewsQuery({pool});
 const FUND_READ_PAGES = ['/provident-fund/news', '/policy/regions', '/provident-fund/business', '/policy/region-report', '/provident-fund/business-report'];
@@ -3407,241 +3101,64 @@ app.get('/api/provident-fund/business-types', async (req, res) => {
   } catch (error) {fundQueryError(res,error);}
 });
 
-app.get('/api/policy/region-report/news', async (req, res) => {
-  try {
-    const { startDate, endDate } = req.query;
-    const selections = normalizeRegionSelections(req.query.regions || req.query.selections);
-
-    if (!startDate || !endDate) {
-      return res.status(400).json({ error: '请选择完整日期区间' });
-    }
-
-    if (new Date(startDate) > new Date(endDate)) {
-      return res.status(400).json({ error: '开始日期不能晚于结束日期' });
-    }
-
-    if (selections.length === 0) {
-      return res.status(400).json({ error: '请至少选择一个地区' });
-    }
-
-    const rawRows = await fetchRegionPolicyRows({ startDate, endDate, selections });
-    const rows = rawRows.map((row) => {
-      const analysis = analyzeRegionPolicyNews(row);
-      return {
-        ...row,
-        includedInAnalysis: analysis.includedInAnalysis,
-        filterReason: analysis.filterReason,
-        filterSource: 'auto',
-      };
-    });
-
-    const filteredNewsCount = rows.filter((item) => item.includedInAnalysis).length;
-    const excludedNewsCount = rows.length - filteredNewsCount;
-
-    res.json({
-      startDate,
-      endDate,
-      regions: selections.map((item) => ({
-        name: item.name,
-        level: item.level,
-        label: item.label,
-      })),
-      rawNewsCount: rows.length,
-      filteredNewsCount,
-      excludedNewsCount,
-      rows,
-    });
-  } catch (error) {
-    console.error('获取地区政策报告新闻失败:', error);
-    res.status(500).json({ error: '获取地区政策报告新闻失败', details: error.message });
+const {buildBusinessTopicPreview, buildBusinessTopicInput, validateBusinessTopicOutput} = require('./services/businessTopicReport.cjs');
+for (const [reportKind, prefix, page] of [
+  ['region','/api/policy/region-report','/policy/region-report'],
+  ['business','/api/provident-fund/business-report','/provident-fund/business-report'],
+]) {
+  async function preview(input) {
+    const result = await policyNewsQuery.reportCandidates(input);
+    return buildBusinessTopicPreview({...result, reportKind});
   }
-});
-
-app.post('/api/policy/region-report/generate', async (req, res) => {
-  try {
-    const modelConfig = getWeeklyReportModel();
-    const { startDate, endDate, regions, promptId, userPrompt, manualOverrides = {} } = req.body || {};
-    const selections = normalizeRegionSelections(regions);
-
-    if (!startDate || !endDate) {
-      return res.status(400).json({ error: '请选择完整日期区间' });
-    }
-
-    if (new Date(startDate) > new Date(endDate)) {
-      return res.status(400).json({ error: '开始日期不能晚于结束日期' });
-    }
-
-    if (selections.length === 0) {
-      return res.status(400).json({ error: '请至少选择一个地区' });
-    }
-
-    const rawRows = await fetchRegionPolicyRows({ startDate, endDate, selections });
-    const rows = rawRows
-      .map((row) => {
-        const analysis = analyzeRegionPolicyNews(row);
-        return {
-          ...row,
-          includedInAnalysis: analysis.includedInAnalysis,
-          filterReason: analysis.filterReason,
-          filterSource: 'auto',
-        };
-      })
-      .map((row) => applyRegionPolicyManualOverride(row, manualOverrides));
-
-    const filteredRows = rows.filter((item) => item.includedInAnalysis);
-    const rawNewsCount = rows.length;
-    const filteredNewsCount = filteredRows.length;
-    const excludedNewsCount = rawNewsCount - filteredNewsCount;
-
-    if (filteredRows.length === 0) {
-      return res.status(400).json({ error: '当前筛选范围无可分析政策新闻' });
-    }
-
-    const promptConfig = promptStore.getRegionLibrary();
-    const prompts = Array.isArray(promptConfig.prompts) ? promptConfig.prompts : [];
-    const promptById = promptId ? prompts.find((item) => item.id === promptId) : null;
-    const recommendedId = selections.length === 1 ? 'single-region-default' : 'multi-region-default';
-    const selectedPrompt =
-      promptById ||
-      prompts.find((item) => item.id === recommendedId) ||
-      prompts.find((item) => item.isDefault) ||
-      prompts[0];
-
-    if (!selectedPrompt) {
-      return res.status(500).json({ error: '地区政策报告 Prompt 配置不存在' });
-    }
-
-    const analysisMode = selections.length === 1 ? 'single-region-timeline' : 'multi-region-comparison';
-    const userPromptTemplate = selections.length === 1
-      ? selectedPrompt.userPromptSingle
-      : selectedPrompt.userPromptMulti;
-
-    const regionBlocks = selections.map((selection) => {
-      const selectionNews = filteredRows
-        .filter((row) =>
-          (row.matchedSelections || []).some(
-            (item) => item.name === selection.name && item.level === selection.level
-          )
-        )
-        .sort((a, b) => new Date(a.fetchdate || 0) - new Date(b.fetchdate || 0));
-
-      return buildRegionBlock(selection, selectionNews);
-    }).join('\n\n');
-
-    const finalUserPrompt = fillPromptTemplate(userPromptTemplate, {
-      analysisMode,
-      startDate,
-      endDate,
-      regions: selections.map((item) => item.label).join('、'),
-      rawNewsCount: String(rawNewsCount),
-      filteredNewsCount: String(filteredNewsCount),
-      excludedNewsCount: String(excludedNewsCount),
-      usertopic: String(userPrompt || '无特别要求'),
-      regionBlocks,
-    });
-
-    const reportContent = await completeChat([
-      { role: 'system', content: selectedPrompt.systemPrompt },
-      { role: 'user', content: finalUserPrompt },
-    ], { modelConfig });
-
-    if (!reportContent) {
-      throw new Error('DeepSeek 未返回有效报告内容');
-    }
-
-    res.json({
-      reportContent,
-      debug: {
-        systemPrompt: selectedPrompt.systemPrompt,
-        userPrompt: finalUserPrompt,
-      },
-      meta: {
-        startDate,
-        endDate,
-        regions: selections.map((item) => item.label),
-        regionCount: selections.length,
-        rawNewsCount,
-        filteredNewsCount,
-        excludedNewsCount,
-        promptVersion: selectedPrompt.name,
-        promptId: selectedPrompt.id,
-        modelName: modelConfig.model,
-      },
-    });
-  } catch (error) {
-    console.error('生成地区政策报告失败:', error);
-    if (isContextLengthErrorText(error.message)) {
-      return res.status(400).json({
-        error: '输入内容超出模型上下文限制',
-        details: '请缩短日期区间、减少地区数量，或减少纳入分析的新闻后重试。',
+  app.get(`${prefix}/news`, async (req,res) => {
+    if (!requirePageRequest(req,res,[page])) return;
+    try {res.json(await preview(req.query));}
+    catch (error) {fundQueryError(res,error);}
+  });
+  app.post(`${prefix}/generate`, async (req,res) => {
+    if (!requirePageRequest(req,res,[page])) return;
+    try {
+      const input=req.body || {};
+      if (!input.previewHash) return res.status(400).json({error:'请先预览并确认本次材料'});
+      const current=await preview(input);
+      if (current.previewHash !== input.previewHash) return res.status(409).json({error:'材料已更新，请重新预览后生成'});
+      const promptId=input.promptId || (reportKind==='business'?'business-topic-comparison-v1':current.filters.regions.length===1?'single-region-default':'multi-region-default');
+      const prompt=promptStore.findRegionPrompt(promptId);
+      const {messages,snapshot}=buildBusinessTopicInput({preview:current,manualOverrides:input.manualOverrides,prompt,userPrompt:input.userPrompt});
+      const modelConfig=getWeeklyReportModel();
+      const reportContent=await completeChat(messages,{modelConfig});
+      const validation=validateBusinessTopicOutput({reportContent,newsReferences:snapshot.newsReferences,reportKind});
+      if (!validation.valid) return res.status(502).json({error:validation.errors.join('；')});
+      snapshot.modelName=modelConfig.model;
+      const exportSignature=signSessionPayload(`fund-report:${JSON.stringify({snapshot,reportContent})}`);
+      res.json({reportContent,snapshot,exportSignature,
+        debug:{systemPrompt:messages[0].content,userPrompt:messages[1].content},
+        meta:{...snapshot,...snapshot.filters,regions:snapshot.filters.regions.map(x=>x.label),regionCount:snapshot.filters.regions.length,promptVersion:prompt.name},
       });
+    } catch (error) {
+      res.status(error.status || 500).json({error:error.status ? error.message : '报告生成失败，请重试；输入过长时请缩小范围'});
     }
-    res.status(500).json({
-      error: '生成地区政策报告失败',
-      details: error.message,
-    });
-  }
-});
-
-app.post('/api/policy/region-report/export-pdf', async (req, res) => {
-  const {
-    title,
-    startDate,
-    endDate,
-    regions,
-    promptVersionName,
-    modelName,
-    rawNewsCount,
-    filteredNewsCount,
-    excludedNewsCount,
-    reportContent,
-    newsReferences,
-  } = req.body || {};
-
-  if (!title || !startDate || !endDate || !reportContent) {
-    return res.status(400).json({ error: '缺少地区政策报告导出 PDF 所需参数' });
-  }
-
-  try {
-    const pdfBuffer = await renderRegionPolicyReportPdf({
-      title,
-      startDate,
-      endDate,
-      regions,
-      promptVersionName,
-      modelName,
-      rawNewsCount,
-      filteredNewsCount,
-      excludedNewsCount,
-      reportContent,
-      newsReferences,
-    });
-
-    const filename = buildRegionPolicyReportPdfFilename({
-      title,
-      startDate,
-    });
-
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Length', pdfBuffer.length);
-    res.setHeader('Content-Disposition', buildAttachmentDisposition(filename));
-    res.send(pdfBuffer);
-  } catch (error) {
-    console.error('地区政策报告 PDF 导出失败:', error);
-
-    if (error instanceof PdfRendererUnavailableError || error?.code === 'PDF_RENDERER_UNAVAILABLE') {
-      return res.status(503).json({
-        error: 'PDF 引擎不可用',
-        details: error.message,
-      });
+  });
+  app.post(`${prefix}/export-pdf`, async (req,res) => {
+    if (!requirePageRequest(req,res,[page])) return;
+    const {snapshot,reportContent,exportSignature}=req.body || {};
+    if (!snapshot || snapshot.reportKind!==reportKind || typeof reportContent!=='string' || !reportContent.trim() ||
+        exportSignature!==signSessionPayload(`fund-report:${JSON.stringify({snapshot,reportContent})}`)) {
+      return res.status(400).json({error:'导出快照无效，请重新生成报告后导出'});
     }
-
-    return res.status(500).json({
-      error: '地区政策报告 PDF 生成失败',
-      details: error.message,
-    });
-  }
-});
+    try {
+      const title=reportKind==='business'?`公积金业务政策报告 · ${snapshot.businessTopic}`:'地区政策报告';
+      const payload={...snapshot,...snapshot.filters,title,reportContent,regions:snapshot.filters.regions.map(x=>x.label)};
+      const pdf=await renderRegionPolicyReportPdf(payload);
+      const filename=buildRegionPolicyReportPdfFilename(payload);
+      res.setHeader('Content-Type','application/pdf');
+      res.setHeader('Content-Disposition',buildAttachmentDisposition(filename));
+      res.send(pdf);
+    } catch (error) {
+      res.status(error?.code==='PDF_RENDERER_UNAVAILABLE'?503:500).json({error:'PDF 生成失败，请检查渲染器后重试'});
+    }
+  });
+}
 
 // 静态托管 dist 目录
 app.use(express.static(path.join(__dirname, 'dist')));

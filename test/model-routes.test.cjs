@@ -31,7 +31,8 @@ function loadApp({ failure, completion = '完整报告', configDir } = {}) {
       return completion;
     },
   };
-  const fakePool = { async query(sql, args) {
+  const fakePool = { async getConnection(){return {query:(sql,args)=>fakePool.query(sql,args),async rollback(){},release(){}};}, async query(sql, args) {
+    if (/^SET TRANSACTION|^START TRANSACTION/.test(sql) || sql.includes('news_business_type_aliases')) return [[]];
     if (sql.includes('INSERT INTO weekly_reports')) { writes.push(args); return [{ insertId: 1 }]; }
     if (sql.includes('FROM scored_news')) return [[{
       id: 1, region: '南京', title: '南京提高公积金贷款额度', content: '南京发布新政策，提高公积金贷款额度至80万元。',
@@ -69,7 +70,7 @@ function loadApp({ failure, completion = '完整报告', configDir } = {}) {
       setHeader() {}, flushHeaders() { this.headersSent = true; },
       write(text) { this.text += text; }, end() {},
     };
-    await layer.route.stack[0].handle({ body, query: {}, headers: {authorization:`Bearer ${token}`}, get: name=>name.toLowerCase()==='authorization'?`Bearer ${token}`:undefined }, res);
+    await layer.route.stack[0].handle({ body, query: body || {}, headers: {authorization:`Bearer ${token}`}, get: name=>name.toLowerCase()==='authorization'?`Bearer ${token}`:undefined }, res);
     return res;
   }
   return { calls, writes, request };
@@ -136,7 +137,10 @@ test('policy extraction/compare reject empty inputs and use unified configuratio
 
 test('region reports retain filtering and route the actual generation to the unified model', async () => {
   const app = loadApp();
+  const input={startDate:'2026-09-13',endDate:'2026-09-19',regions:[{name:'南京',level:'city'}]};
+  const preview=await app.request('/api/policy/region-report/news',input,'get');
   const res = await app.request('/api/policy/region-report/generate', {
+    previewHash:preview.data.previewHash,
     startDate: '2026-09-13', endDate: '2026-09-19', regions: [{ name: '南京', level: 'city' }],
     manualOverrides: { 1: true },
   });
@@ -178,8 +182,10 @@ test('unified generation routes consume runtime prompts without modifying Git de
     assert.match(app.calls.at(-1).messages[1].content, /RUNTIME_EXTRACT/);
     await app.request('/api/policy/compare', { extractedPolicy: policy, currentPolicy: policy });
     assert.match(app.calls.at(-1).messages[1].content, /RUNTIME_COMPARE/);
-    await app.request('/api/policy/region-report/generate', { startDate: '2026-09-13', endDate: '2026-09-19', regions: [{ name: '南京', level: 'city' }], manualOverrides: { 1: true } });
-    assert.equal(app.calls.at(-1).messages[0].content, 'RUNTIME_REGION');
+    const regionInput={startDate:'2026-09-13',endDate:'2026-09-19',regions:[{name:'南京',level:'city'}]};
+    const preview=await app.request('/api/policy/region-report/news',regionInput,'get');
+    await app.request('/api/policy/region-report/generate', { previewHash:preview.data.previewHash, startDate: '2026-09-13', endDate: '2026-09-19', regions: [{ name: '南京', level: 'city' }], manualOverrides: { 1: true } });
+    assert.ok(app.calls.at(-1).messages[0].content.startsWith('RUNTIME_REGION'));
     assert.ok(app.calls.every(call => call.options.modelConfig.model === 'DeepSeek-V4.1-Flash'));
     assert.equal(fs.readFileSync(path.join(configDir, 'prompts.md'), 'utf8'), defaultWeekly);
   } finally { fs.rmSync(configDir, { recursive: true, force: true }); }

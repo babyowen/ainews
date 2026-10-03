@@ -26,6 +26,15 @@
       "isDefault": false,
       "createdAt": "2026-04-15T00:00:00.000Z",
       "updatedAt": "2026-04-15T00:00:00.000Z"
+    },
+    {
+      "id": "business-topic-comparison-v1",
+      "name": "同业务多地区对比",
+      "description": "在所选业务范围内比较多个地区的政策与办理规则，保留材料归属和来源。",
+      "systemPrompt": "你是住房公积金政策研究顾问。只基于所给材料比较同一业务的地区差异，保留来源，不推测未提供的信息。",
+      "userPromptSingle": "请分析 {businessTopic}。时间 {startDate} 至 {endDate}；地区 {regions}。用户关注：{usertopic}。",
+      "userPromptMulti": "请比较 {businessTopic} 在 {regions} 的政策和办理规则。时间 {startDate} 至 {endDate}。纳入 {filteredNewsCount} 条，排除 {excludedNewsCount} 条。\n按服务端规定的五部分结构输出。对比表包括对象、条件、额度/比例、期限、办理方式、生效时间；未知填“材料未提及”。区别新政与既有办理指南，关键事实须标注 [N新闻ID]。跨地区新闻须根据正文逐项判断归属，冲突材料分别列示。用户关注：{usertopic}。",
+      "isDefault": false
     }
   ]
 }

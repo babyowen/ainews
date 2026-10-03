@@ -17,6 +17,7 @@ import RegionPolicyBrowser from './pages/PolicyComparison/RegionPolicyBrowser';
 import RegionPolicyReportPage from './pages/PolicyComparison/RegionPolicyReport';
 import ProvidentFundNews from './pages/ProvidentFundNews';
 import ProvidentFundBusiness from './pages/ProvidentFundBusiness';
+import ProvidentFundBusinessReport from './pages/ProvidentFundBusinessReport';
 import Layout from './components/Layout';
 import { AuthProvider, useAuth } from './auth/AuthContext';
 import './App.css'
@@ -79,6 +80,7 @@ function App() {
               <Route path="/provident-fund/news" element={<ProtectedPage routePath="/provident-fund/news"><ProvidentFundNews /></ProtectedPage>} />
               <Route path="/provident-fund/business" element={<ProtectedPage routePath="/provident-fund/business"><ProvidentFundBusiness /></ProtectedPage>} />
               <Route path="/policy/regions" element={<ProtectedPage routePath="/policy/regions"><RegionPolicyBrowser /></ProtectedPage>} />
+              <Route path="/provident-fund/business-report" element={<ProtectedPage routePath="/provident-fund/business-report"><ProvidentFundBusinessReport /></ProtectedPage>} />
               <Route path="/policy/region-report" element={<ProtectedPage routePath="/policy/region-report"><RegionPolicyReportPage /></ProtectedPage>} />
             </Route>
             <Route path="*" element={<HomeRedirect />} />
