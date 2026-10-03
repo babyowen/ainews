@@ -58,7 +58,8 @@ function buildReferenceList(references = []) {
       <ol class="reference-list">
         ${safeReferences.map((item) => `
           <li>
-            <span class="ref-title">${escapeHtml(item.title)}</span>
+            <span class="ref-title">${item.id != null ? `[N${escapeHtml(item.id)}] ` : ''}${escapeHtml(item.title)}</span>
+            ${/^https?:\/\//i.test(item.link || '') ? `<a class="ref-link" href="${escapeHtml(item.link)}">${escapeHtml(item.link)}</a>` : ''}
             <span class="ref-meta">${escapeHtml([
               item.date ? `日期：${item.date}` : '',
               item.source ? `来源：${item.source}` : '',
@@ -74,6 +75,8 @@ function buildReferenceList(references = []) {
 function buildRegionPolicyReportPdfHtml(payload = {}) {
   const {
     title,
+    businessTopic,
+    modelName,
     startDate,
     endDate,
     regions,
@@ -376,10 +379,15 @@ function buildRegionPolicyReportPdfHtml(payload = {}) {
         color: var(--ink-soft);
       }
 
+      .reference-list li { break-inside: avoid; page-break-inside: avoid; }
+
       .reference-list li + li {
         margin-top: 8px;
       }
 
+      .ref-link { display:block; color:var(--brand-accent); overflow-wrap:anywhere; word-break:break-all; }
+      thead { display:table-header-group; }
+      tr { break-inside:avoid; }
       .ref-title {
         display: block;
         color: var(--ink);
@@ -409,6 +417,8 @@ function buildRegionPolicyReportPdfHtml(payload = {}) {
         <div class="meta-grid">
           ${buildMetaCard('分析时间', `${formatDate(startDate)} - ${formatDate(endDate)}`)}
           ${buildMetaCard('分析地区', joinRegions(regions))}
+          ${businessTopic ? buildMetaCard('业务专题', businessTopic) : ''}
+          ${modelName ? buildMetaCard('生成模型', modelName) : ''}
           ${buildMetaCard('Prompt 版本', promptVersionName || '默认版本')}
           ${buildMetaCard('新闻统计', `原始 ${rawNewsCount || 0} / 纳入 ${filteredNewsCount || 0} / 排除 ${excludedNewsCount || 0}`)}
         </div>
@@ -425,7 +435,7 @@ function buildRegionPolicyReportPdfHtml(payload = {}) {
         </article>
       </section>
       ${buildReferenceList(newsReferences)}
-      <div class="footer-note">地区政策报告</div>
+      <div class="footer-note">${businessTopic ? '公积金业务政策报告' : '地区政策报告'}</div>
     </main>
   </body>
 </html>`;
