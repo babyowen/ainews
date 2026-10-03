@@ -1,6 +1,6 @@
 const {createHash} = require('node:crypto');
 const {LEVELS, decodeBusinessTypes, matchesBusinessTypes, countBusinessTypes} = require('./newsBusinessTypes.cjs');
-const {normalizeRegionSelections, getMatchedRegionsForSelection, buildRegionTree} = require('./newsRegions.cjs');
+const {normalizeRegionSelections, getMatchedRegionsForSelection, buildRegionTree, splitMultiRegion, classifyRegion} = require('./newsRegions.cjs');
 const fail = (message, status = 400) => Object.assign(new Error(message), {status});
 function dateYmd(value) { return value instanceof Date ? value.toISOString().slice(0,10) : String(value || '').slice(0,10); }
 function shiftDate(value, days) { return new Date(Date.parse(`${value}T00:00:00Z`) + days * 86400000).toISOString().slice(0,10); }
@@ -65,7 +65,7 @@ function createPolicyNewsQuery({pool}) {
           const matchedRegions=getMatchedRegionsForSelection(row.region,selection);
           return matchedRegions.length ? [{...selection,matchedRegions}] : [];
         });
-        unique.set(String(row.id),{...row,fetchdate:dateYmd(row.fetchdate),businessTypes:decoded.tags,businessTypeStatus:decoded.status,matchedSelections});
+        unique.set(String(row.id),{...row,fetchdate:dateYmd(row.fetchdate),businessTypes:decoded.tags,businessTypeStatus:decoded.status,regions:splitMultiRegion(row.region).map(classifyRegion),matchedSelections});
       }
       const candidates=[...unique.values()];
       const regionMatches=row=>!filters.regions.length || row.matchedSelections.length > 0;
