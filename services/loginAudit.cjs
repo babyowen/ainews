@@ -18,10 +18,27 @@ function readRecords(auditPath) {
   }
 }
 
+const beijingFormatter = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'Asia/Shanghai',
+  year: 'numeric', month: '2-digit', day: '2-digit',
+  hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+});
+
+function timestamp(record) {
+  const value = Date.parse(record.loginAt);
+  return Number.isFinite(value) ? value : -Infinity;
+}
+
 function normalizeRecord(record) {
-  const loginAt = record.loginAt || new Date().toISOString();
-  const [date, rawTime = ''] = loginAt.split('T');
-  const time = rawTime.replace(/\.\d{3}Z$/, '').replace(/Z$/, '');
+  const loginAt = record.loginAt || '';
+  const instant = new Date(loginAt);
+  let date = '';
+  let time = '';
+  if (Number.isFinite(instant.getTime())) {
+    const parts = Object.fromEntries(beijingFormatter.formatToParts(instant).map(part => [part.type, part.value]));
+    date = `${parts.year}-${parts.month}-${parts.day}`;
+    time = `${parts.hour}:${parts.minute}:${parts.second}`;
+  }
 
   return {
     username: String(record.username || ''),
@@ -35,7 +52,7 @@ function normalizeRecord(record) {
 function appendLoginAudit(auditPath, record) {
   ensureAuditFile(auditPath);
   const records = readRecords(auditPath);
-  const nextRecord = normalizeRecord(record);
+  const nextRecord = normalizeRecord({ ...record, loginAt: record.loginAt || new Date().toISOString() });
   records.push(nextRecord);
   fs.writeFileSync(auditPath, `${JSON.stringify(records, null, 2)}\n`, 'utf8');
   return nextRecord;
@@ -43,8 +60,9 @@ function appendLoginAudit(auditPath, record) {
 
 function readLoginAuditStats(auditPath) {
   const records = readRecords(auditPath)
+    .filter(record => record && typeof record === 'object')
     .map(normalizeRecord)
-    .sort((a, b) => new Date(b.loginAt) - new Date(a.loginAt));
+    .sort((a, b) => timestamp(b) - timestamp(a));
 
   const summaryByUser = new Map();
   for (const record of records) {
@@ -56,7 +74,7 @@ function readLoginAuditStats(auditPath) {
       lastTime: '',
     };
     current.count += 1;
-    if (!current.lastLoginAt || new Date(record.loginAt) > new Date(current.lastLoginAt)) {
+    if (timestamp(record) > timestamp({ loginAt: current.lastLoginAt })) {
       current.lastLoginAt = record.loginAt;
       current.lastDate = record.date;
       current.lastTime = record.time;
