@@ -78,13 +78,13 @@ Frontend (React + Vite)  ←→  Backend (Express + MySQL)
 
 ### Key Architectural Patterns
 
-1. **Single-file backend**: `server.cjs` is a monolithic Express file containing all routes, DB pool initialization, and business logic. It is not split into controllers or middleware directories.
+1. **Single-file backend**: `server.cjs` registers Express routes and initializes the DB pool. Reusable configuration, model, housing-fund query and report logic live in `services/`; no controllers or middleware directory is required.
 2. **Layered runtime configuration**: `services/configStore.cjs` reads Git defaults from `config/` and merges ignored production differences from `config/runtime/`. `services/promptStore.cjs` is the only prompt parsing/CRUD entry point. Admin writes never modify Git defaults.
 3. **LLM abstraction**: `services/llmService.cjs` encapsulates AI calls and uses services/modelClient.cjs and the fixed Agent Router model from config/weekly-report-models.json; prompts come from promptStore. The compatibility reload endpoint requires admin authentication.
 4. **Streaming reports**: Report generation endpoints (`/api/generate-report`, `/api/generate-kimi-report`, etc.) use SSE (text/event-stream) to stream LLM chunks to the frontend.
-5. **Server-side PDF rendering**: Report and policy comparison PDFs are rendered via Playwright in `server/pdf/`, not in the browser. The frontend posts HTML to the backend, which returns a PDF buffer.
+5. **Server-side PDF rendering**: Report and policy comparison PDFs are rendered via Playwright in `server/pdf/`, not in the browser. The frontend posts report data; server templates produce the printable HTML and return a PDF buffer. Housing-fund exports require the signed generation snapshot.
 6. **Keyword-specific prompts**: `config/keyword-prompts.json` contains defaults. The config UI at `/config` manages runtime overrides and shows each entry's source.
-7. **Region policy reports**: `/policy/regions` and `/policy/region-report` use the layered `region-policy-report-prompts.json` configuration with separate single-region and multi-region templates.
+7. **Housing-fund workspace**: global `/summary` keeps generic fields. Dedicated daily/region/business pages share `ProvidentFundNewsView` and `policyNewsQuery.cjs`; separate region/business report routes share `ProvidentFundReportView` and `businessTopicReport.cjs`. The layered region prompt library includes `business-topic-comparison-v1`. See `docs/issue-25-business-types.md` for bounded queries, evidence snapshots and validation.
 8. **Lightweight multi-user access**: `POST /api/auth/login` validates `users.json`, and admin mutation endpoints validate the signed token. Successful logins are appended to `data/login-audit.json`.
 9. **Automatic weekly reports**: `node-cron` schedules `services/autoReportService.cjs` at `0 5 * * 0` in `Asia/Shanghai`. The service reads effective auto-report and prompt config on each cycle.
 10. **Page-scoped CSS convention**: Vite merges every `import './X.css'` into a single global stylesheet, so bare class selectors in `src/pages/*.css` leak across pages. Page-level rules must remain scoped under their page wrapper.
@@ -161,13 +161,19 @@ Frontend routes (`src/App.jsx`):
 - `/history` — saved report history route kept for direct/internal use; hidden from the sidebar menu
 - `/auto-report` — automatic weekly report config for admin and download logs for users
 - `/login-stats` — admin-only successful login statistics
-- `/policy/current`, `/policy/comparison`, `/policy/regions`, `/policy/region-report` — policy comparison workflow
+- `/provident-fund/news` — dedicated housing-fund daily news
+- `/provident-fund/business`, `/provident-fund/business-report` — business browsing and multi-region topic reports
+- `/policy/regions`, `/policy/region-report` — general region browsing and reports
+- `/policy/current`, `/policy/comparison` — Yangzhou-only baseline editing and weekly comparison
 
-Frontend route visibility is filtered by `src/config/userAccess.js`. `yzgjj` sees `/summary`, `/report`, `/word-count`, and the four `/policy/*` routes; its policy menu is expanded by default.
+Navigation metadata lives in `config/navigation.json`. `src/config/navigation.js` and `services/routeAccess.cjs` enforce the same leaf permissions, including the housing-fund keyword requirement. Runtime routes are authoritative, including for built-in users; never silently restore revoked routes. Parent groups derive from visible leaves and the current URL. `/api/auth/me` refreshes public user permissions. New entry permissions require an administrator to grant them to existing restricted users.
 
 ### Important File Locations
 
-- `server.cjs` — all backend routes and DB logic
+- `server.cjs` — backend routes and shared DB pool
+- `services/newsBusinessTypes.cjs`, `newsRegions.cjs` — canonical tags/regions and unique-ID counts
+- `services/policyNewsQuery.cjs` — bounded read-only query snapshots, facets and pagination
+- `services/businessTopicReport.cjs` — material filtering, hashes, prompt input and citation validation
 - `services/configStore.cjs` — default/runtime merge engine and atomic runtime writes
 - `services/promptStore.cjs` — unified prompt parsing and CRUD
 - `services/llmService.cjs` — LLM abstraction layer

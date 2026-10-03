@@ -2,7 +2,8 @@ const {createHash} = require('node:crypto');
 const {LEVELS, decodeBusinessTypes, matchesBusinessTypes, countBusinessTypes} = require('./newsBusinessTypes.cjs');
 const {normalizeRegionSelections, getMatchedRegionsForSelection, buildRegionTree, splitMultiRegion, classifyRegion} = require('./newsRegions.cjs');
 const fail = (message, status = 400) => Object.assign(new Error(message), {status});
-function dateYmd(value) { return value instanceof Date ? value.toISOString().slice(0,10) : String(value || '').slice(0,10); }
+// mysql2 parses DATE as local midnight unless dateStrings is configured. Preserve that calendar day.
+function dateYmd(value) { return value instanceof Date ? `${value.getFullYear()}-${String(value.getMonth()+1).padStart(2,'0')}-${String(value.getDate()).padStart(2,'0')}` : String(value || '').slice(0,10); }
 function shiftDate(value, days) { return new Date(Date.parse(`${value}T00:00:00Z`) + days * 86400000).toISOString().slice(0,10); }
 function listParam(value) {
   if (value == null || value === '') return [];
@@ -13,7 +14,7 @@ function listParam(value) {
 function normalizePolicyFilters(input = {}) {
   const endDate = input.endDate || new Date(Date.now() + 8 * 3600000).toISOString().slice(0,10);
   const startDate = input.startDate || (/^\d{4}-\d{2}-\d{2}$/.test(endDate) && !Number.isNaN(Date.parse(endDate)) ? shiftDate(endDate,-29) : '');
-  for (const date of [startDate,endDate]) if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(date)) || dateYmd(new Date(date)) !== date) throw fail('日期无效，请使用 YYYY-MM-DD');
+  for (const date of [startDate,endDate]) if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(date)) || new Date(date).toISOString().slice(0,10) !== date) throw fail('日期无效，请使用 YYYY-MM-DD');
   const days = (Date.parse(endDate)-Date.parse(startDate))/86400000 + 1;
   if (days < 1 || days > 366) throw fail('日期区间须为1至366天');
   const regions = normalizeRegionSelections(input.regions || input.selections || (input.region ? [{name:input.region,level:input.regionLevel || 'city'}] : []));

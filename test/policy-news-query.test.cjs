@@ -36,3 +36,8 @@ test('报告最多200条；地区集合与材料来源保留，标签别名改�
  const large=Array.from({length:201},(_,id)=>({...rows[0],id}));
  await assert.rejects(createPolicyNewsQuery({pool:fakeFundPool(large)}).reportCandidates(filters),e=>e.status===413);
 });
+test('MySQL DATE 的本地午夜不因转 UTC 而变成前一天',()=>{
+ const {execFileSync}=require('node:child_process');
+ const code="const {dateYmd}=require('./services/policyNewsQuery.cjs'); process.stdout.write(dateYmd(new Date(2026,9,2)));";
+ for(const TZ of ['Asia/Shanghai','UTC','America/Los_Angeles']) assert.equal(execFileSync(process.execPath,['-e',code],{cwd:require('node:path').resolve(__dirname,'..'),env:{...process.env,TZ},encoding:'utf8'}),'2026-10-02');
+});

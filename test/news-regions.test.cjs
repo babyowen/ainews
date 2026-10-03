@@ -19,3 +19,15 @@ test('地区树父级按 ID 并集计数，别名合并且缺失可见',()=>{
  assert.equal(js.cities.find(x=>x.name==='南京').count,2);
  assert.equal(tree.unknownCount,1);assert.equal(tree.national.count,1);assert.equal(tree.municipalities[0].count,1);
 });
+test('吉林市的城市身份在归一化、地区树、匹配和再次解析中保持不变',()=>{
+ const selections=normalizeRegionSelections([{name:'吉林市',level:'city'}]);
+ assert.deepEqual(normalizeRegionSelections(selections),selections);
+ assert.deepEqual(getMatchedRegionsForSelection('吉林市',selections[0]),['吉林市']);
+ const province=buildRegionTree([{id:1,region:'吉林市'}]).provinces[0];
+ assert.equal(province.name,'吉林省');assert.equal(province.provincialCount,0);assert.equal(province.cities[0].name,'吉林市');
+ assert.deepEqual(match('吉林市','吉林','provincial'),[]);
+});
+test('旧地区树平均分按去重后的新闻计算，不按重复地区加权',()=>{
+ const tree=buildRegionTree([{id:1,region:'江苏|南京|苏州',score:5},{id:2,region:'南京市',score:3}]);
+ assert.equal(tree.provinces[0].avgScore,'4.00');assert.equal(tree.provinces[0].cities.find(x=>x.name==='南京').avgScore,'4.00');
+});

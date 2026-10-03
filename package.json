@@ -11,7 +11,8 @@
     "test": "node --test test/*.test.*",
     "verify:production-baseline": "node scripts/verify-production-baseline.cjs --snapshot .production-snapshot/incoming/production-current",
     "preview": "vite preview",
-    "pdf:install-browser": "playwright install chromium"
+    "pdf:install-browser": "playwright install chromium",
+    "test:fund-ui": "npm run build && node test/browser-issue25.cjs"
   },
   "dependencies": {
     "@shadcn/ui": "^0.0.4",

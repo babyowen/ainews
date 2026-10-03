@@ -46,7 +46,9 @@ export default function ProvidentFundNewsView({mode}) {
     <div className={`pf-workspace ${mode==='daily'?'pf-daily':''}`}>
       {mode!=='daily'&&<aside className="pf-filters">{mode==='business'?businessFilter:regionFilter}<details><summary>{mode==='business'?'按地区进一步筛选':'按业务进一步筛选'}</summary>{mode==='business'?regionFilter:businessFilter}</details></aside>}
       <main className="pf-results" aria-busy={loading&&!error}>
-        <div className="pf-results-heading"><strong>{loading?'正在读取…':`${data?.total||0} 条新闻`}</strong><span>评分 ≥ 3 · 按日期倒序</span></div>
+        <div className="pf-results-heading"><strong>{loading?'正在读取…':`${data?.total||0} 条新闻`}</strong><span>评分 ≥ 3 · 按采集日期倒序</span></div>
+        <p className="pf-hint">日期按采集时间筛选，不代表政策发布或生效日期。多标签、多地区新闻只计一次，各分类数量之和可能大于总数。</p>
+        {data?.coverage&&<p className="pf-hint">业务标注：待标注 {data.coverage.pending} · 未识别 {data.coverage.unidentified} · 异常 {data.coverage.invalid}</p>}
         {!!filters.regions.length&&<p className="pf-hint">地区：{filters.regions.map(x=>x.label||x.name).join('、')}</p>}
         {!!filters.businessTypes.length&&<p className="pf-hint">业务：{filters.businessTypes.map(x=>[x.level1,x.level2].filter(Boolean).join(' · ')).join('、')}</p>}
         {error?<div role="alert" className="pf-error">{error}<button onClick={()=>setRetry(x=>x+1)}>重试</button></div>:loading?<p role="status">正在读取新闻…</p>:<>
@@ -56,7 +58,7 @@ export default function ProvidentFundNewsView({mode}) {
             <div className="pf-news-meta"><time>{row.fetchdate?.slice(0,10)}</time><span>{row.source||'来源未标明'}</span><span>{row.score} 分</span></div>
             <h2>{safeNewsUrl(row.link)?<a href={row.link} target="_blank" rel="noopener noreferrer">{row.title}</a>:row.title}</h2>
             <div className="pf-region-line">地区：{row.regions?.length ? row.regions.map(region=>canAccessRoute(user,'/policy/regions')?<button className="pf-text-button" key={region.name} onClick={()=>jump('/policy/regions',{regions:[{name:region.name,level:region.level}]})}>{region.name} · </button>:<span key={region.name}>{region.name} </span>):'未识别地区'}</div>
-            <BusinessTypeTags tags={row.businessTypes} status={row.businessTypeStatus} onSelect={canAccessRoute(user,'/provident-fund/business')?tag=>jump('/provident-fund/business',{businessTypes:[tag],tagState:'all'}):undefined}/>
+            <BusinessTypeTags tags={row.businessTypes} status={row.businessTypeStatus} selected={filters.businessTypes} onSelect={canAccessRoute(user,'/provident-fund/business')?tag=>jump('/provident-fund/business',{businessTypes:[tag],tagState:'all'}):undefined}/>
             {row.short_summary&&<p>{row.short_summary}</p>}
             {row.content&&<details><summary>查看正文</summary><div className="pf-article-content">{row.content}</div></details>}
           </article>)}

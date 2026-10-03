@@ -53,7 +53,8 @@ function classifyRegion(value) {
   if (municipalities.includes(name)) return {name, level: 'municipality', parent: '全国'};
   if (Object.values(provinceNameMap).includes(name)) return {name, level: 'province', parent: '全国'};
   const city = cityNames.get(raw);
-  return city ? {name: city.name, level: 'city', parent: city.province} : null;
+  // Keep the full city name where the short name is also a province alias.
+  return city ? {name: provinceNameMap[city.name] ? raw : city.name, level: 'city', parent: city.province} : null;
 }
 function splitMultiRegion(value) {
   return [...new Set(String(value || '').split('|').map(v => classifyRegion(v)?.name).filter(Boolean))];
@@ -98,6 +99,8 @@ function getMatchedRegionsForSelection(value, selection) {
 function buildRegionTree(rows) {
   const nodes = new Map();
   const unknown = new Set();
+  const scores = new Map(rows.map(row => [String(row.id),Number(row.score)||0]));
+  const stats = node => ({count:node?.ids.size||0,avgScore:node?.ids.size ? ([...node.ids].reduce((sum,id)=>sum+scores.get(id),0)/node.ids.size).toFixed(2) : '0.00'});
   function add(name, id, provincial = false) {
     if (!nodes.has(name)) nodes.set(name, {ids: new Set(), provincial: new Set()});
     nodes.get(name).ids.add(String(id));
@@ -112,11 +115,11 @@ function buildRegionTree(rows) {
       if (kind.level === 'city') add(kind.parent, row.id);
     }
   }
-  const result = {national: {name:'全国', level:'national', count:nodes.get('全国')?.ids.size || 0}, provinces:[], municipalities:[], unknownCount:unknown.size};
+  const result = {national: {name:'全国', level:'national', ...stats(nodes.get('全国')),children:[]}, provinces:[], municipalities:[], unknownCount:unknown.size};
   for (const [name, node] of nodes) {
     const kind = classifyRegion(name);
-    if (kind.level === 'municipality') result.municipalities.push({...kind, count:node.ids.size});
-    if (kind.level === 'province') result.provinces.push({...kind, count:node.ids.size, provincialCount:node.provincial.size, cities:[...nodes].filter(([city]) => classifyRegion(city)?.parent === name).map(([city, data]) => ({name:city,level:'city',count:data.ids.size})).sort((a,b)=>a.name.localeCompare(b.name,'zh-CN'))});
+    if (kind.level === 'municipality') result.municipalities.push({...kind, ...stats(node)});
+    if (kind.level === 'province') result.provinces.push({...kind, ...stats(node), provincialCount:node.provincial.size, cities:[...nodes].filter(([city]) => classifyRegion(city)?.parent === name).map(([city, data]) => ({name:city,level:'city',...stats(data)})).sort((a,b)=>a.name.localeCompare(b.name,'zh-CN'))});
   }
   result.provinces.sort((a,b)=>a.name.localeCompare(b.name,'zh-CN'));
   return result;

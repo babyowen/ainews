@@ -55,8 +55,14 @@ AGENT_ROUTER_API_KEY=
 - `prompts.md`：默认周报及修改提示词。
 - `keyword-prompts.json`：关键词专属提示词。
 - `policy_prompts.md`：政策提取和比对模板。
-- `region-policy-report-prompts.json`：地区政策报告模板。
+- `region-policy-report-prompts.json`：地区与业务政策报告模板，包含 `business-topic-comparison-v1`；它不改变原全局默认。显式 ID 不存在或被运行时墓碑删除时返回错误，不静默回退。
 
 此次迁移不修改业务提示词和政策基准文件。
 
 部署与验证见 `docs/agent-router-migration.md`。
+
+### 公积金导航和权限
+
+`navigation.json` 是随代码发布的菜单元数据，由前后端共同读取，不属于运行时可编辑配置。`users.json` 仅提供初始化权限模板；已有 `runtime/users.json` 不会自动增加新版路由或补回已撤销权限。管理员需要在用户管理页明确授予三个 `/provident-fund/*` 页面权限，同时保留“公积金”关键词。
+
+业务报告与地区报告复用上述 Prompt 库和管理员 CRUD。保存仅写运行时层；专题范围、来源引用和材料归属要求由报告服务补充。不要直接编辑默认文件来覆盖线上自定义版本。
