@@ -5,7 +5,7 @@ import { useAuth } from '../auth/AuthContext';
 import './UserManagement.css';
 
 export default function UserManagementPage() {
-  const { authHeaders } = useAuth();
+  const { authHeaders, user: currentUser, refreshUser } = useAuth();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -116,6 +116,7 @@ export default function UserManagementPage() {
         flash(result.error || '保存失败', 'error');
         return;
       }
+      if(form.username===currentUser?.username) await refreshUser();
       flash(isNew ? '用户已创建' : '用户已更新');
       await loadData();
       if (isNew) {
@@ -159,8 +160,12 @@ export default function UserManagementPage() {
   if (!data) return null;
 
   const { users, allKeywords, availableRoutes } = data;
-  const mainRoutes = availableRoutes.filter(r => r.group === 'main');
-  const policyRoutes = availableRoutes.filter(r => r.group === 'policy');
+  const routeGroups=[
+    {label:'平台通用',items:availableRoutes.filter(r=>r.group==='main')},
+    {label:'公积金通用',items:availableRoutes.filter(r=>['housing-fund','fund-regions','fund-business'].includes(r.group))},
+    {label:'扬州专用',items:availableRoutes.filter(r=>r.group==='yangzhou-fund')},
+  ];
+  const routeLabel=r=>r.group==='fund-regions'?`地区 · ${r.label}`:r.group==='fund-business'?`业务 · ${r.label}`:r.label;
   const current = isNew ? form : users[selectedIdx] || users[0];
 
   return (
@@ -268,28 +273,11 @@ export default function UserManagementPage() {
                 {/* 菜单权限 */}
                 <div className="um-section">
                   <h3 className="um-section-title">菜单权限</h3>
-                  <div className="um-route-group">
-                    <p className="um-route-group-label">主菜单</p>
-                    <div className="um-checkbox-grid">
-                      {mainRoutes.map(r => (
-                        <label key={r.path} className={`um-check ${form.routes.includes(r.path) ? 'checked' : ''}`}>
-                          <input type="checkbox" checked={form.routes.includes(r.path)} onChange={() => toggleRoute(r.path)} />
-                          {r.label}
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="um-route-group">
-                    <p className="um-route-group-label">政策子菜单</p>
-                    <div className="um-checkbox-grid">
-                      {policyRoutes.map(r => (
-                        <label key={r.path} className={`um-check ${form.routes.includes(r.path) ? 'checked' : ''}`}>
-                          <input type="checkbox" checked={form.routes.includes(r.path)} onChange={() => toggleRoute(r.path)} />
-                          {r.label}
-                        </label>
-                      ))}
-                    </div>
-                  </div>
+                  {!form.keywords.includes('公积金')&&form.role!=='admin'&&<p className="um-empty-hint">公积金专区需要同时勾选“公积金”关键词和对应页面。</p>}
+                  {routeGroups.map(group=><div className="um-route-group" key={group.label}>
+                    <p className="um-route-group-label">{group.label} <button type="button" className="um-group-toggle" onClick={()=>setForm(f=>{const paths=group.items.map(r=>r.path);const all=paths.every(p=>f.routes.includes(p));return {...f,routes:all?f.routes.filter(p=>!paths.includes(p)):[...new Set([...f.routes,...paths])]};})}>全选 / 取消</button></p>
+                    <div className="um-checkbox-grid">{group.items.map(r=><label key={r.path} className={`um-check ${form.routes.includes(r.path)?'checked':''}`}><input type="checkbox" checked={form.routes.includes(r.path)} onChange={()=>toggleRoute(r.path)}/>{routeLabel(r)}</label>)}</div>
+                  </div>)}
                 </div>
 
                 {/* 操作按钮 */}

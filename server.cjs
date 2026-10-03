@@ -103,22 +103,7 @@ const LOGIN_AUDIT_PATH = path.join(DATA_DIR, 'login-audit.json');
 const AUTO_REPORT_PDF_DIR = path.join(DATA_DIR, 'auto-report-pdfs');
 const AUTO_REPORT_ROUTE = '/auto-report';
 
-const AVAILABLE_ROUTES = [
-  { path: '/summary', label: '每日新闻', group: 'main' },
-  { path: '/analysis', label: '来源分析', group: 'main' },
-  { path: '/report', label: '周报生成', group: 'main' },
-  { path: '/score-edit', label: '评分修改', group: 'main' },
-  { path: '/word-count', label: '字数统计', group: 'main' },
-  { path: '/config', label: '周报参数', group: 'main' },
-  { path: '/history', label: '历史周报', group: 'main' },
-  { path: AUTO_REPORT_ROUTE, label: '自动周报', group: 'main' },
-  { path: '/login-stats', label: '登录统计', group: 'main' },
-  { path: '/user-management', label: '用户管理', group: 'main' },
-  { path: '/policy/current', label: '现行政策编辑', group: 'policy' },
-  { path: '/policy/comparison', label: '周报政策对比', group: 'policy' },
-  { path: '/policy/regions', label: '地域政策浏览', group: 'policy' },
-  { path: '/policy/region-report', label: '地区政策报告', group: 'policy' },
-];
+const { canAccessPage, availableRoutes: AVAILABLE_ROUTES } = require('./services/routeAccess.cjs');
 
 const AUTH_USERS = {
   admin: {
@@ -173,7 +158,7 @@ function getPublicUserProfile(user) {
     role: user.role,
     defaultPath: user.defaultPath,
     keywords: user.keywords,
-    routes: user.routes,
+    routes: user.role === 'admin' ? AVAILABLE_ROUTES.map(route => route.path) : (user.routes || []),
   };
 }
 
@@ -246,20 +231,6 @@ function loadUsersConfig() {
   } else if (!Array.isArray(users)) {
     throw new Error('私有用户配置必须是数组');
   }
-  // Lightweight migration: ensure built-in users have routes from AUTH_USERS
-  let changed = false;
-  for (const u of users) {
-    const builtin = AUTH_USERS[u.username];
-    if (!builtin) continue;
-    if (!Array.isArray(u.routes)) { u.routes = []; changed = true; }
-    for (const route of builtin.routes) {
-      if (!u.routes.includes(route)) {
-        u.routes.push(route);
-        changed = true;
-      }
-    }
-  }
-  if (changed) saveUsersConfig(users);
   return users;
 }
 
@@ -544,7 +515,7 @@ app.post('/api/auth/login', (req, res) => {
     role: user.role,
     defaultPath: '/summary',
     keywords: user.keywords,
-    routes: user.routes,
+    routes: user.role === 'admin' ? AVAILABLE_ROUTES.map(route => route.path) : (user.routes || []),
   };
   try {
     appendLoginAudit(LOGIN_AUDIT_PATH, {
@@ -558,6 +529,21 @@ app.post('/api/auth/login', (req, res) => {
 
   res.json({ user: profile, token: createSessionToken(user.username) });
 });
+
+app.get('/api/auth/me', (req, res) => {
+  const user = getUserFromRequest(req);
+  if (!user) return res.status(401).json({ error: '未登录或登录已失效' });
+  res.json({ user: getPublicUserProfile(user) });
+});
+
+function requirePageRequest(req, res, paths) {
+  const user = getUserFromRequest(req);
+  if (!user) { res.status(401).json({ error: '未登录或登录已失效' }); return null; }
+  if (!(Array.isArray(paths) ? paths : [paths]).some(route => canAccessPage(user, route))) {
+    res.status(403).json({ error: '没有此功能的访问权限' }); return null;
+  }
+  return user;
+}
 
 app.get('/api/auth/login-stats', (req, res) => {
   if (!requireAdminRequest(req, res)) return;
@@ -1989,6 +1975,7 @@ app.post('/api/config/reset-default', async (req, res) => {
 
 // 获取所有政策版本列表
 app.get('/api/policy/versions', async (req, res) => {
+  if (!requirePageRequest(req, res, ["/policy/current", "/policy/comparison"])) return;
   try {
     const fs = require('fs');
     const path = require('path');
@@ -2028,6 +2015,7 @@ app.get('/api/policy/versions', async (req, res) => {
 
 // 获取最新政策内容
 app.get('/api/policy/latest', async (req, res) => {
+  if (!requirePageRequest(req, res, ["/policy/current", "/policy/comparison"])) return;
   try {
     const fs = require('fs');
     const path = require('path');
@@ -2070,6 +2058,7 @@ app.get('/api/policy/latest', async (req, res) => {
 
 // 保存新版政策（自动创建新版本）
 app.post('/api/policy/save', async (req, res) => {
+  if (!requirePageRequest(req, res, ["/policy/current"])) return;
   try {
     const fs = require('fs');
     const path = require('path');
@@ -2107,6 +2096,7 @@ app.post('/api/policy/save', async (req, res) => {
 
 // 政策抽取 (Step 1)
 app.post('/api/policy/extract', async (req, res) => {
+  if (!requirePageRequest(req, res, ["/policy/comparison"])) return;
   const { reportContent, reportId, modelKey } = req.body;
   
   if (!reportContent && !reportId) {
@@ -2119,7 +2109,7 @@ app.post('/api/policy/extract', async (req, res) => {
     
     // 如果提供了ID但没有内容，从数据库获取
     if (!contentToProcess && reportId) {
-      const [rows] = await pool.query('SELECT report_content FROM weekly_reports WHERE id = ?', [reportId]);
+      const [rows] = await pool.query('SELECT report_content FROM weekly_reports WHERE id = ? AND keyword = ?', [reportId, '公积金']);
       if (rows.length === 0) {
         return res.status(404).json({ error: 'Report not found' });
       }
@@ -2183,6 +2173,7 @@ app.post('/api/policy/extract', async (req, res) => {
 
 // 预览政策相关Prompt (Step 1 & 2)
 app.post('/api/policy/preview-prompt', async (req, res) => {
+  if (!requirePageRequest(req, res, ["/policy/comparison"])) return;
   const { type, reportContent, reportId, extractedPolicy, currentPolicy, modelKey } = req.body;
   // type: 'extraction' or 'comparison'
   
@@ -2198,7 +2189,7 @@ app.post('/api/policy/preview-prompt', async (req, res) => {
         let contentToProcess = reportContent;
         // 如果提供了ID但没有内容，从数据库获取
         if (!contentToProcess && reportId) {
-            const [rows] = await pool.query('SELECT report_content FROM weekly_reports WHERE id = ?', [reportId]);
+            const [rows] = await pool.query('SELECT report_content FROM weekly_reports WHERE id = ? AND keyword = ?', [reportId, '公积金']);
             if (rows.length > 0) {
                 contentToProcess = rows[0].report_content;
             }
@@ -2272,6 +2263,7 @@ app.post('/api/policy/preview-prompt', async (req, res) => {
 
 // 政策对比 (Step 2)
 app.post('/api/policy/compare', async (req, res) => {
+  if (!requirePageRequest(req, res, ["/policy/comparison"])) return;
   const { extractedPolicy, currentPolicy, modelKey } = req.body;
   
   if (!countPolicyDetails(extractedPolicy)) {
@@ -2860,6 +2852,7 @@ app.post('/api/reports/export-pdf', async (req, res) => {
 });
 
 app.post('/api/policy/comparison/export-pdf', async (req, res) => {
+  if (!requirePageRequest(req, res, ["/policy/comparison"])) return;
   const {
     title,
     startDate,

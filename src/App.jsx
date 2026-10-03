@@ -18,10 +18,13 @@ import RegionPolicyReportPage from './pages/PolicyComparison/RegionPolicyReport'
 import Layout from './components/Layout';
 import { AuthProvider, useAuth } from './auth/AuthContext';
 import './App.css'
+import {canAccessRoute,getDefaultAccessiblePath} from './config/navigation';
 
 function ProtectedShell() {
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated, user, loading, authError, refreshUser } = useAuth();
 
+  if (loading) return <div className="kd-page">正在读取权限…</div>;
+  if (authError) return <div className="kd-page">{authError}<button onClick={refreshUser}>重试</button></div>;
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
   }
@@ -36,16 +39,19 @@ function ProtectedShell() {
 function ProtectedPage({ routePath, children }) {
   const { user } = useAuth();
 
-  if (user?.routes && !user.routes.includes(routePath)) {
-    return <Navigate to={user?.defaultPath || '/summary'} replace />;
+  if (!canAccessRoute(user,routePath)) {
+    const path=getDefaultAccessiblePath(user);
+    return path ? <Navigate to={path} replace /> : <div className="kd-page">暂无可访问功能，请联系管理员。</div>;
   }
 
   return children;
 }
 
 function HomeRedirect() {
-  const { isAuthenticated, user } = useAuth();
-  return <Navigate to={isAuthenticated ? (user?.defaultPath || '/summary') : '/login'} replace />;
+  const {isAuthenticated,user,loading}=useAuth();
+  if(loading)return <div className="kd-page">正在读取权限…</div>;
+  const path=isAuthenticated?getDefaultAccessiblePath(user):'/login';
+  return path?<Navigate to={path} replace />:<div className="kd-page">暂无可访问功能，请联系管理员。</div>;
 }
 
 function App() {

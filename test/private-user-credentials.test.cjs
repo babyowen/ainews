@@ -67,3 +67,15 @@ test('empty private password disables login without falling back to environment'
     assert.equal((await request('POST', '/api/auth/login', { username: 'admin', password: candidate })).status, 401);
   }
 });
+
+test('revoked built-in leaf permissions stay revoked across login and profile reads', async t => {
+ const password=randomUUID();
+ const {request,runtimePath}=fixture(t,{},[{username:'yzgjj',displayName:'Test',role:'restricted',password,keywords:['公积金'],routes:['/policy/regions']}]);
+ const before=fs.readFileSync(runtimePath,'utf8');
+ const login=await request('POST','/api/auth/login',{username:'yzgjj',password});
+ assert.deepEqual(login.body.user.routes,['/policy/regions']);
+ const me=await request('GET','/api/auth/me',null,login.body.token);
+ assert.equal(me.status,200);assert.deepEqual(me.body.user.routes,['/policy/regions']);
+ assert.equal(me.body.user.password,undefined);assert.equal(fs.readFileSync(runtimePath,'utf8'),before);
+ const denied=await request('POST','/api/policy/save',{},login.body.token);assert.equal(denied.status,403);
+});

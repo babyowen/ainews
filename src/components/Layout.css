@@ -476,3 +476,12 @@
     overflow-x: clip;
   }
 }
+
+.sidebar .fund-menu-group { margin: 5px 0; padding: 5px; border: 1px solid rgba(139,216,214,.22); border-radius: 10px; background: rgba(56,166,165,.065); }
+.sidebar .fund-menu-group > .menu-trigger { color: #b1e3df; font-weight: 750; }
+.sidebar .fund-submenu { margin-left: 13px; padding-left: 9px; border-left: 1px solid rgba(139,216,214,.18); }
+.sidebar .fund-submenu[hidden] { display: none; }
+.sidebar .fund-submenu a, .sidebar .fund-submenu .menu-trigger { min-height: 36px; padding: 8px; font-size: 13px; }
+.sidebar .fund-subgroup > .menu-trigger { font-weight: 600; }
+.sidebar .fund-submenu .fund-submenu { margin-left: 9px; padding-left: 5px; }
+.sidebar nav :focus-visible { outline: 2px solid #8bd8d6; outline-offset: 2px; }

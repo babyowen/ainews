@@ -22,6 +22,9 @@ export const USERS = {
       '/policy/comparison',
       '/policy/regions',
       '/policy/region-report',
+      '/provident-fund/news',
+      '/provident-fund/business',
+      '/provident-fund/business-report',
     ],
   },
   yzgjj: {
@@ -40,6 +43,9 @@ export const USERS = {
       '/policy/comparison',
       '/policy/regions',
       '/policy/region-report',
+      '/provident-fund/news',
+      '/provident-fund/business',
+      '/provident-fund/business-report',
     ],
   },
 };

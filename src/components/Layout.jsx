@@ -18,29 +18,28 @@ import {
   ShieldCheck,
   Settings2,
   Users,
-  X
+  X,
+  Tags
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 import './Layout.css';
+import {getVisibleNavigation, getActiveGroupIds} from '../config/navigation';
 
-const menuItems = [
-  { to: '/summary', label: '每日新闻', icon: Newspaper },
-  { to: '/analysis', label: '来源分析', icon: Globe },
-  { to: '/report', label: '周报生成', icon: FileText },
-  { to: '/score-edit', label: '评分修改', icon: PenLine },
-  { to: '/word-count', label: '字数统计', icon: BarChart3 },
-  { to: '/config', label: '周报参数', icon: Settings2 },
-  { to: '/auto-report', label: '自动周报', icon: CalendarClock },
-  { to: '/login-stats', label: '登录统计', icon: ShieldCheck },
-  { to: '/user-management', label: '用户管理', icon: Users }
-];
-
-const policyItems = [
-  { to: '/policy/current', label: '现行政策编辑', icon: FileClock },
-  { to: '/policy/comparison', label: '周报政策对比', icon: Scale },
-  { to: '/policy/regions', label: '地域政策浏览', icon: Map },
-  { to: '/policy/region-report', label: '地区政策报告', icon: FileText }
-];
+const icons={BarChart3,CalendarClock,FileClock,FileText,Globe,Landmark,Map,Newspaper,PenLine,Scale,ShieldCheck,Settings2,Users,Tags};
+function NavBranch({node,pathname,openGroups,toggleGroup,closeMobile}) {
+  const Icon=icons[node.icon]||FileText;
+  if(node.path) return <Link to={node.path} className={pathname===node.path?'active':''} aria-current={pathname===node.path?'page':undefined} onClick={closeMobile}><Icon className="menu-icon" size={18}/>{node.label}</Link>;
+  const open=!!openGroups[node.id];
+  const active=getActiveGroupIds(pathname).includes(node.id);
+  return <div className={`menu-group ${node.id==='housing-fund'?'fund-menu-group':'fund-subgroup'}`}>
+    <button type="button" className={`menu-trigger ${active?'active-group':''}`} onClick={()=>toggleGroup(node.id)} aria-expanded={open} aria-controls={`nav-${node.id}`}>
+      <span className="menu-label"><Icon className="menu-icon" size={18}/>{node.label}</span><ChevronDown className={`arrow ${open?'open':''}`} size={16}/>
+    </button>
+    <div id={`nav-${node.id}`} className="fund-submenu" hidden={!open}>
+      {node.children.map(child=><NavBranch key={child.id} node={child} pathname={pathname} openGroups={openGroups} toggleGroup={toggleGroup} closeMobile={closeMobile}/>)}
+    </div>
+  </div>;
+}
 
 function BrandMark() {
   return (
@@ -50,23 +49,13 @@ function BrandMark() {
   );
 }
 
-function NavIcon({ icon: Icon }) {
-  return <Icon className="menu-icon" size={18} strokeWidth={2.1} />;
-}
-
 export default function Layout({ children }) {
   const { pathname } = useLocation();
   const { user, logout } = useAuth();
-  const [isPolicyOpen, setIsPolicyOpen] = useState(user?.username === 'yzgjj');
+  const [openGroups, setOpenGroups] = useState(() => Object.fromEntries(getActiveGroupIds(pathname).map(id => [id,true])));
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const visibleMenuItems = menuItems.filter(item => user?.routes?.includes(item.to));
-  const visiblePolicyItems = policyItems.filter(item => user?.routes?.includes(item.to));
-
-  useEffect(() => {
-    if (user?.username === 'yzgjj' || pathname.startsWith('/policy')) {
-      setIsPolicyOpen(true);
-    }
-  }, [pathname, user?.username]);
+  const visibleNavigation=getVisibleNavigation(user);
+  useEffect(()=>{setOpenGroups(previous=>({...previous,...Object.fromEntries(getActiveGroupIds(pathname).map(id=>[id,true]))}));},[pathname]);
 
   // 路由切换时自动关闭移动端菜单
   useEffect(() => {
@@ -109,35 +98,7 @@ export default function Layout({ children }) {
           </span>
         </h1>
         <nav aria-label="主导航">
-          {visibleMenuItems.map(item => (
-            <Link key={item.to} className={pathname === item.to ? 'active' : ''} to={item.to} onClick={() => setIsMobileMenuOpen(false)}>
-              <NavIcon icon={item.icon} />
-              {item.label}
-            </Link>
-          ))}
-
-          {visiblePolicyItems.length > 0 && <div className="menu-group">
-            <button
-              type="button"
-              className={`menu-trigger ${pathname.startsWith('/policy') ? 'active-group' : ''}`}
-              onClick={() => setIsPolicyOpen(!isPolicyOpen)}
-              aria-expanded={isPolicyOpen}
-            >
-              <span className="menu-label">
-                <NavIcon icon={Landmark} />
-                扬公政策对比
-              </span>
-              <ChevronDown className={`arrow ${isPolicyOpen ? 'open' : ''}`} size={16} />
-            </button>
-            <div className={`submenu ${isPolicyOpen ? 'open' : ''}`}>
-              {visiblePolicyItems.map(item => (
-                <Link key={item.to} className={pathname === item.to ? 'active' : ''} to={item.to} onClick={() => setIsMobileMenuOpen(false)}>
-                  <NavIcon icon={item.icon} />
-                  {item.label}
-                </Link>
-              ))}
-            </div>
-          </div>}
+          {visibleNavigation.map(node=><NavBranch key={node.id} node={node} pathname={pathname} openGroups={openGroups} toggleGroup={id=>setOpenGroups(prev=>({...prev,[id]:!prev[id]}))} closeMobile={()=>setIsMobileMenuOpen(false)}/>)}
         </nav>
         <div className="sidebar-user">
           <div className="sidebar-user-meta">
