@@ -6,6 +6,7 @@ const cors = require('cors');
 const path = require('path');
 const crypto = require('crypto');
 const cron = require('node-cron');
+const { isIntroductionPart, renderIntroductionPdf } = require('./server/pdf/renderIntroductionPdf.cjs');
 const {
   buildReportPdfFilename,
   PdfRendererUnavailableError,
@@ -2791,6 +2792,25 @@ app.get('/api/word-count-stats', async (req, res) => {
 });
 
 // ============ 历史周报相关 API ============
+
+// Static product literature is available to every signed-in user; it grants no business access.
+app.post('/api/introduction/export-pdf', async (req, res) => {
+  if (!getUserFromRequest(req)) return res.status(401).json({ error: '请先登录' });
+  const part = req.body?.part;
+  if (!isIntroductionPart(part)) return res.status(400).json({ error: '请选择有效的 PDF 导出范围' });
+  try {
+    const pdf = await renderIntroductionPdf(part);
+    const names = { general: '网站介绍', fund: '公积金专区介绍', all: '网站与公积金专区介绍' };
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Length', pdf.length);
+    res.setHeader('Content-Disposition', buildAttachmentDisposition(`KeyDigest_${names[part]}.pdf`));
+    res.send(pdf);
+  } catch (error) {
+    console.error('网站介绍 PDF 导出失败:', error.message);
+    const unavailable = error?.code === 'PDF_RENDERER_UNAVAILABLE';
+    res.status(unavailable ? 503 : 500).json({ error: unavailable ? 'PDF 引擎暂不可用，请联系管理员' : 'PDF 导出失败，请重试' });
+  }
+});
 
 app.post('/api/reports/export-pdf', async (req, res) => {
   const {

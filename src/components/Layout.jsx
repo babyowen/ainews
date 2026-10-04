@@ -19,7 +19,8 @@ import {
   Settings2,
   Users,
   X,
-  Tags
+  Tags,
+  BookOpen
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 import './Layout.css';
@@ -63,7 +64,7 @@ export default function Layout({ children }) {
   }, [pathname]);
 
   return (
-    <div className="layout-root">
+    <div className={`layout-root${pathname === '/introduction' ? ' introduction-layout' : ''}`}>
       {/* 移动端顶部栏 */}
       <header className="mobile-topbar">
         <button
@@ -100,6 +101,11 @@ export default function Layout({ children }) {
         <nav aria-label="主导航">
           {visibleNavigation.map(node=><NavBranch key={node.id} node={node} pathname={pathname} openGroups={openGroups} toggleGroup={id=>setOpenGroups(prev=>({...prev,[id]:!prev[id]}))} closeMobile={()=>setIsMobileMenuOpen(false)}/>)}
         </nav>
+        <div className="sidebar-introduction">
+          <Link to="/introduction" className={pathname === '/introduction' ? 'active' : ''} aria-current={pathname === '/introduction' ? 'page' : undefined} onClick={() => setIsMobileMenuOpen(false)}>
+            <BookOpen className="menu-icon" size={18} />网站介绍
+          </Link>
+        </div>
         <div className="sidebar-user">
           <div className="sidebar-user-meta">
             <span className="sidebar-user-label">当前用户</span>
