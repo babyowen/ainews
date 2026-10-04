@@ -34,7 +34,7 @@ const pages = [
     body: productView("news", "每日新闻：摘要、地区、业务类型、来源与评分并列展示", [["按规则逐条评估", "先看主题相关性，再看政策层级、影响范围与内容价值。5 分重大，4 分重要，3 分一般相关，0–2 分非重点。"], ["从综述回到依据", "周报 → 具体新闻 → 原始来源。读到值得关注的判断，可以继续核对原文。"], ["把一次问答变成积累", "无需每周重复组织信息任务；同一主题持续留存，形成可回查的行业资料。"]], "评分用于安排阅读优先级；不同主题可配置专门规则，不代表事实真实性评级。"),
   },
   {
-    id: 'fund-overview', part: 'fund', label: '专区综述', theme: 'fund-cover', eyebrow: 'KEYDIGEST / 公积金专区',
+    id: 'fund-overview', part: 'fund', label: '公积金专区', theme: 'fund-cover', eyebrow: 'KEYDIGEST / <span>公积金专区</span>',
     title: '看各地变化。<br><em>找业务参考。</em>',
     lead: '将公积金资讯按地区与业务整理。从每周动态，到专题分析，再到扬州现行政策对比，让资料更贴近实际工作。',
     body: `<div class="intro-feature-grid">${[['01','自动周报','每周把握行业动态'],['02','地区浏览','沿省市查找相关资料'],['03','业务类型分析','围绕缴存、提取、贷款研究'],['04','扬州政策对比','对照现行政策梳理差异']].map(([n,t,d])=>`<div><span>${n}</span><h3>${t}</h3><p>${d}</p></div>`).join('')}</div><div class="intro-foundation"><span>共同基础</span><strong>地区打标 · 业务打标 · 来源核对 · 报告导出</strong></div>`,

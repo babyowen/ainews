@@ -1,14 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
-import { ArrowDown, Download, LoaderCircle } from 'lucide-react';
+import { ArrowUp, Download, LoaderCircle } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 import { getIntroductionPages, introductionParts, renderIntroductionPages } from '../introduction/content.mjs';
 import '../introduction/introduction.css';
 import './Introduction.css';
 
 export default function Introduction() {
-  const [params, setParams] = useSearchParams();
-  const part = params.get('part') === 'fund' ? 'fund' : 'general';
   const [exportPart, setExportPart] = useState('all');
   const [exporting, setExporting] = useState(false);
   const [message, setMessage] = useState('');
@@ -17,10 +14,10 @@ export default function Introduction() {
   const exportLock = useRef(false);
   const requestRef = useRef(null);
   const { apiFetch } = useAuth();
-  const pages = getIntroductionPages(part);
+  const pages = getIntroductionPages('all');
   // Keep the static DOM stable when chapter position or download status changes.
   // Otherwise React replaces nodes that IntersectionObserver is still observing.
-  const markup = useMemo(() => ({ __html: renderIntroductionPages(part) }), [part]);
+  const markup = useMemo(() => ({ __html: renderIntroductionPages('all') }), []);
 
   useEffect(() => () => requestRef.current?.abort(), []);
 
@@ -66,16 +63,11 @@ export default function Introduction() {
       window.removeEventListener('scroll', updatePosition);
       media.removeEventListener('change', configureMotion);
     };
-  }, [part]);
+  }, []);
 
   const jumpTo = id => {
     const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     document.getElementById(id)?.scrollIntoView({ behavior: reduced ? 'instant' : 'smooth', block: 'start' });
-  };
-  const changePart = next => {
-    setParams({ part: next }, { replace: true });
-    setActive(0);
-    window.scrollTo({ top: 0, behavior: 'instant' });
   };
   const exportPdf = async () => {
     if (exportLock.current) return;
@@ -116,10 +108,6 @@ export default function Introduction() {
     <header className="intro-toolbar">
       <div className="intro-toolbar-main">
         <h1>网站介绍</h1>
-        <div className="intro-part-switch" role="group" aria-label="选择介绍">
-          <button type="button" aria-pressed={part === 'general'} onClick={() => changePart('general')}>网站总体介绍</button>
-          <button type="button" aria-pressed={part === 'fund'} onClick={() => changePart('fund')}>公积金专区</button>
-        </div>
         <div className="intro-export">
           <label htmlFor="intro-export-part" className="intro-sr-only">PDF 导出范围</label>
           <select id="intro-export-part" value={exportPart} onChange={event => setExportPart(event.target.value)} disabled={exporting}>
@@ -138,7 +126,7 @@ export default function Introduction() {
       </nav>
       <div role="status" aria-live="polite" className={message ? 'intro-export-status' : 'intro-sr-only'}>{message}</div>
     </header>
-    <div key={part} ref={bookRef} className="intro-book" dangerouslySetInnerHTML={markup} />
-    <div className="intro-end"><span>KeyDigest · 让信息成为有依据的业务参考</span><button type="button" onClick={() => changePart(part === 'general' ? 'fund' : 'general')}>{part === 'general' ? '继续了解公积金专区' : '返回网站总体介绍'}<ArrowDown size={15} /></button></div>
+    <div ref={bookRef} className="intro-book" dangerouslySetInnerHTML={markup} />
+    <div className="intro-end"><span>KeyDigest · 让信息成为有依据的业务参考</span><button type="button" onClick={() => jumpTo('general-overview')}>返回顶部<ArrowUp size={15} /></button></div>
   </div>;
 }
