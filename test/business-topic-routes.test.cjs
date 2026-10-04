@@ -118,6 +118,78 @@ test('不存在的引用只纠正一次，对照原材料重新验证；仍错�
   else {assert.equal(response.status,502);assert.deepEqual(response.body.invalidCitationIds,['999']);assert.equal(response.body.exportSignature,undefined);}
  }
 });
+test('业务和地区报告的非数字引用触发一次校正，仅签发校正后的报告',async t=>{
+ for(const base of [prefix,'/api/policy/region-report']) {
+  const draft='规则调整。[N1] 另一项规则已实施。[N未知]';
+  const repaired='规则调整。[N1]';
+  const calls=[];
+  const app=await fundApp(t,{model:{async completeChat(messages){calls.push(messages);return calls.length===1?draft:repaired;}}});
+  const p=await preview(app,filters,base);
+  assert.equal(p.status,200);
+  const response=await app.request('POST',base+'/generate',{...filters,previewHash:p.body.previewHash});
+  assert.equal(response.status,200,JSON.stringify(response.body));
+  assert.equal(response.body.reportContent,repaired);
+  assert.equal(response.body.snapshot.citationRepairAttempted,true);
+  assert.equal(calls.length,2);
+  assert.equal(calls[1].at(-2).content,draft);
+  assert.equal((await app.request('POST',base+'/export-pdf',response.body)).status,200);
+  assert.equal(app.exports[0].reportContent,repaired);
+  assert.equal((await app.request('POST',base+'/export-pdf',{...response.body,reportContent:draft})).status,400);
+ }
+});
+test('非数字引用校正后仍错误时，业务和地区报告均拒绝签发导出快照',async t=>{
+ for(const base of [prefix,'/api/policy/region-report']) {
+  let calls=0;
+  const app=await fundApp(t,{model:{async completeChat(){calls++;return `规则调整。[N1] 另一项规则已实施。${calls===1?'[N未知]':'[Nundefined]'}`;}}});
+  const p=await preview(app,filters,base);
+  assert.equal(p.status,200);
+  const response=await app.request('POST',base+'/generate',{...filters,previewHash:p.body.previewHash});
+  assert.equal(response.status,502,JSON.stringify(response.body));
+  assert.equal(response.body.code,'REPORT_VALIDATION_FAILED');
+  assert.equal(response.body.citationRepairAttempted,true);
+  assert.equal(calls,2);
+  assert.equal(response.body.exportSignature,undefined);
+  assert.equal(response.body.snapshot,undefined);
+  assert.equal((await app.request('POST',base+'/export-pdf',response.body)).status,400);
+  assert.equal(app.exports.length,0);
+ }
+});
+test('正文财务公积材料在预览中排除，人工强制纳入也不调用模型',async t=>{
+ const app=await fundApp(t);
+ app.rows.splice(0,app.rows.length,{...app.rows[0],title:'公积金使用规则',short_summary:'',content:'公司提取盈余公积，比例为10%。'});
+ const p=await preview(app);
+ assert.equal(p.status,200);
+ assert.equal(p.body.filteredNewsCount,0);
+ assert.equal(p.body.rows[0].evidenceKind,'financial-reserve');
+ const response=await app.request('POST',prefix+'/generate',{...filters,previewHash:p.body.previewHash,manualOverrides:{1:true}});
+ assert.equal(response.status,400);
+ assert.match(response.body.error,/企业财务公积金/);
+ assert.equal(app.calls.length,0);
+ assert.equal(response.body.exportSignature,undefined);
+});
+test('业务和地区报告超长跳过引用校正时说明原因，并阻止导出',async t=>{
+ for(const base of [prefix,'/api/policy/region-report']) {
+  const completion='材料'.repeat(10000)+'[N未知]';
+  const app=await fundApp(t,{completion});
+  const p=await preview(app,filters,base);
+  assert.equal(p.status,200);
+  const response=await app.request('POST',base+'/generate',{...filters,previewHash:p.body.previewHash,userPrompt:'关注额度。'.repeat(16000)});
+  assert.equal(response.status,502);
+  assert.equal(app.calls.length,1);
+  const inputLength=app.calls[0].messages.reduce((sum,message)=>sum+message.content.length,0);
+  assert.ok(inputLength<=180000);
+  assert.ok(inputLength+completion.length>180000);
+  assert.equal(response.body.code,'REPORT_VALIDATION_FAILED');
+  assert.equal(response.body.citationRepairAttempted,false);
+  assert.match(response.body.error,/引用格式无效/);
+  assert.match(response.body.error,/自动校正.*超过.*180000/);
+  assert.match(response.body.error,/减少材料|缩短补充要求/);
+  assert.equal(response.body.exportSignature,undefined);
+  assert.equal(response.body.snapshot,undefined);
+  assert.equal((await app.request('POST',base+'/export-pdf',response.body)).status,400);
+  assert.equal(app.exports.length,0);
+ }
+});
 test('地区报告缺少模型密钥时显示配置原因，而不是输入过长',async t=>{
  const {completeChat}=require('../services/modelClient.cjs');
  const app=await fundApp(t,{model:{completeChat:(messages,{modelConfig})=>completeChat(messages,{modelConfig:{...modelConfig,apiKey:'KEYDIGEST_TEST_ABSENT_KEY'},fetchImpl:()=>{throw new Error('unexpected network request');}})}});

@@ -3130,6 +3130,8 @@ for (const [reportKind, prefix, page] of [
           citationRepairAttempted=true;
           draft=await completeChat(repairMessages,{modelConfig});
           validation=validateBusinessTopicOutput({reportContent:draft,newsReferences:snapshot.newsReferences,reportKind});
+        } else {
+          validation.errors.push('未执行自动校正：校正输入超过180000字符上限，请减少材料或缩短补充要求后重试');
         }
       }
       if (!validation.valid) return res.status(502).json({error:validation.errors.join('；')+(citationRepairAttempted?'；自动校正后仍未通过，请重试':''),code:'REPORT_VALIDATION_FAILED',invalidCitationIds:validation.invalidCitationIds,citationRepairAttempted});

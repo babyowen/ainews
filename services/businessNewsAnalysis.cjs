@@ -7,7 +7,10 @@ function analyzeBusinessPolicyNews(news={}) {
   const heading=`${title}\n${news.short_summary||''}`;
   const body=[news.short_summary,news.content].filter(Boolean).join('\n').trim();
   const result=(includedInAnalysis,filterReason,evidenceKind)=>({includedInAnalysis,filterReason,evidenceKind});
-  if (/资本公积|盈余公积|转增股本/.test(heading)) return result(false,'企业财务公积金，与住房公积金无关','financial-reserve');
+  const financialReserve=/资本公积|盈余公积|转增股本/;
+  // Body-only financial terms can be comparisons in valid housing-fund material.
+  const hasHousingContext=/住房公积金|公积金(?:管理)?中心|公积金贷款|(?:缴存|欠缴|补缴|骗提|骗贷)[^。；\n]{0,12}公积金|公积金[^。；\n]{0,12}(?:缴存|欠缴|补缴|骗提|骗贷)/.test(`${heading}\n${body}`);
+  if (financialReserve.test(heading) || (financialReserve.test(body) && !hasHousingContext)) return result(false,'企业财务公积金，与住房公积金无关','financial-reserve');
   if (!body) return result(false,'缺少正文和摘要，请核对原文后决定是否纳入','insufficient-material');
   if (/(?:欠缴|补缴|追缴|骗提|骗贷)/.test(heading) && /公积金/.test(heading) && /案件|案例|纠纷|法院|被执行|责令.{0,15}补缴|查封/.test(heading)) return result(true,'缴存或使用合规案例，不能视为普遍政策','enforcement-case');
   const lead=String(news.short_summary||'').split(/[。\n]/)[0];

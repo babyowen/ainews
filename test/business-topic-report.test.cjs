@@ -60,6 +60,28 @@ test('问答分类不能把企业财务公积金重新纳入业务报告',()=>{
  assert.equal(preview.rows[0].evidenceKind,'financial-reserve');
  assert.throws(()=>buildBusinessTopicInput({preview,prompt,manualOverrides:{1:true}}),/企业财务公积金/);
 });
+test('正文明确属于企业财务且没有住房公积金语境时排除，不能人工重新纳入',()=>{
+ for(const content of ['公司提取盈余公积，比例为10%。','本次以资本公积转增股本，比例为10%。','本年度资本公积使用额度为100万元。']) {
+  const preview=buildBusinessTopicPreview({filters,rows:[{...inputRows[0],title:'公积金使用规则',short_summary:'',content}]});
+  assert.equal(preview.filteredNewsCount,0,content);
+  assert.equal(preview.rows[0].evidenceKind,'financial-reserve',content);
+  assert.throws(()=>buildBusinessTopicInput({preview,prompt,manualOverrides:{1:true}}),/企业财务公积金/);
+ }
+});
+test('正文提及财务公积不误杀住房公积金指南、贷款规则和欠缴案例',()=>{
+ const cases=[
+  {title:'住房公积金办理指南',content:'住房公积金不同于资本公积、盈余公积。职工连续缴存6个月可申请贷款。',kind:'existing-rule'},
+  {title:'公积金贷款指南',content:'资本公积不能用于替代个人缴存。贷款额度为80万元。',kind:'existing-rule'},
+  {title:'贷款申请条件',content:'本规则适用于住房公积金，贷款额度80万元，不涉及资本公积。',kind:'existing-rule'},
+  {title:'公积金欠缴案例',content:'法院责令企业补缴公积金，不能以提取盈余公积代替为职工缴存。',kind:'enforcement-case'},
+ ];
+ for(const {title,content,kind} of cases) {
+  const preview=buildBusinessTopicPreview({filters,rows:[{...inputRows[0],title,short_summary:'',content}]});
+  assert.equal(preview.filteredNewsCount,1,title);
+  assert.equal(preview.rows[0].evidenceKind,kind,title);
+  assert.equal(buildBusinessTopicInput({preview,prompt}).snapshot.newsReferences.length,1,title);
+ }
+});
 test('正文、摘要、别名版本和报告类型改变都使预览 hash 失效',()=>{
  const first=buildBusinessTopicPreview({filters,rows:inputRows,aliasesVersion:'v1'});
  for(const change of [{rows:inputRows.map(x=>({...x,content:'更新正文'}))},{rows:inputRows.map(x=>({...x,short_summary:'更新摘要'}))},{aliasesVersion:'v2'},{reportKind:'region'}]) assert.notEqual(first.previewHash,buildBusinessTopicPreview({filters,rows:inputRows,aliasesVersion:'v1',...change}).previewHash);
@@ -109,6 +131,23 @@ test('合并和全角引用按独立新闻编号校验并统一格式，不推�
   assert.equal(result.valid,false,citation);
   assert.ok(result.malformedCitations.length>0,citation);
  }
+});
+test('业务和地区报告均拒绝混在有效引用中的非数字新闻标记',()=>{
+ for(const reportKind of ['business','region']) {
+  for(const citation of ['[N未知]','[Nundefined]','[Nabc]','[N-1]','[N]','［Ｎ未知］','【n-1】']) {
+   const result=validateBusinessTopicOutput({reportContent:`规则调整。[N1] 另一项规则已实施。${citation}`,newsReferences:[{id:1}],reportKind});
+   assert.equal(result.valid,false,`${reportKind}: ${citation}`);
+   assert.equal(result.citationIssue,true,`${reportKind}: ${citation}`);
+   assert.deepEqual(result.malformedCitations,[citation]);
+  }
+ }
+});
+test('非新闻引用的方括号说明保留原文且不触发校正',()=>{
+ const reportContent='[说明] 规则调整。[N1] 【待核实】［来源说明］';
+ const result=validateBusinessTopicOutput({reportContent,newsReferences:[{id:1}]});
+ assert.equal(result.valid,true);
+ assert.equal(result.citationIssue,false);
+ assert.equal(result.reportContent,reportContent);
 });
 test('业务专题不要求地区，覆盖从材料计算，单地区和未知地区也可生成',()=>{
  for(const region of ['南京市',null]) {

@@ -96,7 +96,8 @@ function validateBusinessTopicOutput({reportContent,newsReferences,reportKind='b
   // material; never infer ordinal mappings, correct typos, or expand ID ranges.
   const normalized=reportContent.replace(/[\[［【]([^\]］】\r\n]+)[\]］】]/g,(original,body)=>{
     const value=body.normalize('NFKC').trim();
-    if (!/^N(?:\s*\d|新闻|ID)/i.test(value)) return original;
+    // Check every N-prefixed candidate so malformed IDs cannot bypass validation.
+    if (!/^N/i.test(value)) return original;
     const parts=value.replace(/N\s+(?=\d)/gi,'N').split(/[\s,，、;；]+/);
     if (!parts.every(part=>/^N?\d+$/i.test(part))) {malformedCitations.push(original);return original;}
     const group=parts.map(part=>part.replace(/^N/i,''));
