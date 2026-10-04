@@ -19,6 +19,7 @@ import ProvidentFundNews from './pages/ProvidentFundNews';
 import ProvidentFundBusiness from './pages/ProvidentFundBusiness';
 import ProvidentFundBusinessReport from './pages/ProvidentFundBusinessReport';
 import Layout from './components/Layout';
+import Introduction from './pages/Introduction';
 import { AuthProvider, useAuth } from './auth/AuthContext';
 import './App.css'
 import {canAccessRoute,getDefaultAccessiblePath} from './config/navigation';
@@ -64,6 +65,7 @@ function App() {
           <Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route element={<ProtectedShell />}>
+              <Route path="/introduction" element={<Introduction />} />
               <Route path="/summary" element={<ProtectedPage routePath="/summary"><SummaryNewsPage /></ProtectedPage>} />
               <Route path="/analysis" element={<ProtectedPage routePath="/analysis"><SourceAnalysisPage /></ProtectedPage>} />
               <Route path="/report" element={<ProtectedPage routePath="/report"><ReportGeneratorPage /></ProtectedPage>} />
