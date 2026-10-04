@@ -48,7 +48,7 @@ const output = process.env.INTRO_QA_DIR || path.join(os.tmpdir(), 'keydigest-int
     const url = `http://127.0.0.1:${server.address().port}/introduction`;
     await page.goto(url);
     await page.locator('.intro-sheet').first().waitFor();
-    assert.equal(await page.locator('.intro-sheet').count(), 3);
+    assert.equal(await page.locator('.intro-sheet').count(), 9);
     await page.evaluate(() => document.fonts.ready);
     await page.waitForTimeout(1200);
     const link = page.getByRole('link', { name: '网站介绍', exact: true });
@@ -64,9 +64,10 @@ const output = process.env.INTRO_QA_DIR || path.join(os.tmpdir(), 'keydigest-int
     assert.ok(await page.evaluate(() => window.introObservedSheet === document.querySelector('#general-difference')), 'Chapter updates must retain observed content');
     assert.equal(await page.locator('#general-difference .intro-sheet-content').evaluate(el => getComputedStyle(el).opacity), '1');
     await page.screenshot({ path: path.join(output, 'difference-desktop.png') });
-    await page.getByRole('button', { name: '公积金专区', exact: true }).click();
+    assert.equal(await page.getByRole('group', { name: '选择介绍' }).count(), 0);
+    await page.getByRole('button', { name: /04\s*公积金专区/ }).click();
     await page.locator('#fund-overview').waitFor();
-    assert.equal(await page.locator('.intro-sheet').count(), 6);
+    assert.equal(await page.locator('.intro-sheet').count(), 9);
     await page.waitForTimeout(1100);
     await page.screenshot({ path: path.join(output, 'fund-desktop.png') });
     for (const part of ['general', 'fund', 'all']) {
@@ -101,7 +102,7 @@ const output = process.env.INTRO_QA_DIR || path.join(os.tmpdir(), 'keydigest-int
     await page.locator('.intro-sheet').first().waitFor();
     assert.equal(await page.locator('.intro-motion').count(), 0);
     assert.equal(await page.locator('.intro-sheet-content').last().evaluate(el => getComputedStyle(el).opacity), '1');
-    await page.getByRole('button', { name: '网站总体介绍', exact: true }).click();
+    await page.getByRole('button', { name: '返回顶部', exact: true }).click();
     await page.screenshot({ path: path.join(output, 'general-mobile.png') });
     // Check the actual print layout for clipped content and per-page footer placement.
     const printPage = await browser.newPage();

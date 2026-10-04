@@ -3,9 +3,6 @@
 .intro-toolbar { position: sticky; top: 0; z-index: 20; background: #f8fbfbf2; backdrop-filter: blur(18px); border-bottom: 1px solid #d7e4e7; }
 .intro-toolbar-main { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; padding: 17px 28px 13px; }
 .intro-toolbar h1 { font-size: 14px; font-weight: 650; margin: 0; white-space: nowrap; }
-.intro-part-switch { display: flex; padding: 3px; background: #eaf1f1; border-radius: 7px; }
-.intro-part-switch button { background: transparent; color: #607681; padding: 7px 13px; font-size: 12px; border-radius: 5px; }
-.intro-part-switch button[aria-pressed="true"] { color: #1b7f81; background: #fff; box-shadow: 0 1px 3px #20354712; }
 .intro-export { display: flex; margin-left: auto; gap: 8px; }
 .intro-export select { font-size: 11px; padding: 7px 9px; max-width: 180px; }
 .intro-export-button { display: flex; align-items: center; justify-content: center; gap: 7px; background: #203547; color: #fff; font-size: 12px; padding: 9px 13px; }
@@ -30,8 +27,6 @@
 @media (max-width: 768px) { .introduction-layout .sidebar { position: fixed; top: 56px; height: calc(100dvh - 56px); } .intro-toolbar { top: 56px; } }
 @media (max-width: 600px) {
   .intro-toolbar-main { padding: 10px 14px; }
-  .intro-part-switch { flex: 1; }
-  .intro-part-switch button { flex: 1; padding: 7px 10px; }
   .intro-export { width: 100%; }
   .intro-export select { max-width: none; flex: 1; }
   .intro-export-button { min-width: 104px; }
@@ -41,3 +36,16 @@
 }
 @media (prefers-reduced-motion: reduce) { .introduction-page *, .introduction-page *::before, .introduction-page *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
 @media print { .intro-toolbar, .intro-end { display: none; } }
+
+/* A visible chapter transition in the continuous web story. */
+@media screen {
+  .introduction-page .fund-cover { background: #203547; border-top: 5px solid #62b9b4; }
+  .introduction-page .fund-cover .intro-eyebrow { color: #99d6d0; letter-spacing: .12em; }
+  .introduction-page .fund-cover .intro-eyebrow span { display: block; margin-top: 14px; color: #fff; font-size: clamp(28px, 3.4vw, 44px); letter-spacing: .04em; }
+  .introduction-page .fund-cover h2, .introduction-page .fund-cover h3 { color: #fff; }
+  .introduction-page .fund-cover h2 em { color: #99d6d0; }
+  .introduction-page .fund-cover .intro-lead, .introduction-page .fund-cover .intro-feature-grid p { color: #cedfdf; }
+  .introduction-page .fund-cover .intro-feature-grid > div, .introduction-page .fund-cover .intro-foundation, .introduction-page .fund-cover .intro-sheet-footer { border-color: #ffffff30; }
+  .introduction-page .fund-cover .intro-feature-grid > div > span, .introduction-page .fund-cover .intro-foundation > span, .introduction-page .fund-cover .intro-sheet-footer { color: #99c9c6; }
+  .introduction-page .fund-cover .intro-foundation strong { color: #fff; }
+}
