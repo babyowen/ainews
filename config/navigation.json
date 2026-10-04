@@ -1,0 +1,145 @@
+{
+  "groups": [
+    {
+      "id": "housing-fund",
+      "label": "公积金专区",
+      "afterPath": "/summary",
+      "icon": "Landmark"
+    },
+    {
+      "id": "fund-regions",
+      "label": "地区浏览",
+      "parentId": "housing-fund",
+      "icon": "Map"
+    },
+    {
+      "id": "fund-business",
+      "label": "业务类型浏览",
+      "parentId": "housing-fund",
+      "icon": "Tags"
+    },
+    {
+      "id": "yangzhou-fund",
+      "label": "扬州公积金专区",
+      "parentId": "housing-fund",
+      "icon": "Landmark"
+    }
+  ],
+  "routes": [
+    {
+      "path": "/summary",
+      "label": "每日新闻",
+      "icon": "Newspaper",
+      "group": "main"
+    },
+    {
+      "path": "/analysis",
+      "label": "来源分析",
+      "icon": "Globe",
+      "group": "main"
+    },
+    {
+      "path": "/report",
+      "label": "周报生成",
+      "icon": "FileText",
+      "group": "main"
+    },
+    {
+      "path": "/score-edit",
+      "label": "评分修改",
+      "icon": "PenLine",
+      "group": "main"
+    },
+    {
+      "path": "/word-count",
+      "label": "字数统计",
+      "icon": "BarChart3",
+      "group": "main"
+    },
+    {
+      "path": "/config",
+      "label": "周报参数",
+      "icon": "Settings2",
+      "group": "main"
+    },
+    {
+      "path": "/auto-report",
+      "label": "自动周报",
+      "icon": "CalendarClock",
+      "group": "main"
+    },
+    {
+      "path": "/login-stats",
+      "label": "登录统计",
+      "icon": "ShieldCheck",
+      "group": "main"
+    },
+    {
+      "path": "/user-management",
+      "label": "用户管理",
+      "icon": "Users",
+      "group": "main"
+    },
+    {
+      "path": "/history",
+      "label": "历史周报",
+      "group": "main",
+      "hidden": true
+    },
+    {
+      "path": "/quality",
+      "label": "质量分析",
+      "group": "main",
+      "hidden": true
+    },
+    {
+      "path": "/provident-fund/news",
+      "label": "每日新闻",
+      "group": "housing-fund",
+      "icon": "Newspaper",
+      "requiredKeyword": "公积金"
+    },
+    {
+      "path": "/policy/regions",
+      "label": "新闻浏览",
+      "group": "fund-regions",
+      "icon": "Map",
+      "requiredKeyword": "公积金"
+    },
+    {
+      "path": "/policy/region-report",
+      "label": "地区 AI 报告",
+      "group": "fund-regions",
+      "icon": "FileText",
+      "requiredKeyword": "公积金"
+    },
+    {
+      "path": "/provident-fund/business",
+      "label": "新闻浏览",
+      "group": "fund-business",
+      "icon": "Tags",
+      "requiredKeyword": "公积金"
+    },
+    {
+      "path": "/provident-fund/business-report",
+      "label": "业务政策 AI 报告",
+      "group": "fund-business",
+      "icon": "FileText",
+      "requiredKeyword": "公积金"
+    },
+    {
+      "path": "/policy/current",
+      "label": "现行政策编辑",
+      "group": "yangzhou-fund",
+      "icon": "FileClock",
+      "requiredKeyword": "公积金"
+    },
+    {
+      "path": "/policy/comparison",
+      "label": "周报政策对比",
+      "group": "yangzhou-fund",
+      "icon": "Scale",
+      "requiredKeyword": "公积金"
+    }
+  ]
+}

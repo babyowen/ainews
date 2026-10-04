@@ -103,22 +103,7 @@ const LOGIN_AUDIT_PATH = path.join(DATA_DIR, 'login-audit.json');
 const AUTO_REPORT_PDF_DIR = path.join(DATA_DIR, 'auto-report-pdfs');
 const AUTO_REPORT_ROUTE = '/auto-report';
 
-const AVAILABLE_ROUTES = [
-  { path: '/summary', label: '每日新闻', group: 'main' },
-  { path: '/analysis', label: '来源分析', group: 'main' },
-  { path: '/report', label: '周报生成', group: 'main' },
-  { path: '/score-edit', label: '评分修改', group: 'main' },
-  { path: '/word-count', label: '字数统计', group: 'main' },
-  { path: '/config', label: '周报参数', group: 'main' },
-  { path: '/history', label: '历史周报', group: 'main' },
-  { path: AUTO_REPORT_ROUTE, label: '自动周报', group: 'main' },
-  { path: '/login-stats', label: '登录统计', group: 'main' },
-  { path: '/user-management', label: '用户管理', group: 'main' },
-  { path: '/policy/current', label: '现行政策编辑', group: 'policy' },
-  { path: '/policy/comparison', label: '周报政策对比', group: 'policy' },
-  { path: '/policy/regions', label: '地域政策浏览', group: 'policy' },
-  { path: '/policy/region-report', label: '地区政策报告', group: 'policy' },
-];
+const { canAccessPage, availableRoutes: AVAILABLE_ROUTES } = require('./services/routeAccess.cjs');
 
 const AUTH_USERS = {
   admin: {
@@ -173,7 +158,7 @@ function getPublicUserProfile(user) {
     role: user.role,
     defaultPath: user.defaultPath,
     keywords: user.keywords,
-    routes: user.routes,
+    routes: user.role === 'admin' ? AVAILABLE_ROUTES.map(route => route.path) : (user.routes || []),
   };
 }
 
@@ -246,20 +231,6 @@ function loadUsersConfig() {
   } else if (!Array.isArray(users)) {
     throw new Error('私有用户配置必须是数组');
   }
-  // Lightweight migration: ensure built-in users have routes from AUTH_USERS
-  let changed = false;
-  for (const u of users) {
-    const builtin = AUTH_USERS[u.username];
-    if (!builtin) continue;
-    if (!Array.isArray(u.routes)) { u.routes = []; changed = true; }
-    for (const route of builtin.routes) {
-      if (!u.routes.includes(route)) {
-        u.routes.push(route);
-        changed = true;
-      }
-    }
-  }
-  if (changed) saveUsersConfig(users);
   return users;
 }
 
@@ -544,7 +515,7 @@ app.post('/api/auth/login', (req, res) => {
     role: user.role,
     defaultPath: '/summary',
     keywords: user.keywords,
-    routes: user.routes,
+    routes: user.role === 'admin' ? AVAILABLE_ROUTES.map(route => route.path) : (user.routes || []),
   };
   try {
     appendLoginAudit(LOGIN_AUDIT_PATH, {
@@ -558,6 +529,21 @@ app.post('/api/auth/login', (req, res) => {
 
   res.json({ user: profile, token: createSessionToken(user.username) });
 });
+
+app.get('/api/auth/me', (req, res) => {
+  const user = getUserFromRequest(req);
+  if (!user) return res.status(401).json({ error: '未登录或登录已失效' });
+  res.json({ user: getPublicUserProfile(user) });
+});
+
+function requirePageRequest(req, res, paths) {
+  const user = getUserFromRequest(req);
+  if (!user) { res.status(401).json({ error: '未登录或登录已失效' }); return null; }
+  if (!(Array.isArray(paths) ? paths : [paths]).some(route => canAccessPage(user, route))) {
+    res.status(403).json({ error: '没有此功能的访问权限' }); return null;
+  }
+  return user;
+}
 
 app.get('/api/auth/login-stats', (req, res) => {
   if (!requireAdminRequest(req, res)) return;
@@ -1895,6 +1881,7 @@ app.delete('/api/config/region-policy-report-prompts/:promptId', async (req, res
 
 // 获取地区政策报告 prompt 列表（前台使用）
 app.get('/api/policy/region-report/prompts', async (req, res) => {
+  if (!requirePageRequest(req,res,['/policy/region-report','/provident-fund/business-report'])) return;
   try {
     res.json(promptStore.getRegionPromptSummaries());
   } catch (error) {
@@ -1989,6 +1976,7 @@ app.post('/api/config/reset-default', async (req, res) => {
 
 // 获取所有政策版本列表
 app.get('/api/policy/versions', async (req, res) => {
+  if (!requirePageRequest(req, res, ["/policy/current", "/policy/comparison"])) return;
   try {
     const fs = require('fs');
     const path = require('path');
@@ -2028,6 +2016,7 @@ app.get('/api/policy/versions', async (req, res) => {
 
 // 获取最新政策内容
 app.get('/api/policy/latest', async (req, res) => {
+  if (!requirePageRequest(req, res, ["/policy/current", "/policy/comparison"])) return;
   try {
     const fs = require('fs');
     const path = require('path');
@@ -2070,6 +2059,7 @@ app.get('/api/policy/latest', async (req, res) => {
 
 // 保存新版政策（自动创建新版本）
 app.post('/api/policy/save', async (req, res) => {
+  if (!requirePageRequest(req, res, ["/policy/current"])) return;
   try {
     const fs = require('fs');
     const path = require('path');
@@ -2107,6 +2097,7 @@ app.post('/api/policy/save', async (req, res) => {
 
 // 政策抽取 (Step 1)
 app.post('/api/policy/extract', async (req, res) => {
+  if (!requirePageRequest(req, res, ["/policy/comparison"])) return;
   const { reportContent, reportId, modelKey } = req.body;
   
   if (!reportContent && !reportId) {
@@ -2119,7 +2110,7 @@ app.post('/api/policy/extract', async (req, res) => {
     
     // 如果提供了ID但没有内容，从数据库获取
     if (!contentToProcess && reportId) {
-      const [rows] = await pool.query('SELECT report_content FROM weekly_reports WHERE id = ?', [reportId]);
+      const [rows] = await pool.query('SELECT report_content FROM weekly_reports WHERE id = ? AND keyword = ?', [reportId, '公积金']);
       if (rows.length === 0) {
         return res.status(404).json({ error: 'Report not found' });
       }
@@ -2183,6 +2174,7 @@ app.post('/api/policy/extract', async (req, res) => {
 
 // 预览政策相关Prompt (Step 1 & 2)
 app.post('/api/policy/preview-prompt', async (req, res) => {
+  if (!requirePageRequest(req, res, ["/policy/comparison"])) return;
   const { type, reportContent, reportId, extractedPolicy, currentPolicy, modelKey } = req.body;
   // type: 'extraction' or 'comparison'
   
@@ -2198,7 +2190,7 @@ app.post('/api/policy/preview-prompt', async (req, res) => {
         let contentToProcess = reportContent;
         // 如果提供了ID但没有内容，从数据库获取
         if (!contentToProcess && reportId) {
-            const [rows] = await pool.query('SELECT report_content FROM weekly_reports WHERE id = ?', [reportId]);
+            const [rows] = await pool.query('SELECT report_content FROM weekly_reports WHERE id = ? AND keyword = ?', [reportId, '公积金']);
             if (rows.length > 0) {
                 contentToProcess = rows[0].report_content;
             }
@@ -2272,6 +2264,7 @@ app.post('/api/policy/preview-prompt', async (req, res) => {
 
 // 政策对比 (Step 2)
 app.post('/api/policy/compare', async (req, res) => {
+  if (!requirePageRequest(req, res, ["/policy/comparison"])) return;
   const { extractedPolicy, currentPolicy, modelKey } = req.body;
   
   if (!countPolicyDetails(extractedPolicy)) {
@@ -2860,6 +2853,7 @@ app.post('/api/reports/export-pdf', async (req, res) => {
 });
 
 app.post('/api/policy/comparison/export-pdf', async (req, res) => {
+  if (!requirePageRequest(req, res, ["/policy/comparison"])) return;
   const {
     title,
     startDate,
@@ -3056,1016 +3050,115 @@ app.get('/api/reports/keywords/list', async (req, res) => {
 // 地域政策相关 API
 // ============================================
 
-// 国外/境外地区列表（需要过滤）
-const foreignRegions = ['新加坡', '日本', '韩国', '美国', '英国', '法国', '德国', '澳大利亚', '加拿大', '新西兰', '泰国', '马来西亚', '越南', '菲律宾', '印度尼西亚', '印度'];
-
-// 纯省级名称映射（如"湖南"映射到"湖南省"）
-const provinceNameMap = {
-  '北京': '北京市', '上海': '上海市', '天津': '天津市', '重庆': '重庆市',
-  '江苏': '江苏省', '浙江': '浙江省', '广东': '广东省', '山东': '山东省',
-  '河南': '河南省', '四川': '四川省', '湖北': '湖北省', '湖南': '湖南省',
-  '河北': '河北省', '福建': '福建省', '安徽': '安徽省', '辽宁': '辽宁省',
-  '陕西': '陕西省', '江西': '江西省', '黑龙江': '黑龙江省', '吉林': '吉林省',
-  '云南': '云南省', '贵州': '贵州省', '山西': '山西省', '广西': '广西壮族自治区',
-  '内蒙古': '内蒙古自治区', '新疆': '新疆维吾尔自治区', '西藏': '西藏自治区',
-  '宁夏': '宁夏回族自治区', '青海': '青海省', '甘肃': '甘肃省', '海南': '海南省',
-  '台湾': '台湾省', '香港': '香港特别行政区', '澳门': '澳门特别行政区'
-};
-
-// 直辖市列表
-const municipalities = ['北京', '上海', '天津', '重庆', '北京市', '上海市', '天津市', '重庆市'];
-
-// 判断是否为国外/境外地区
-function isForeignRegion(region) {
-  if (!region) return true;
-  return foreignRegions.some(foreign => region.includes(foreign));
+const {createPolicyNewsQuery} = require('./services/policyNewsQuery.cjs');
+const policyNewsQuery = createPolicyNewsQuery({pool});
+const FUND_READ_PAGES = ['/provident-fund/news', '/policy/regions', '/provident-fund/business', '/policy/region-report', '/provident-fund/business-report'];
+function fundQueryError(res, error) {
+  res.status(error.status || 500).json({error: error.status ? error.message : '公积金新闻读取失败，请重试或联系管理员'});
 }
-
-// 地域分级识别函数
-function classifyRegion(region) {
-  if (!region) return null;
-
-  // 过滤国外数据
-  if (isForeignRegion(region)) {
-    return null;
-  }
-
-  // 全国级
-  if (region === '全国') {
-    return { level: 'national', name: '全国', parent: null };
-  }
-
-  // 直辖市（与省级同层级）
-  if (municipalities.includes(region)) {
-    const shortName = region.replace('市', '');
-    return { level: 'municipality', name: shortName + '市', parent: '全国' };
-  }
-
-  // 省级（以"省"、"自治区"结尾）
-  if (region.endsWith('省') || region.endsWith('自治区') || region.endsWith('特别行政区')) {
-    return { level: 'province', name: region, parent: '全国' };
-  }
-
-  // 纯省级名称（如"湖南"）
-  if (provinceNameMap[region]) {
-    return { level: 'province', name: provinceNameMap[region], parent: '全国', isShortName: true };
-  }
-
-  // 其他视为市级
-  return { level: 'city', name: region, parent: null };
-}
-
-// 拆分多地域（以|分隔）
-function splitMultiRegion(regionStr) {
-  if (!regionStr) return [];
-  return regionStr.split('|').map(r => r.trim()).filter(r => r && !isForeignRegion(r));
-}
-
-// 省份-城市映射表（用于识别城市所属省份）
-const provinceCityMap = {
-  '江苏省': ['南京', '苏州', '无锡', '常州', '扬州', '镇江', '泰州', '南通', '盐城', '淮安', '宿迁', '连云港', '徐州'],
-  '浙江省': ['杭州', '宁波', '温州', '嘉兴', '湖州', '绍兴', '金华', '衢州', '舟山', '台州', '丽水'],
-  '广东省': ['广州', '深圳', '珠海', '汕头', '佛山', '韶关', '湛江', '肇庆', '江门', '茂名', '惠州', '梅州', '汕尾', '河源', '阳江', '清远', '东莞', '中山', '潮州', '揭阳', '云浮'],
-  '山东省': ['济南', '青岛', '淄博', '枣庄', '东营', '烟台', '潍坊', '济宁', '泰安', '威海', '日照', '临沂', '德州', '聊城', '滨州', '菏泽'],
-  '河南省': ['郑州', '开封', '洛阳', '平顶山', '安阳', '鹤壁', '新乡', '焦作', '濮阳', '许昌', '漯河', '三门峡', '南阳', '商丘', '信阳', '周口', '驻马店'],
-  '四川省': ['成都', '自贡', '攀枝花', '泸州', '德阳', '绵阳', '广元', '遂宁', '内江', '乐山', '南充', '眉山', '宜宾', '广安', '达州', '雅安', '巴中', '资阳', '阿坝', '甘孜', '凉山'],
-  '湖北省': ['武汉', '黄石', '十堰', '宜昌', '襄阳', '鄂州', '荆门', '孝感', '荆州', '黄冈', '咸宁', '随州', '恩施', '仙桃', '潜江', '天门', '神农架'],
-  '湖南省': ['长沙', '株洲', '湘潭', '衡阳', '邵阳', '岳阳', '常德', '张家界', '益阳', '郴州', '永州', '怀化', '娄底', '湘西'],
-  '河北省': ['石家庄', '唐山', '秦皇岛', '邯郸', '邢台', '保定', '张家口', '承德', '沧州', '廊坊', '衡水'],
-  '福建省': ['福州', '厦门', '莆田', '三明', '泉州', '漳州', '南平', '龙岩', '宁德'],
-  '安徽省': ['合肥', '芜湖', '蚌埠', '淮南', '马鞍山', '淮北', '铜陵', '安庆', '黄山', '滁州', '阜阳', '宿州', '六安', '亳州', '池州', '宣城'],
-  '辽宁省': ['沈阳', '大连', '鞍山', '抚顺', '本溪', '丹东', '锦州', '营口', '阜新', '辽阳', '盘锦', '铁岭', '朝阳', '葫芦岛'],
-  '陕西省': ['西安', '铜川', '宝鸡', '咸阳', '渭南', '延安', '汉中', '榆林', '安康', '商洛'],
-  '江西省': ['南昌', '景德镇', '萍乡', '九江', '新余', '鹰潭', '赣州', '吉安', '宜春', '抚州', '上饶'],
-  '黑龙江省': ['哈尔滨', '齐齐哈尔', '鸡西', '鹤岗', '双鸭山', '大庆', '伊春', '佳木斯', '七台河', '牡丹江', '黑河', '绥化', '大兴安岭'],
-  '吉林省': ['长春', '吉林', '四平', '辽源', '通化', '白山', '松原', '白城', '延边', '长白山'],
-  '云南省': ['昆明', '曲靖', '玉溪', '保山', '昭通', '丽江', '普洱', '临沧', '楚雄', '红河', '文山', '西双版纳', '大理', '德宏', '怒江', '迪庆'],
-  '贵州省': ['贵阳', '六盘水', '遵义', '安顺', '毕节', '铜仁', '黔西南', '黔东南', '黔南'],
-  '山西省': ['太原', '大同', '阳泉', '长治', '晋城', '朔州', '晋中', '运城', '忻州', '临汾', '吕梁'],
-  '广西壮族自治区': ['南宁', '柳州', '桂林', '梧州', '北海', '防城港', '钦州', '贵港', '玉林', '百色', '贺州', '河池', '来宾', '崇左'],
-  '内蒙古自治区': ['呼和浩特', '包头', '乌海', '赤峰', '通辽', '鄂尔多斯', '呼伦贝尔', '巴彦淖尔', '乌兰察布', '兴安', '锡林郭勒', '阿拉善'],
-  '新疆维吾尔自治区': ['乌鲁木齐', '克拉玛依', '吐鲁番', '哈密', '昌吉', '博尔塔拉', '巴音郭楞', '阿克苏', '克孜勒苏', '喀什', '和田', '伊犁', '塔城', '阿勒泰', '石河子', '阿拉尔', '图木舒克', '五家渠', '北屯', '铁门关', '双河', '可克达拉', '昆玉', '胡杨河', '新星'],
-  '西藏自治区': ['拉萨', '日喀则', '昌都', '林芝', '山南', '那曲', '阿里'],
-  '宁夏回族自治区': ['银川', '石嘴山', '吴忠', '固原', '中卫'],
-  '青海省': ['西宁', '海东', '海北', '黄南', '海南', '果洛', '玉树', '海西'],
-  '甘肃省': ['兰州', '嘉峪关', '金昌', '白银', '天水', '武威', '张掖', '平凉', '酒泉', '庆阳', '定西', '陇南', '临夏', '甘南'],
-  '海南省': ['海口', '三亚', '三沙', '儋州', '五指山', '琼海', '文昌', '万宁', '东方', '定安', '屯昌', '澄迈', '临高', '白沙', '昌江', '乐东', '陵水', '保亭', '琼中'],
-  '台湾省': ['台北', '新北', '桃园', '台中', '台南', '高雄', '基隆', '新竹', '嘉义'],
-  '香港特别行政区': ['香港'],
-  '澳门特别行政区': ['澳门']
-};
-
-// 获取城市所属省份
-function getCityProvince(cityName) {
-  for (const [province, cities] of Object.entries(provinceCityMap)) {
-    if (cities.includes(cityName)) {
-      return province;
-    }
-  }
-  return null;
-}
-
-function getSelectionDisplayName(selection) {
-  if (!selection) return '';
-  return selection.level === 'provincial' ? `${selection.name}（省级）` : selection.name;
-}
-
-function normalizeRegionSelection(input) {
-  if (!input) return null;
-
-  if (typeof input === 'string') {
-    const text = input.trim();
-    if (!text) return null;
-    if (text.startsWith('{')) {
-      try {
-        return normalizeRegionSelection(JSON.parse(text));
-      } catch {
-        return null;
+for (const [url, page] of [
+  ['/api/policy/region-news', '/policy/regions'],
+  ['/api/provident-fund/business-news', '/provident-fund/business'],
+  ['/api/provident-fund/news', '/provident-fund/news'],
+]) {
+  app.get(url, async (req, res) => {
+    if (!requirePageRequest(req, res, [page])) return;
+    try {
+      let filters = req.query;
+      if (page === '/provident-fund/news') {
+        const date = req.query.date || req.query.startDate;
+        if (!date || req.query.endDate && req.query.endDate !== date) return res.status(400).json({error:'请选择单个日期'});
+        filters = {...filters, startDate:date, endDate:date};
       }
-    }
-    const [level, ...rest] = text.split('::');
-    if (!level || rest.length === 0) return null;
-    const name = rest.join('::').trim();
-    if (!name) return null;
-    return {
-      name,
-      level: level.trim(),
-      label: getSelectionDisplayName({ name, level: level.trim() }),
-    };
-  }
-
-  if (typeof input === 'object') {
-    const name = String(input.name || '').trim();
-    const level = String(input.level || '').trim();
-    if (!name || !level) return null;
-    return {
-      name,
-      level,
-      label: String(input.label || '').trim() || getSelectionDisplayName({ name, level }),
-    };
-  }
-
-  return null;
-}
-
-function normalizeRegionSelections(input) {
-  const list = Array.isArray(input) ? input : (input ? [input] : []);
-  const deduped = new Map();
-  list.forEach((item) => {
-    const normalized = normalizeRegionSelection(item);
-    if (!normalized) return;
-    deduped.set(`${normalized.level}::${normalized.name}`, normalized);
-  });
-  return Array.from(deduped.values());
-}
-
-function getMatchedRegionsForSelection(regionStr, selection) {
-  const splitRegions = splitMultiRegion(regionStr);
-  if (!selection || splitRegions.length === 0) return [];
-
-  const matches = splitRegions.filter((part) => {
-    const classified = classifyRegion(part);
-    if (!classified) return false;
-
-    if (selection.level === 'national') {
-      return classified.level === 'national';
-    }
-
-    if (selection.level === 'municipality') {
-      return classified.level === 'municipality' && classified.name === selection.name;
-    }
-
-    if (selection.level === 'province') {
-      if (classified.level === 'province' && classified.name === selection.name) {
-        return true;
-      }
-      if (classified.level === 'city') {
-        return getCityProvince(classified.name) === selection.name;
-      }
-      return false;
-    }
-
-    if (selection.level === 'provincial') {
-      return classified.level === 'province' && classified.name === selection.name;
-    }
-
-    if (selection.level === 'city') {
-      return classified.level === 'city' && classified.name === selection.name;
-    }
-
-    return false;
-  });
-
-  return Array.from(new Set(matches));
-}
-
-function splitTextIntoSentences(text = '') {
-  return String(text || '')
-    .replace(/\r/g, '\n')
-    .split(/[。！？!?；;\n]/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
-function formatPolicyDateYmd(value) {
-  if (!value) return '';
-  const date = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    const raw = String(value);
-    return raw.length >= 10 ? raw.slice(0, 10) : raw;
-  }
-  return date.toISOString().slice(0, 10);
-}
-
-const REGION_POLICY_NOISE_PATTERNS = [
-  /问答/,
-  /答疑/,
-  /知识问答/,
-  /热点问答/,
-  /常见问题/,
-  /知识库/,
-  /政策科普/,
-  /办事指南/,
-  /操作指南/,
-  /办理指南/,
-  /办理流程/,
-  /服务指南/,
-  /攻略/,
-  /流程说明/,
-  /使用说明/,
-  /图解/,
-  /一图读懂/,
-  /指引/,
-  /手把手/,
-  /如何/,
-  /怎么/,
-  /FAQ/i,
-];
-
-const REGION_POLICY_FINANCIAL_RESERVE_PATTERNS = [
-  /弥补亏损/,
-  /盈余公积/,
-  /债权人/,
-  /证券代码/,
-  /公司公告/,
-  /董事会/,
-  /股东/,
-  /上市公司/,
-];
-
-const REGION_POLICY_OLD_POLICY_PATTERNS = [
-  /政策回顾/,
-  /历史政策/,
-  /旧政策/,
-  /政策沿革/,
-  /盘点/,
-  /梳理/,
-  /汇总/,
-  /合集/,
-  /历年来/,
-  /此前政策/,
-  /既有政策/,
-];
-
-const REGION_POLICY_INTERPRETATION_PATTERNS = [
-  /政策解读/,
-  /权威解读/,
-  /专家解读/,
-  /媒体解读/,
-  /条文解读/,
-];
-
-const REGION_POLICY_ACTION_PATTERNS = [
-  /发布/,
-  /印发/,
-  /通知/,
-  /通告/,
-  /出台/,
-  /实施/,
-  /执行/,
-  /调整/,
-  /优化/,
-  /提高/,
-  /降低/,
-  /上调/,
-  /下调/,
-  /放宽/,
-  /收紧/,
-  /修订/,
-  /明确/,
-  /细化/,
-  /延长/,
-  /缩短/,
-  /取消/,
-  /支持/,
-  /推进/,
-  /推出/,
-  /新增/,
-  /恢复/,
-  /阶段性/,
-  /暂行/,
-  /办法/,
-  /措施/,
-  /新政/,
-];
-
-function getRegionPolicySourceText(news = {}) {
-  return [news.title, news.short_summary, news.content].filter(Boolean).join('\n');
-}
-
-function extractPolicySnippet(news = {}, maxLength = 150) {
-  const summary = String(news.short_summary || '').trim();
-  if (summary) {
-    return summary.length > maxLength ? `${summary.slice(0, maxLength)}...` : summary;
-  }
-  const sourceText = getRegionPolicySourceText(news);
-  const sentences = splitTextIntoSentences(sourceText);
-  const actionSentences = sentences.filter((sentence) =>
-    REGION_POLICY_ACTION_PATTERNS.some((pattern) => pattern.test(sentence))
-  );
-  const chosen = (actionSentences.length > 0 ? actionSentences : sentences).slice(0, 3).join('；');
-  const compact = chosen.replace(/\s+/g, ' ').trim();
-  if (!compact) return '未提取到有效摘要';
-  return compact.length > maxLength ? `${compact.slice(0, maxLength)}...` : compact;
-}
-
-function analyzeRegionPolicyNews(news = {}) {
-  const title = String(news.title || '').trim();
-  const sourceText = getRegionPolicySourceText(news);
-  const compactText = sourceText.replace(/\s+/g, ' ').trim();
-  const hasAction = REGION_POLICY_ACTION_PATTERNS.some((pattern) => pattern.test(compactText));
-  const titleAndSummary = `${title}\n${String(news.short_summary || '')}`;
-
-  if (REGION_POLICY_FINANCIAL_RESERVE_PATTERNS.some((pattern) => pattern.test(titleAndSummary))) {
-    return { includedInAnalysis: false, filterReason: '企业财务公积金/公告类内容' };
-  }
-
-  if (REGION_POLICY_NOISE_PATTERNS.some((pattern) => pattern.test(titleAndSummary))) {
-    return { includedInAnalysis: false, filterReason: '政策问答/指南类内容' };
-  }
-
-  if (REGION_POLICY_INTERPRETATION_PATTERNS.some((pattern) => pattern.test(titleAndSummary)) && !hasAction) {
-    return { includedInAnalysis: false, filterReason: '政策解读但无明确新政动作' };
-  }
-
-  if (REGION_POLICY_OLD_POLICY_PATTERNS.some((pattern) => pattern.test(titleAndSummary)) && !hasAction) {
-    return { includedInAnalysis: false, filterReason: '历史政策回顾或汇总' };
-  }
-
-  if (!hasAction) {
-    return { includedInAnalysis: false, filterReason: '缺少明确政策动作信号' };
-  }
-
-  return { includedInAnalysis: true, filterReason: '纳入分析' };
-}
-
-function applyRegionPolicyManualOverride(row, manualOverrides = {}) {
-  const overrideValue = manualOverrides?.[String(row.id)];
-  if (typeof overrideValue !== 'boolean') {
-    return row;
-  }
-
-  return {
-    ...row,
-    includedInAnalysis: overrideValue,
-    filterReason: overrideValue ? '人工纳入' : '人工排除',
-    filterSource: 'manual',
-  };
-}
-
-function summarizeRegionPolicyNews(newsList = [], maxLength = 500) {
-  if (!Array.isArray(newsList) || newsList.length === 0) {
-    return '当前筛选周期内暂无可纳入分析的政策新闻。';
-  }
-
-  const ordered = [...newsList].sort((a, b) => new Date(a.fetchdate || 0) - new Date(b.fetchdate || 0));
-  const parts = [];
-
-  for (const news of ordered) {
-    const dateText = news.fetchdate ? formatPolicyDateYmd(news.fetchdate) : '日期不详';
-    const fullSummary = String(news.short_summary || '').trim();
-    const snippet = fullSummary || extractPolicySnippet(news, 120);
-    const part = `${dateText} ${news.title || '未命名新闻'}：${snippet}`;
-    parts.push(part);
-  }
-
-  const summary = parts.join('\n').trim();
-  if (!summary) {
-    const fallback = extractPolicySnippet(ordered[0], 480);
-    return fallback;
-  }
-  return summary;
-}
-
-function formatRegionCoverage(newsList = []) {
-  if (!Array.isArray(newsList) || newsList.length === 0) return '无';
-  const sorted = [...newsList]
-    .map((item) => item.fetchdate ? formatPolicyDateYmd(item.fetchdate) : '')
-    .filter(Boolean)
-    .sort();
-  if (sorted.length === 0) return '无';
-  return `${sorted[0]} 至 ${sorted[sorted.length - 1]}`;
-}
-
-function buildRegionBlock(selection, newsList = []) {
-  const header = [
-    `地区名称：${getSelectionDisplayName(selection)}`,
-    `政策新闻数量：${newsList.length}`,
-    `时间覆盖：${formatRegionCoverage(newsList)}`,
-    `地区政策摘要（<=500字）：`,
-    summarizeRegionPolicyNews(newsList, 500),
-    '政策新闻清单：',
-  ];
-
-  const lines = newsList.map((news) => {
-    const dateText = news.fetchdate ? formatPolicyDateYmd(news.fetchdate) : '日期不详';
-    const fullSummary = String(news.short_summary || '').trim();
-    const snippet = fullSummary || extractPolicySnippet(news, 140);
-    return `- ${dateText}｜${news.title || '未命名新闻'}｜来源：${news.source || '未知'}｜地区：${news.region || selection.name}｜摘要：${snippet}`;
-  });
-
-  return `## ${getSelectionDisplayName(selection)}\n${header.join('\n')}\n${lines.join('\n')}`;
-}
-
-function fillPromptTemplate(template, variables) {
-  return String(template || '').replace(/\{(\w+)\}/g, (_, key) => {
-    if (Object.prototype.hasOwnProperty.call(variables, key)) {
-      return variables[key];
-    }
-    return '';
+      res.json(await policyNewsQuery.query(filters, req.query));
+    } catch (error) {fundQueryError(res,error);}
   });
 }
-
-
-function isContextLengthErrorText(text = '') {
-  const content = String(text || '').toLowerCase();
-  return (
-    content.includes('context length') ||
-    content.includes('token limit') ||
-    content.includes('maximum context') ||
-    content.includes('context window') ||
-    content.includes('too many tokens')
-  );
-}
-
-async function fetchRegionPolicyRows({ startDate, endDate, selections }) {
-  const params = [REGION_POLICY_REPORT_KEYWORD];
-  let whereClause = `WHERE keyword = ? AND region IS NOT NULL AND region != '' AND score >= 3`;
-
-  if (startDate) {
-    whereClause += ' AND fetchdate >= ?';
-    params.push(startDate);
-  }
-  if (endDate) {
-    whereClause += ' AND fetchdate < ?';
-    params.push(getNextDateYmd(endDate));
-  }
-
-  const [rows] = await pool.query(`
-    SELECT
-      id, title, content, link, source, score,
-      keyword, search_keyword, fetchdate, wordcount,
-      sourceapi, short_summary, region
-    FROM scored_news
-    ${whereClause}
-    ORDER BY fetchdate DESC, id DESC
-  `, params);
-
-  const filtered = rows
-    .map((row) => {
-      const matchedSelections = selections
-        .map((selection) => ({
-          selection,
-          matchedRegions: getMatchedRegionsForSelection(row.region, selection),
-        }))
-        .filter((item) => item.matchedRegions.length > 0);
-
-      if (matchedSelections.length === 0) return null;
-
-      return {
-        ...row,
-        matchedSelections: matchedSelections.map((item) => ({
-          name: item.selection.name,
-          level: item.selection.level,
-          label: item.selection.label,
-          matchedRegions: item.matchedRegions,
-        })),
-      };
-    })
-    .filter(Boolean);
-
-  const deduped = new Map();
-  filtered.forEach((row) => {
-    if (!deduped.has(row.id)) {
-      deduped.set(row.id, row);
-    }
-  });
-
-  return Array.from(deduped.values());
-}
-
-// 获取地域列表（带统计和层级结构）
+app.get('/api/provident-fund/facets', async (req, res) => {
+  if (!requirePageRequest(req,res,FUND_READ_PAGES)) return;
+  try {res.json(await policyNewsQuery.query(req.query,{facetsOnly:true}));}
+  catch (error) {fundQueryError(res,error);}
+});
 app.get('/api/policy/regions', async (req, res) => {
+  if (!requirePageRequest(req,res,FUND_READ_PAGES)) return;
   try {
-    const { startDate, endDate } = req.query;
+    const {regionTree} = await policyNewsQuery.query(req.query,{facetsOnly:true});
+    // Preserve the legacy dictionary/children shape for bookmarked region tools.
+    res.json({...regionTree,
+      provinces:Object.fromEntries(regionTree.provinces.map(p=>[p.name,{...p,hasProvincialNews:p.provincialCount>0,children:[
+        ...(p.provincialCount ? [{name:'省级',type:'provincial',count:p.provincialCount}] : []),
+        ...p.cities.map(c=>({...c,type:'city'})),
+      ]}])),
+      municipalities:Object.fromEntries(regionTree.municipalities.map(m=>[m.name,{...m,type:'municipality'}])),
+    });
+  } catch (error) {fundQueryError(res,error);}
+});
+app.get('/api/provident-fund/business-types', async (req, res) => {
+  if (!requirePageRequest(req,res,FUND_READ_PAGES)) return;
+  try {
+    const {businessFacets,coverage} = await policyNewsQuery.query(req.query,{facetsOnly:true});
+    res.json({businessFacets,coverage});
+  } catch (error) {fundQueryError(res,error);}
+});
 
-    let dateFilter = '';
-    const params = ['公积金'];
-
-    if (startDate && endDate) {
-      dateFilter = ' AND fetchdate >= ? AND fetchdate < ?';
-      params.push(startDate, getNextDateYmd(endDate));
-    }
-
-    // 查询各地域的新闻（不过滤，先获取原始数据）
-    const [rows] = await pool.query(`
-      SELECT region, COUNT(*) as count, AVG(score) as avgScore
-      FROM scored_news
-      WHERE keyword = ?
-        AND region IS NOT NULL
-        AND region != ''
-        AND score >= 3
-        ${dateFilter}
-      GROUP BY region
-      ORDER BY count DESC
-    `, params);
-
-    // 构建层级结构
-    const regionTree = {
-      national: { name: '全国', count: 0, avgScore: 0, children: [] },
-      provinces: {},
-      municipalities: {} // 直辖市单独处理
-    };
-
-    // 统计计数器（处理多地域拆分后的计数）
-    const regionStats = {};
-
-    rows.forEach(row => {
-      // 拆分多地域
-      const regions = splitMultiRegion(row.region);
-      if (regions.length === 0) return;
-
-      // 每个地域都计入统计（一条新闻可能属于多个地域）
-      regions.forEach(regionName => {
-        if (!regionStats[regionName]) {
-          regionStats[regionName] = { count: 0, totalScore: 0 };
-        }
-        regionStats[regionName].count += row.count;
-        regionStats[regionName].totalScore += parseFloat(row.avgScore || 0) * row.count;
+const {buildBusinessTopicPreview, buildBusinessTopicInput, validateBusinessTopicOutput} = require('./services/businessTopicReport.cjs');
+for (const [reportKind, prefix, page] of [
+  ['region','/api/policy/region-report','/policy/region-report'],
+  ['business','/api/provident-fund/business-report','/provident-fund/business-report'],
+]) {
+  async function preview(input) {
+    const result = await policyNewsQuery.reportCandidates(input);
+    return buildBusinessTopicPreview({...result, reportKind});
+  }
+  app.get(`${prefix}/news`, async (req,res) => {
+    if (!requirePageRequest(req,res,[page])) return;
+    try {res.json(await preview(req.query));}
+    catch (error) {fundQueryError(res,error);}
+  });
+  app.post(`${prefix}/generate`, async (req,res) => {
+    if (!requirePageRequest(req,res,[page])) return;
+    try {
+      const input=req.body || {};
+      if (!input.previewHash) return res.status(400).json({error:'请先预览并确认本次材料'});
+      const current=await preview(input);
+      if (current.previewHash !== input.previewHash) return res.status(409).json({error:'材料已更新，请重新预览后生成'});
+      const promptId=input.promptId || (reportKind==='business'?'business-topic-comparison-v1':current.filters.regions.length===1?'single-region-default':'multi-region-default');
+      const prompt=promptStore.findRegionPrompt(promptId);
+      const {messages,snapshot}=buildBusinessTopicInput({preview:current,manualOverrides:input.manualOverrides,prompt,userPrompt:input.userPrompt});
+      const modelConfig=getWeeklyReportModel();
+      const reportContent=await completeChat(messages,{modelConfig});
+      const validation=validateBusinessTopicOutput({reportContent,newsReferences:snapshot.newsReferences,reportKind});
+      if (!validation.valid) return res.status(502).json({error:validation.errors.join('；')});
+      snapshot.modelName=modelConfig.model;
+      const exportSignature=signSessionPayload(`fund-report:${JSON.stringify({snapshot,reportContent})}`);
+      res.json({reportContent,snapshot,exportSignature,
+        debug:{systemPrompt:messages[0].content,userPrompt:messages[1].content},
+        meta:{...snapshot,...snapshot.filters,regions:snapshot.filters.regions.map(x=>x.label),regionCount:snapshot.filters.regions.length,promptVersion:prompt.name},
       });
-    });
-
-    // 处理统计数据并构建树
-    Object.entries(regionStats).forEach(([regionName, stats]) => {
-      const classified = classifyRegion(regionName);
-      if (!classified) return;
-
-      const avgScore = (stats.totalScore / stats.count).toFixed(2);
-
-      if (classified.level === 'national') {
-        regionTree.national.count = stats.count;
-        regionTree.national.avgScore = avgScore;
-      } else if (classified.level === 'municipality') {
-        // 直辖市与省级同层级
-        regionTree.municipalities[classified.name] = {
-          name: classified.name,
-          count: stats.count,
-          avgScore: avgScore,
-          type: 'municipality'
-        };
-      } else if (classified.level === 'province') {
-        const provinceName = classified.name;
-        if (!regionTree.provinces[provinceName]) {
-          regionTree.provinces[provinceName] = {
-            name: provinceName,
-            count: 0,
-            avgScore: 0,
-            children: [],
-            hasProvincialNews: false
-          };
-        }
-
-        // 纯省级名称（如"湖南"）算作省级新闻
-        if (classified.isShortName) {
-          regionTree.provinces[provinceName].children.push({
-            name: '省级',
-            count: stats.count,
-            avgScore: avgScore,
-            type: 'provincial'
-          });
-          regionTree.provinces[provinceName].hasProvincialNews = true;
-        }
-        regionTree.provinces[provinceName].count += stats.count;
-      } else if (classified.level === 'city') {
-        const provinceName = getCityProvince(regionName) || '其他';
-        if (!regionTree.provinces[provinceName]) {
-          regionTree.provinces[provinceName] = {
-            name: provinceName,
-            count: 0,
-            avgScore: 0,
-            children: [],
-            hasProvincialNews: false
-          };
-        }
-        regionTree.provinces[provinceName].children.push({
-          name: regionName,
-          count: stats.count,
-          avgScore: avgScore,
-          type: 'city'
-        });
-        regionTree.provinces[provinceName].count += stats.count;
-      }
-    });
-
-    // 计算各省份平均分
-    Object.values(regionTree.provinces).forEach(province => {
-      if (province.children.length > 0) {
-        const totalScore = province.children.reduce((sum, child) => sum + parseFloat(child.avgScore || 0) * child.count, 0);
-        province.avgScore = (totalScore / province.count).toFixed(2);
-      }
-    });
-
-    res.json(regionTree);
-  } catch (error) {
-    console.error('获取地域列表失败:', error);
-    res.status(500).json({ error: '获取地域列表失败', details: error.message });
-  }
-});
-
-// 按地域获取新闻
-app.get('/api/policy/region-news', async (req, res) => {
-  try {
-    const {
-      region,
-      regionLevel = 'city', // 'national' | 'province' | 'city' | 'municipality' | 'provincial'
-      startDate,
-      endDate,
-      page = 1,
-      pageSize = 20,
-      sortBy = 'fetchdate',
-      order = 'desc'
-    } = req.query;
-
-    if (!region) {
-      return res.status(400).json({ error: '地域参数必填' });
+    } catch (error) {
+      res.status(error.status || 500).json({error:error.status ? error.message : '报告生成失败，请重试；输入过长时请缩小范围'});
     }
-
-    const validSortFields = ['fetchdate', 'score', 'title', 'source'];
-    const sortField = validSortFields.includes(sortBy) ? sortBy : 'fetchdate';
-    const sortOrder = order.toLowerCase() === 'asc' ? 'ASC' : 'DESC';
-
-    // 构建查询条件
-    let whereClause = 'WHERE keyword = ? AND score >= 3';
-    const params = ['公积金'];
-
-    if (regionLevel === 'national') {
-      whereClause += ' AND region = ?';
-      params.push('全国');
-    } else if (regionLevel === 'province') {
-      // 省级查询：包含该省省级新闻和下属所有城市的新闻
-      const cities = provinceCityMap[region] || [];
-      // 纯省级名称（如"湖南"）也要匹配
-      const shortProvinceName = region.replace('省', '').replace('自治区', '').replace('特别行政区', '');
-      const regionConditions = [
-        `region = ?`,
-        `region LIKE ?`,  // 匹配纯省级名称
-        ...cities.map(() => 'region LIKE ?')  // 使用LIKE匹配多地域中的城市
-      ];
-      whereClause += ` AND (${regionConditions.join(' OR ')})`;
-      params.push(region, `%${shortProvinceName}%`, ...cities.map(() => `%|%`));
-      // 重新构建params，需要更精确的匹配
-      params.length = 1; // 重置params
-      params.push(region);
-      // 纯省级名称匹配（region字段完全等于或包含在|分隔的列表中）
-      params.push(shortProvinceName);
-      // 城市匹配（城市名可能在多地域字段中）
-      cities.forEach(city => params.push(city));
-
-      // 重新构建SQL
-      const cityConditions = cities.map(() => `
-        region = ? OR
-        region LIKE CONCAT('%', ?, '%') OR
-        region LIKE CONCAT('%', ?, '|%') OR
-        region LIKE CONCAT('%|', ?, '%')
-      `).join(' OR ');
-
-      whereClause = `WHERE keyword = ? AND (
-        region = ? OR
-        region = ? OR
-        ${cityConditions ? cityConditions : '1=0'}
-      )`;
-
-      // 重新构建params
-      const newParams = ['公积金', region, shortProvinceName];
-      cities.forEach(city => {
-        newParams.push(city, city, city, city);
-      });
-      params.length = 0;
-      params.push(...newParams);
-
-    } else if (regionLevel === 'municipality') {
-      // 直辖市查询
-      const shortName = region.replace('市', '');
-      whereClause += ` AND (region = ? OR region = ? OR region LIKE ? OR region LIKE ? OR region LIKE ?)`;
-      params.push(region, shortName, `%${region}%`, `%${shortName}%`, `%${shortName}|%`);
-    } else if (regionLevel === 'provincial') {
-      // 纯省级新闻（如"湖南"而非"湖南省"）
-      const shortName = region.replace('省', '').replace('自治区', '').replace('特别行政区', '');
-      whereClause += ` AND (region = ? OR region LIKE ? OR region LIKE ? OR region LIKE ?)`;
-      params.push(shortName, `%${shortName}|%`, `%|${shortName}%`, `%|${shortName}|%`);
-    } else {
-      // 市级查询（支持多地域匹配）
-      // 使用 CONCAT('|', region, '|') 技巧来处理 | 分隔的多地域字段
-      // 例如：region='湖南|娄底' -> '|湖南|娄底|'，可以匹配 '%|娄底|%'
-      whereClause += ` AND (
-        region = ? OR
-        region LIKE CONCAT(?, '|%') OR
-        region LIKE CONCAT('%|', ?) OR
-        region LIKE CONCAT('%|', ?, '|%') OR
-        CONCAT('|', region, '|') LIKE CONCAT('%|', ?, '|%')
-      )`;
-      params.push(region, region, region, region, region);
+  });
+  app.post(`${prefix}/export-pdf`, async (req,res) => {
+    if (!requirePageRequest(req,res,[page])) return;
+    const {snapshot,reportContent,exportSignature}=req.body || {};
+    if (!snapshot || snapshot.reportKind!==reportKind || typeof reportContent!=='string' || !reportContent.trim() ||
+        exportSignature!==signSessionPayload(`fund-report:${JSON.stringify({snapshot,reportContent})}`)) {
+      return res.status(400).json({error:'导出快照无效，请重新生成报告后导出'});
     }
-
-    // 过滤国外数据
-    const foreignExcludes = foreignRegions.map(() => 'region NOT LIKE ?').join(' AND ');
-    if (foreignRegions.length > 0) {
-      whereClause += ` AND (${foreignExcludes})`;
-      foreignRegions.forEach(fr => params.push(`%${fr}%`));
+    try {
+      const title=reportKind==='business'?`公积金业务政策报告 · ${snapshot.businessTopic}`:'地区政策报告';
+      const payload={...snapshot,...snapshot.filters,title,reportContent,regions:snapshot.filters.regions.map(x=>x.label)};
+      const pdf=await renderRegionPolicyReportPdf(payload);
+      const filename=buildRegionPolicyReportPdfFilename(payload);
+      res.setHeader('Content-Type','application/pdf');
+      res.setHeader('Content-Disposition',buildAttachmentDisposition(filename));
+      res.send(pdf);
+    } catch (error) {
+      res.status(error?.code==='PDF_RENDERER_UNAVAILABLE'?503:500).json({error:'PDF 生成失败，请检查渲染器后重试'});
     }
-
-    if (startDate && endDate) {
-      whereClause += ' AND fetchdate >= ? AND fetchdate < ?';
-      params.push(startDate, getNextDateYmd(endDate));
-    }
-
-    // 查询总数
-    const countSql = `SELECT COUNT(*) as total FROM scored_news ${whereClause}`;
-    const [countRows] = await pool.query(countSql, params);
-    const total = countRows[0].total;
-
-    // 查询数据
-    const dataSql = `
-      SELECT
-        id, title, content, link, source, score,
-        keyword, search_keyword, fetchdate, wordcount,
-        sourceapi, short_summary, region
-      FROM scored_news
-      ${whereClause}
-      ORDER BY ${sortField} ${sortOrder}
-      LIMIT ? OFFSET ?
-    `;
-    const dataParams = [...params, parseInt(pageSize), (parseInt(page) - 1) * parseInt(pageSize)];
-    const [rows] = await pool.query(dataSql, dataParams);
-
-    res.json({
-      rows,
-      total,
-      page: parseInt(page),
-      pageSize: parseInt(pageSize),
-      totalPages: Math.ceil(total / parseInt(pageSize))
-    });
-  } catch (error) {
-    console.error('获取地域新闻失败:', error);
-    res.status(500).json({ error: '获取地域新闻失败', details: error.message });
-  }
-});
-
-app.get('/api/policy/region-report/news', async (req, res) => {
-  try {
-    const { startDate, endDate } = req.query;
-    const selections = normalizeRegionSelections(req.query.regions || req.query.selections);
-
-    if (!startDate || !endDate) {
-      return res.status(400).json({ error: '请选择完整日期区间' });
-    }
-
-    if (new Date(startDate) > new Date(endDate)) {
-      return res.status(400).json({ error: '开始日期不能晚于结束日期' });
-    }
-
-    if (selections.length === 0) {
-      return res.status(400).json({ error: '请至少选择一个地区' });
-    }
-
-    const rawRows = await fetchRegionPolicyRows({ startDate, endDate, selections });
-    const rows = rawRows.map((row) => {
-      const analysis = analyzeRegionPolicyNews(row);
-      return {
-        ...row,
-        includedInAnalysis: analysis.includedInAnalysis,
-        filterReason: analysis.filterReason,
-        filterSource: 'auto',
-      };
-    });
-
-    const filteredNewsCount = rows.filter((item) => item.includedInAnalysis).length;
-    const excludedNewsCount = rows.length - filteredNewsCount;
-
-    res.json({
-      startDate,
-      endDate,
-      regions: selections.map((item) => ({
-        name: item.name,
-        level: item.level,
-        label: item.label,
-      })),
-      rawNewsCount: rows.length,
-      filteredNewsCount,
-      excludedNewsCount,
-      rows,
-    });
-  } catch (error) {
-    console.error('获取地区政策报告新闻失败:', error);
-    res.status(500).json({ error: '获取地区政策报告新闻失败', details: error.message });
-  }
-});
-
-app.post('/api/policy/region-report/generate', async (req, res) => {
-  try {
-    const modelConfig = getWeeklyReportModel();
-    const { startDate, endDate, regions, promptId, userPrompt, manualOverrides = {} } = req.body || {};
-    const selections = normalizeRegionSelections(regions);
-
-    if (!startDate || !endDate) {
-      return res.status(400).json({ error: '请选择完整日期区间' });
-    }
-
-    if (new Date(startDate) > new Date(endDate)) {
-      return res.status(400).json({ error: '开始日期不能晚于结束日期' });
-    }
-
-    if (selections.length === 0) {
-      return res.status(400).json({ error: '请至少选择一个地区' });
-    }
-
-    const rawRows = await fetchRegionPolicyRows({ startDate, endDate, selections });
-    const rows = rawRows
-      .map((row) => {
-        const analysis = analyzeRegionPolicyNews(row);
-        return {
-          ...row,
-          includedInAnalysis: analysis.includedInAnalysis,
-          filterReason: analysis.filterReason,
-          filterSource: 'auto',
-        };
-      })
-      .map((row) => applyRegionPolicyManualOverride(row, manualOverrides));
-
-    const filteredRows = rows.filter((item) => item.includedInAnalysis);
-    const rawNewsCount = rows.length;
-    const filteredNewsCount = filteredRows.length;
-    const excludedNewsCount = rawNewsCount - filteredNewsCount;
-
-    if (filteredRows.length === 0) {
-      return res.status(400).json({ error: '当前筛选范围无可分析政策新闻' });
-    }
-
-    const promptConfig = promptStore.getRegionLibrary();
-    const prompts = Array.isArray(promptConfig.prompts) ? promptConfig.prompts : [];
-    const promptById = promptId ? prompts.find((item) => item.id === promptId) : null;
-    const recommendedId = selections.length === 1 ? 'single-region-default' : 'multi-region-default';
-    const selectedPrompt =
-      promptById ||
-      prompts.find((item) => item.id === recommendedId) ||
-      prompts.find((item) => item.isDefault) ||
-      prompts[0];
-
-    if (!selectedPrompt) {
-      return res.status(500).json({ error: '地区政策报告 Prompt 配置不存在' });
-    }
-
-    const analysisMode = selections.length === 1 ? 'single-region-timeline' : 'multi-region-comparison';
-    const userPromptTemplate = selections.length === 1
-      ? selectedPrompt.userPromptSingle
-      : selectedPrompt.userPromptMulti;
-
-    const regionBlocks = selections.map((selection) => {
-      const selectionNews = filteredRows
-        .filter((row) =>
-          (row.matchedSelections || []).some(
-            (item) => item.name === selection.name && item.level === selection.level
-          )
-        )
-        .sort((a, b) => new Date(a.fetchdate || 0) - new Date(b.fetchdate || 0));
-
-      return buildRegionBlock(selection, selectionNews);
-    }).join('\n\n');
-
-    const finalUserPrompt = fillPromptTemplate(userPromptTemplate, {
-      analysisMode,
-      startDate,
-      endDate,
-      regions: selections.map((item) => item.label).join('、'),
-      rawNewsCount: String(rawNewsCount),
-      filteredNewsCount: String(filteredNewsCount),
-      excludedNewsCount: String(excludedNewsCount),
-      usertopic: String(userPrompt || '无特别要求'),
-      regionBlocks,
-    });
-
-    const reportContent = await completeChat([
-      { role: 'system', content: selectedPrompt.systemPrompt },
-      { role: 'user', content: finalUserPrompt },
-    ], { modelConfig });
-
-    if (!reportContent) {
-      throw new Error('DeepSeek 未返回有效报告内容');
-    }
-
-    res.json({
-      reportContent,
-      debug: {
-        systemPrompt: selectedPrompt.systemPrompt,
-        userPrompt: finalUserPrompt,
-      },
-      meta: {
-        startDate,
-        endDate,
-        regions: selections.map((item) => item.label),
-        regionCount: selections.length,
-        rawNewsCount,
-        filteredNewsCount,
-        excludedNewsCount,
-        promptVersion: selectedPrompt.name,
-        promptId: selectedPrompt.id,
-        modelName: modelConfig.model,
-      },
-    });
-  } catch (error) {
-    console.error('生成地区政策报告失败:', error);
-    if (isContextLengthErrorText(error.message)) {
-      return res.status(400).json({
-        error: '输入内容超出模型上下文限制',
-        details: '请缩短日期区间、减少地区数量，或减少纳入分析的新闻后重试。',
-      });
-    }
-    res.status(500).json({
-      error: '生成地区政策报告失败',
-      details: error.message,
-    });
-  }
-});
-
-app.post('/api/policy/region-report/export-pdf', async (req, res) => {
-  const {
-    title,
-    startDate,
-    endDate,
-    regions,
-    promptVersionName,
-    modelName,
-    rawNewsCount,
-    filteredNewsCount,
-    excludedNewsCount,
-    reportContent,
-    newsReferences,
-  } = req.body || {};
-
-  if (!title || !startDate || !endDate || !reportContent) {
-    return res.status(400).json({ error: '缺少地区政策报告导出 PDF 所需参数' });
-  }
-
-  try {
-    const pdfBuffer = await renderRegionPolicyReportPdf({
-      title,
-      startDate,
-      endDate,
-      regions,
-      promptVersionName,
-      modelName,
-      rawNewsCount,
-      filteredNewsCount,
-      excludedNewsCount,
-      reportContent,
-      newsReferences,
-    });
-
-    const filename = buildRegionPolicyReportPdfFilename({
-      title,
-      startDate,
-    });
-
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Length', pdfBuffer.length);
-    res.setHeader('Content-Disposition', buildAttachmentDisposition(filename));
-    res.send(pdfBuffer);
-  } catch (error) {
-    console.error('地区政策报告 PDF 导出失败:', error);
-
-    if (error instanceof PdfRendererUnavailableError || error?.code === 'PDF_RENDERER_UNAVAILABLE') {
-      return res.status(503).json({
-        error: 'PDF 引擎不可用',
-        details: error.message,
-      });
-    }
-
-    return res.status(500).json({
-      error: '地区政策报告 PDF 生成失败',
-      details: error.message,
-    });
-  }
-});
+  });
+}
 
 // 静态托管 dist 目录
 app.use(express.static(path.join(__dirname, 'dist')));

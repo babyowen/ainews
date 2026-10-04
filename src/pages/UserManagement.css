@@ -351,3 +351,4 @@
     grid-template-columns: 1fr;
   }
 }
+.user-management-page .um-group-toggle { margin-left: 12px; background: transparent; border: 0; color: var(--kd-accent-dark); cursor: pointer; font-size: 12px; }

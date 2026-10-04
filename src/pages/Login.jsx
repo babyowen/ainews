@@ -3,6 +3,7 @@ import { Navigate, useNavigate } from 'react-router-dom';
 import { Gauge } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 import './Login.css';
+import {getDefaultAccessiblePath} from '../config/navigation';
 
 export default function LoginPage() {
   const { isAuthenticated, login, user } = useAuth();
@@ -13,7 +14,7 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
 
   if (isAuthenticated) {
-    return <Navigate to={user?.defaultPath || '/summary'} replace />;
+    return <Navigate to={getDefaultAccessiblePath(user) || '/summary'} replace />;
   }
 
   const handleSubmit = async (event) => {
@@ -22,7 +23,7 @@ export default function LoginPage() {
     setLoading(true);
     try {
       const profile = await login({ username, password });
-      navigate(profile.defaultPath || '/summary', { replace: true });
+      navigate(getDefaultAccessiblePath(profile) || '/summary', { replace: true });
     } catch (err) {
       setError(err.message || '登录失败');
     } finally {

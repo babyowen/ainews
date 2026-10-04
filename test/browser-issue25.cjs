@@ -1,0 +1,104 @@
+// Run after npm run build. Local static UI + actual handlers with fake SQL/model only.
+const assert=require('node:assert/strict');
+const fs=require('node:fs');const path=require('node:path');
+const express=require('express');const {chromium}=require('playwright');
+const {fundApp}=require('./helpers/fundApp.cjs');
+const root=path.resolve(__dirname,'..');
+const output=path.join(root,'.superpowers/sdd/2026-10-03-issue-25-business-types/qa');
+const cleanup=[];
+(async()=>{
+ fs.mkdirSync(output,{recursive:true});
+ const fixture=await fundApp({after:fn=>cleanup.push(fn)});
+ const app=express();app.use(express.static(path.join(root,'dist')));app.get('*',(_req,res)=>res.sendFile(path.join(root,'dist/index.html')));
+ const server=await new Promise(resolve=>{const s=app.listen(0,'127.0.0.1',()=>resolve(s));});cleanup.push(()=>new Promise(resolve=>server.close(resolve)));
+ const origin=`http://127.0.0.1:${server.address().port}`;
+ const browser=await chromium.launch({headless:true});cleanup.push(()=>browser.close());
+ const page=await browser.newPage({viewport:{width:1440,height:1000},timezoneId:'Asia/Shanghai'});
+ await page.clock.setFixedTime(new Date('2026-10-03T10:00:00+08:00'));
+ const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ const requests=[];
+ await page.addInitScript(()=>sessionStorage.setItem('keydigest_auth_token','offline-ui-test'));
+ await page.route('**/api/**',async route=>{
+   const req=route.request();const url=new URL(req.url());requests.push({url:url.pathname,query:url.searchParams.toString(),headers:req.headers()});
+   let result;
+   if(url.pathname==='/api/scored-news') result={status:200,body:{rows:fixture.rows.filter(r=>r.content),total:4}};
+   else if(url.pathname==='/api/keywords') result={status:200,body:['公积金','养老']};
+   else result=await fixture.request(req.method(),url.pathname+url.search,req.postData()?JSON.parse(req.postData()):undefined);
+   if(url.pathname==='/api/provident-fund/news'&&url.searchParams.get('startDate')==='2026-10-01') await new Promise(r=>setTimeout(r,350));
+   await route.fulfill({status:result.status,contentType:'application/json',body:JSON.stringify(result.body)}).catch(()=>{});
+ });
+ const go=async url=>{await page.goto(origin+url);};
+ await go('/summary');await page.locator('.nt tbody tr').first().waitFor();
+ assert.equal(await page.locator('.summary-page .pf-tags').count(),0);
+ assert.ok(!(await page.locator('.nt thead').innerText()).includes('地区'));
+ assert.ok((await page.locator('.nt tbody').innerText()).includes('公积金'));
+ await page.locator('.summary-filter-panel select').first().selectOption('公积金');
+ await page.locator('.nt tbody tr').first().waitFor();assert.ok(!(await page.locator('.nt thead').innerText()).includes('业务'));
+ await page.locator('.summary-filter-panel select').first().selectOption('');
+ await page.locator('.nt tbody tr').first().waitFor();
+ await page.screenshot({path:path.join(output,'global-daily.png'),fullPage:true});
+ await go('/provident-fund/news');await page.locator('.pf-news-row').first().waitFor();
+ assert.equal(await page.getByLabel('新闻日期').inputValue(),'2026-10-02');
+ assert.ok(await page.locator('.pf-news-row .pf-tag').count());
+ const dailyRequest=requests.find(x=>x.url==='/api/provident-fund/news');assert.ok(dailyRequest.headers.authorization);
+ await page.getByLabel('新闻日期').fill('2026-10-01');
+ await page.getByLabel('新闻日期').fill('2026-10-02');
+ await page.waitForTimeout(500);assert.ok(await page.locator('.pf-news-row').count());
+ await page.screenshot({path:path.join(output,'fund-daily.png'),fullPage:true});
+ await page.locator('.pf-news-row .pf-tag').filter({hasText:'贷款 · 额度'}).first().click();
+ await page.waitForURL('**/provident-fund/business?**');await page.locator('.pf-news-row').first().waitFor();
+ assert.equal(new URL(page.url()).searchParams.get('startDate'),'2026-10-02');
+ await page.reload();await page.locator('.pf-news-row').first().waitFor();assert.ok((await page.locator('.pf-results-heading').innerText()).includes('2 条'));
+ const filters={startDate:'2026-10-01',endDate:'2026-10-03',regions:[{name:'南京',level:'city'},{name:'苏州',level:'city'}],businessTypes:[{level1:'贷款'}]};
+ const query=new URLSearchParams(Object.entries(filters).map(([k,v])=>[k,typeof v==='string'?v:JSON.stringify(v)]));
+ await go('/provident-fund/business?'+query);await page.locator('.pf-news-row').first().waitFor();
+ await page.getByRole('link',{name:'业务政策 AI 报告 →'}).click();
+ await page.getByRole('button',{name:'预览新闻',exact:true}).click();await page.getByLabel('纳入 N1').waitFor();
+ await page.getByLabel('纳入 N2').uncheck();
+ await page.getByRole('button',{name:'生成报告',exact:true}).click();await page.getByRole('button',{name:'导出 PDF',exact:true}).waitFor();
+ assert.equal(fixture.calls.length,1);assert.equal(await page.locator('.pf-references li').count(),1);
+ await page.locator('.pf-markdown a').first().click();assert.ok(page.url().includes('#fund-source-1'));
+ await page.screenshot({path:path.join(output,'business-report.png'),fullPage:true});
+ await page.getByLabel('补充分析要求').fill('调整关注点');assert.equal(await page.getByRole('button',{name:'导出 PDF',exact:true}).count(),0);
+ await page.getByRole('button',{name:'管理 Prompt',exact:true}).click();
+ const editor=page.getByRole('region',{name:'Prompt 编辑'});await editor.waitFor();
+ await editor.getByLabel('名称',{exact:true}).fill('浏览器测试模板');await editor.getByRole('button',{name:'保存版本',exact:true}).click();await editor.waitFor({state:'hidden'});
+ await go('/policy/region-report?'+new URLSearchParams({...filters,regions:JSON.stringify([filters.regions[0]]),businessTypes:'[]'}));
+ await page.getByRole('button',{name:'预览新闻',exact:true}).click();await page.getByLabel('纳入 N1').waitFor();
+ await page.getByRole('button',{name:'生成报告',exact:true}).click();await page.getByRole('button',{name:'导出 PDF',exact:true}).waitFor();
+ await go('/provident-fund/business?'+query);await page.locator('.pf-news-row').first().waitFor();
+ await page.screenshot({path:path.join(output,'business-browser.png'),fullPage:true});
+ await page.setViewportSize({width:390,height:844});
+ await page.getByRole('button',{name:'打开菜单',exact:true}).click();
+ await page.getByRole('button',{name:'扬州公积金专区',exact:true}).click();
+ assert.ok(await page.getByRole('link',{name:'周报政策对比',exact:true}).isVisible());
+ await page.screenshot({path:path.join(output,'mobile-navigation.png'),fullPage:true});
+ await page.getByRole('button',{name:'关闭菜单',exact:true}).click();
+ assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth));
+ await page.screenshot({path:path.join(output,'mobile-business.png'),fullPage:true});
+ // Pagination and empty results use the same real query service and synthetic pool.
+ await page.setViewportSize({width:1440,height:1000});
+ fixture.rows.push(...Array.from({length:25},(_,i)=>({...fixture.rows[0],id:100+i})));
+ await go('/provident-fund/business?'+query);await page.getByRole('button',{name:'下一页',exact:true}).click();
+ await page.waitForURL('**page=2');await page.getByText('第 2 / 2 页',{exact:true}).waitFor();
+ await page.getByLabel('开始日期',{exact:true}).fill('2026-10-03');await page.getByText('当前条件下暂无新闻',{exact:true}).waitFor();
+ assert.equal(new URL(page.url()).searchParams.get('page'),null);
+ // Render every restricted menu directly from the same catalog, and exercise safe homepage.
+ for (const routes of [['/policy/regions'],['/provident-fund/business'],['/provident-fund/news'],['/policy/current','/policy/comparison'],['/provident-fund/news','/policy/regions','/policy/region-report','/provident-fund/business','/provident-fund/business-report','/policy/current','/policy/comparison'],[]]) {
+   const restricted=await fundApp({after:fn=>cleanup.push(fn)},{user:{role:'restricted',keywords:['公积金'],routes}});
+   await page.unroute('**/api/**');
+   await page.route('**/api/**',async route=>{
+     const req=route.request(),url=new URL(req.url());
+     const result=await restricted.request(req.method(),url.pathname+url.search,req.postData()?JSON.parse(req.postData()):undefined);
+     await route.fulfill({status:result.status,contentType:'application/json',body:JSON.stringify(result.body)});
+   });
+   await page.setViewportSize({width:1440,height:1000});await go('/');
+   if(!routes.length){await page.getByText('暂无可访问功能，请联系管理员。').waitFor();continue;}
+   await page.locator('.sidebar-user strong').waitFor();
+   const actual=await page.locator('.sidebar nav a').evaluateAll(nodes=>nodes.map(n=>n.getAttribute('href')));
+   assert.deepEqual(actual.sort(),routes.slice().sort());
+ }
+ assert.deepEqual(errors,[]);
+ fs.writeFileSync(path.join(output,'browser-checks.json'),JSON.stringify({success:true,checks:['global generic fields','fund default day and tags','race discards old response','URL reload','daily tag jump','shared reports and manual overrides','citation anchors','report invalidation','admin runtime prompt edit','mobile deep menu','no horizontal overflow','six permission combinations','pagination','empty results reset page'],requests:requests.length,modelCalls:fixture.calls.length},null,2));
+ console.log('Browser QA passed. Screenshots:',output);
+})().catch(e=>{console.error(e);process.exitCode=1;}).finally(async()=>{for(const fn of cleanup.reverse())await fn();});

@@ -1,3 +1,4 @@
+import {useAuth} from '../../auth/AuthContext';
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { FileText, ArrowRight, Check, Loader2, Download, FileJson, Scale } from 'lucide-react';
 import html2canvas from 'html2canvas';
@@ -685,6 +686,7 @@ const STEPS = [
 ];
 
 const WeeklyComparison = () => {
+  const {apiFetch}=useAuth();
   const [currentStep, setCurrentStep] = useState('select');
   const [loading, setLoading] = useState(false);
   const [reports, setReports] = useState([]);
@@ -717,7 +719,7 @@ const WeeklyComparison = () => {
 
   const fetchPolicyModels = async () => {
     try {
-      const res = await fetch('/api/policy/models');
+      const res = await apiFetch('/api/policy/models');
       if (!res.ok) return;
       const list = await res.json();
       setPolicyModels(Array.isArray(list) ? list : []);
@@ -735,7 +737,7 @@ const WeeklyComparison = () => {
   const fetchReports = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/reports/history?keyword=公积金&limit=20');
+      const res = await apiFetch('/api/reports/history?keyword=公积金&limit=20');
       const data = await res.json();
       setReports(data.data || []);
     } catch (err) {
@@ -769,7 +771,7 @@ const WeeklyComparison = () => {
         endDate: end,
         minScore: '4'
       });
-      const res = await fetch(`/api/weekly-news?${params.toString()}`);
+      const res = await apiFetch(`/api/weekly-news?${params.toString()}`);
       if (!res.ok) throw new Error('获取新闻失败');
       const data = await res.json();
       const list = Array.isArray(data) ? data : [];
@@ -942,7 +944,7 @@ const WeeklyComparison = () => {
       // 1. Get Preview Prompt immediately
       try {
         const previewContent = useNewsMode ? digestText : null;
-        const previewRes = await fetch('/api/policy/preview-prompt', {
+        const previewRes = await apiFetch('/api/policy/preview-prompt', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ 
@@ -960,7 +962,7 @@ const WeeklyComparison = () => {
 
       // 2. Start actual extraction
       if (!useNewsMode) {
-        const res = await fetch('/api/policy/extract', {
+        const res = await apiFetch('/api/policy/extract', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ reportId: selectedReport.id })
@@ -1009,7 +1011,7 @@ const WeeklyComparison = () => {
             maxSummaryChars,
             includeLink
           });
-          const res = await fetch('/api/policy/extract', {
+          const res = await apiFetch('/api/policy/extract', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ reportContent: groupDigest })
@@ -1088,7 +1090,7 @@ const WeeklyComparison = () => {
     try {
       // 1. Get Preview Prompt immediately
       try {
-        const previewRes = await fetch('/api/policy/preview-prompt', {
+        const previewRes = await apiFetch('/api/policy/preview-prompt', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ 
@@ -1105,7 +1107,7 @@ const WeeklyComparison = () => {
       }
 
       // 2. Start actual comparison
-      const res = await fetch('/api/policy/compare', {
+      const res = await apiFetch('/api/policy/compare', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ extractedPolicy })
@@ -1182,7 +1184,7 @@ const WeeklyComparison = () => {
 
     try {
       const fallbackFilename = `${DEFAULT_POLICY_COMPARISON_TITLE}_${toLocalYMD(selectedReport.start_date || new Date())}.pdf`;
-      const response = await fetch('/api/policy/comparison/export-pdf', {
+      const response = await apiFetch('/api/policy/comparison/export-pdf', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

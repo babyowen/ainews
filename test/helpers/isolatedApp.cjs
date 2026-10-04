@@ -9,8 +9,8 @@ const actualRequire = createRequire(path.join(root, 'server.cjs'));
 
 // Execute the real Express handlers with test-owned files and SQL. Never load .env,
 // listen on a port, register cron jobs, or connect to a real database/model provider.
-function createIsolatedApp({ configDir, dataDir, readiness = false, env = {} }) {
-  const pool = { async query(sql) {
+function createIsolatedApp({ configDir, dataDir, readiness = false, env = {}, pool: suppliedPool, model, pdfRenderer }) {
+  const pool = suppliedPool || { async query(sql) {
     if (sql.includes('SELECT DISTINCT keyword FROM scored_news')) return [[{ keyword: '公积金' }, { keyword: '养老' }]];
     if (readiness && (/CREATE TABLE IF NOT EXISTS auto_report_log|SHOW COLUMNS FROM auto_report_log|ALTER TABLE auto_report_log|SELECT 1 AS ready/.test(sql))) return [[]];
     throw new Error(`Unexpected SQL in isolated test: ${sql}`);
@@ -29,6 +29,8 @@ function createIsolatedApp({ configDir, dataDir, readiness = false, env = {} }) 
       ...actualRequire(name),
       resolveAppDataDir: () => dataDir,
     };
+    if (name === './server/pdf/renderRegionPolicyReportPdf.cjs' && pdfRenderer) return pdfRenderer;
+    if (name === './services/modelClient.cjs' && model) return {redactError:String,...model};
     if (name === './services/modelClient.cjs') return {
       redactError: String,
       async completeChat() { throw new Error('Tests must not call a model provider'); },
@@ -48,12 +50,15 @@ function createIsolatedApp({ configDir, dataDir, readiness = false, env = {} }) 
     const layer = app._router.stack.find(layer => layer.route?.methods[method.toLowerCase()] && layer.match(url.pathname));
     if (!layer) throw new Error(`Route not found: ${method} ${url.pathname}`);
     const headers = token ? { authorization: `Bearer ${token}` } : {};
-    const req = { body, headers, params: layer.params, query: Object.fromEntries(url.searchParams), get: name => headers[name.toLowerCase()] };
+    const query = {};
+    for (const key of new Set(url.searchParams.keys())) { const values=url.searchParams.getAll(key); query[key]=values.length>1?values:values[0]; }
+    const req = { body, headers, params: layer.params, query, get: name => headers[name.toLowerCase()] };
     const res = {
       statusCode: 200,
       status(code) { this.statusCode = code; return this; },
       json(value) { this.body = value; return this; },
       setHeader() {},
+      send(value) { this.body=value; return this; },
     };
     await layer.route.stack[0].handle(req, res);
     return { status: res.statusCode, body: JSON.parse(JSON.stringify(res.body)) };

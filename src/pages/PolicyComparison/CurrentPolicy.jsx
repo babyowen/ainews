@@ -1,3 +1,4 @@
+import {useAuth} from '../../auth/AuthContext';
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import './CurrentPolicy.css';
@@ -411,6 +412,7 @@ const PolicyTreeEditor = ({ data, onChange }) => {
 
 // 页面入口
 export default function CurrentPolicy() {
+  const {apiFetch}=useAuth();
   const [data, setData] = useState(null);
   const [filename, setFilename] = useState('');
   const [lastUpdated, setLastUpdated] = useState('');
@@ -428,7 +430,10 @@ export default function CurrentPolicy() {
   const fetchLatestPolicy = async () => {
     setLoading(true);
     try {
-      const res = await axios.get('/api/policy/latest');
+      const response = await apiFetch('/api/policy/latest');
+      const payload=await response.json();
+      if(!response.ok) throw new Error(payload.error||'读取失败');
+      const res={data:payload};
       if (res.data.content) {
         setData(res.data.content);
         setFilename(res.data.filename);
@@ -449,7 +454,10 @@ export default function CurrentPolicy() {
     setMessage('');
 
     try {
-      const res = await axios.post('/api/policy/save', { content: data });
+      const response=await apiFetch('/api/policy/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({content:data})});
+      const payload=await response.json();
+      if(!response.ok)throw new Error(payload.error||'保存失败');
+      const res={data:payload};
 
       setMessage(`保存成功！已生成新版本: ${res.data.filename}`);
       setFilename(res.data.filename);

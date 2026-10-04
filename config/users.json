@@ -26,7 +26,10 @@
       "/policy/current",
       "/policy/comparison",
       "/policy/regions",
-      "/policy/region-report"
+      "/policy/region-report",
+      "/provident-fund/news",
+      "/provident-fund/business",
+      "/provident-fund/business-report"
     ]
   },
   {
@@ -45,7 +48,10 @@
       "/policy/current",
       "/policy/comparison",
       "/policy/regions",
-      "/policy/region-report"
+      "/policy/region-report",
+      "/provident-fund/news",
+      "/provident-fund/business",
+      "/provident-fund/business-report"
     ]
   },
   {
