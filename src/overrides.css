@@ -2,7 +2,6 @@
 .score-edit-page,
 .word-count-stats,
 .source-analysis-page,
-.weekly-comparison-container,
 .report-generator {
   max-width: 1440px;
   padding: 24px;
@@ -10,8 +9,7 @@
 }
 
 .score-edit-page .page-header,
-.word-count-stats .page-header,
-.weekly-comparison-container .header-section {
+.word-count-stats .page-header {
   position: relative;
   text-align: left;
   margin: 24px auto 18px;
@@ -27,8 +25,7 @@
 }
 
 .score-edit-page .page-header::before,
-.word-count-stats .page-header::before,
-.weekly-comparison-container .header-section::before {
+.word-count-stats .page-header::before {
   content: "";
   position: absolute;
   inset: 0;
@@ -41,8 +38,7 @@
 }
 
 .score-edit-page .page-header::after,
-.word-count-stats .page-header::after,
-.weekly-comparison-container .header-section::after {
+.word-count-stats .page-header::after {
   content: "";
   position: absolute;
   right: 28px;
@@ -56,15 +52,13 @@
 }
 
 .score-edit-page .page-header > *,
-.word-count-stats .page-header > *,
-.weekly-comparison-container .header-section > * {
+.word-count-stats .page-header > * {
   position: relative;
   z-index: 1;
 }
 
 .score-edit-page .page-header h1,
-.word-count-stats .page-header h1,
-.weekly-comparison-container .header-section h1 {
+.word-count-stats .page-header h1 {
   margin: 0;
   color: #fff;
   background: none;
@@ -75,8 +69,7 @@
 }
 
 .score-edit-page .page-header p,
-.word-count-stats .page-header p,
-.weekly-comparison-container .header-section p {
+.word-count-stats .page-header p {
   margin: 8px 0 0;
   color: rgba(255, 255, 255, 0.72);
   font-size: 14px;
@@ -86,11 +79,7 @@
 .score-edit-page .news-item,
 .word-count-stats .date-range-selector,
 .word-count-stats .legend-container,
-.word-count-stats .calendar-container,
-.weekly-comparison-container .step-content,
-.weekly-comparison-container .news-picker,
-.weekly-comparison-container .report-card,
-.weekly-comparison-container .policy-model-selector {
+.word-count-stats .calendar-container {
   border: 1px solid var(--kd-line);
   border-radius: var(--kd-radius-lg);
   background: #fff;
@@ -99,8 +88,7 @@
 }
 
 .score-edit-page .confirm-btn,
-.score-edit-page .modify-btn,
-.weekly-comparison-container .action-btn.btn-primary {
+.score-edit-page .modify-btn {
   background: var(--kd-accent);
   color: #fff;
 }
@@ -115,8 +103,7 @@
   color: var(--kd-ink);
 }
 
-.score-edit-page .news-item:hover,
-.weekly-comparison-container .report-card:hover {
+.score-edit-page .news-item:hover {
   border-color: var(--kd-line-strong);
   box-shadow: var(--kd-shadow);
 }
@@ -125,9 +112,7 @@
   color: var(--kd-ink);
 }
 
-.word-count-stats .data-info,
-.weekly-comparison-container .source-btn.active,
-.weekly-comparison-container .report-card.selected {
+.word-count-stats .data-info {
   border-radius: 999px;
   background: var(--kd-accent-soft);
   color: var(--kd-accent-dark);
@@ -137,12 +122,6 @@
 .word-count-stats .week-header,
 .word-count-stats .week-summary-header {
   background: var(--kd-panel);
-}
-
-.weekly-comparison-container .step-item.active .step-circle {
-  border-color: var(--kd-accent);
-  background: var(--kd-accent);
-  color: #fff;
 }
 
 .password-protection {
@@ -177,7 +156,6 @@
 @media (max-width: 820px) {
   .score-edit-page,
   .word-count-stats,
-  .weekly-comparison-container,
   .report-generator {
     padding: 16px;
   }
