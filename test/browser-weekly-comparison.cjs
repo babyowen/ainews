@@ -1,0 +1,100 @@
+// UI workflow regression: fixture responses only, no database writes or model calls.
+const assert = require('node:assert/strict');
+const path = require('node:path');
+const fs = require('node:fs');
+const express = require('express');
+const { chromium } = require('playwright');
+const root = path.resolve(__dirname, '..');
+const output = path.join(root, '.superpowers/sdd/weekly-comparison/qa');
+const reports = Array.from({ length: 20 }, (_, i) => ({ id: i + 1, keyword: '公积金', start_date: `2026-09-${String(27 - i).padStart(2, '0')}`, end_date: '2026-10-03', news_count: 38, model_used: 'DeepSeek V4.1 Flash' }));
+const policy = { 政策领域: [{ 领域名称: '贷款', 政策类别: [{ 类别名称: '最高贷款额度', 政策明细: Array.from({ length: 18 }, (_, i) => ({ 明细项: `测试城市${i + 1}贷款额度`, 内容: '提高住房公积金贷款额度，具体适用条件以原文为准。', 依据文件: '测试政策文件', 子项: [{ 子项名称: '适用对象', 内容: '符合条件的缴存职工' }] })) }] }] };
+const comparison = '[[CITY|测试城市]]\n[[CATEGORY|最高贷款额度]]\n[[CARD|title=贷款额度调整|category=最高贷款额度]]\n[[BLOCK|local]]\n- 提高住房公积金贷款额度。\n[[BLOCK|yangzhou]]\n- 执行现行额度。\n[[BLOCK|diff]]\n- 需结合适用条件比较。\n[[/CARD]]\n[[/CATEGORY]]\n[[/CITY]]';
+(async () => {
+  fs.mkdirSync(output, { recursive: true });
+  const app = express(); app.use(express.static(path.join(root, 'dist'))); app.get('*', (_req, res) => res.sendFile(path.join(root, 'dist/index.html')));
+  const server = await new Promise(resolve => { const s = app.listen(0, '127.0.0.1', () => resolve(s)); });
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage({ viewport: { width: 1366, height: 768 } });
+    const errors = []; page.on('pageerror', e => errors.push(e.message));
+    let failExtraction = false, failComparison = false;
+    const extractionBodies = [];
+    await page.addInitScript(() => sessionStorage.setItem('keydigest_auth_token', 'offline-test'));
+    await page.route('**/api/**', async route => {
+      const req = route.request(), url = new URL(req.url()); let body = {}, status = 200;
+      if (url.pathname === '/api/auth/me') body = { user: { username: 'admin', role: 'admin', keywords: ['公积金'], routes: ['/policy/comparison'] } };
+      else if (url.pathname === '/api/reports/history') body = { data: reports };
+      else if (url.pathname === '/api/policy/models') body = [{ label: '测试模型', isDefault: true }];
+      else if (url.pathname === '/api/policy/preview-prompt') body = { systemPrompt: '测试提示词', userPrompt: '测试材料' };
+      else if (url.pathname === '/api/policy/extract') {
+        extractionBodies.push(req.postDataJSON()); await new Promise(r => setTimeout(r, 250));
+        status = failExtraction ? 502 : 200; body = failExtraction ? { error: '测试提取失败' } : { result: policy };
+      } else if (url.pathname === '/api/policy/compare') {
+        await new Promise(r => setTimeout(r, 250)); status = failComparison ? 502 : 200;
+        body = failComparison ? { error: '测试对比失败' } : { markdown: comparison };
+      } else if (url.pathname === '/api/weekly-news') {
+        const slow = url.searchParams.get('startDate') === reports[0].start_date;
+        await new Promise(r => setTimeout(r, slow ? 600 : 50));
+        body = [{ id: slow ? 101 : 202, title: slow ? '旧周新闻' : '新周新闻', short_summary: '公积金政策调整', score: 5 }];
+      }
+      await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) }).catch(() => {});
+    });
+    const next = page.getByRole('button', { name: '下一步：提取政策' });
+    const compare = page.getByRole('button', { name: '开始对比分析' });
+    const inViewport = async locator => { const b = await locator.boundingBox(); assert.ok(b && b.y >= 0 && b.y + b.height <= (await page.evaluate(() => innerHeight)), 'Primary action must be visible in the viewport'); };
+    await page.goto(`http://127.0.0.1:${server.address().port}/policy/comparison`);
+    await page.locator('.report-grid').waitFor();
+    await inViewport(next);
+    assert.ok(await next.isDisabled());
+    const options = page.getByRole('button', { name: /公积金周报/ });
+    await options.last().click();
+    await inViewport(next);
+    await options.first().scrollIntoViewIfNeeded();
+    const before = await options.first().boundingBox();
+    await options.first().click();
+    assert.equal(await options.first().getAttribute('aria-pressed'), 'true');
+    const after = await options.first().boundingBox(); assert.ok(Math.abs(after.height - before.height) < 1, 'Selection must not change card height');
+    await inViewport(next); assert.ok(await next.isEnabled());
+    await page.waitForTimeout(220); await page.screenshot({ path: path.join(output, 'select-desktop.png') });
+    await next.click();
+    await compare.waitFor();
+    await page.waitForFunction(() => document.querySelectorAll('.extraction-table tbody tr').length === 18);
+    await inViewport(compare); assert.ok(await compare.isEnabled());
+    assert.ok((await page.locator('.extraction-table').innerText()).includes('符合条件的缴存职工'));
+    await page.waitForTimeout(220); await page.screenshot({ path: path.join(output, 'extract-desktop.png') });
+    failComparison = true; await compare.click();
+    await page.getByText(/对比分析失败/).waitFor(); await inViewport(compare);
+    failComparison = false; await compare.click();
+    await page.getByText('正在与现行政策库进行比对...', { exact: true }).waitFor();
+    await page.screenshot({ path: path.join(output, 'comparing-desktop.png') });
+    await page.locator('.comparison-report').waitFor();
+    await page.getByText('需结合适用条件比较。', { exact: true }).waitFor();
+    assert.ok(await page.locator('.report-preview-scroll').evaluate(el => el.scrollWidth <= el.clientWidth + 1), 'Desktop report should fit its panel');
+    await inViewport(page.getByRole('button', { name: '生成PDF', exact: true }));
+    await page.waitForTimeout(220); await page.screenshot({ path: path.join(output, 'result-desktop.png') });
+    await page.getByRole('button', { name: '重新开始', exact: true }).click();
+    failExtraction = true; await next.click(); await page.getByText(/政策提取失败/).waitFor(); await inViewport(next); failExtraction = false;
+    await page.getByRole('button', { name: /使用当周全部新闻/ }).click();
+    await options.nth(1).click(); assert.ok(await next.isDisabled());
+    await page.getByText('新周新闻', { exact: true }).waitFor();
+    await page.waitForTimeout(700);
+    assert.equal(await page.getByText('旧周新闻', { exact: true }).count(), 0, 'Late response must not replace selected week');
+    await next.click();
+    await page.waitForFunction(() => document.querySelectorAll('.extraction-table tbody tr').length === 18);
+    assert.ok(extractionBodies.at(-1).reportContent.includes('新周新闻'));
+    assert.ok(!extractionBodies.at(-1).reportContent.includes('旧周新闻'));
+    await page.setViewportSize({ width: 390, height: 844 });
+    await inViewport(compare);
+    await page.waitForTimeout(220); await page.screenshot({ path: path.join(output, 'extract-mobile.png') });
+    await page.getByRole('button', { name: '重新选择周报' }).click();
+    await page.getByRole('button', { name: '使用已生成周报', exact: true }).click();
+    await options.first().click(); await inViewport(next);
+    await options.last().click(); await inViewport(next);
+    assert.ok((await next.boundingBox()).y >= 56, 'Sticky action must stay below the mobile header');
+    await options.first().scrollIntoViewIfNeeded(); await options.first().click();
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'No page-wide horizontal overflow');
+    await page.waitForTimeout(220); await page.screenshot({ path: path.join(output, 'select-mobile.png') });
+    assert.deepEqual(errors, []);
+    console.log('PASS: selection geometry, visible actions, extraction table, retries, stale news responses, desktop/mobile layout');
+  } finally { await browser.close(); await new Promise(resolve => server.close(resolve)); }
+})().catch(error => { console.error(error); process.exitCode = 1; });

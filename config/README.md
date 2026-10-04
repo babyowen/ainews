@@ -55,7 +55,7 @@ AGENT_ROUTER_API_KEY=
 - `prompts.md`：默认周报及修改提示词。
 - `keyword-prompts.json`：关键词专属提示词。
 - `policy_prompts.md`：政策提取和比对模板。
-- `region-policy-report-prompts.json`：地区与业务政策报告模板，包含 `business-topic-comparison-v1`；它不改变原全局默认。显式 ID 不存在或被运行时墓碑删除时返回错误，不静默回退。
+- `region-policy-report-prompts.json`：地区与业务政策报告模板，包含业务默认 `business-topic-brief-v3`（业务政策简报 V3），并保留旧版 `business-topic-analysis-v2`、`business-topic-comparison-v1`；它不改变原全局默认。显式 ID 不存在或被运行时墓碑删除时返回错误，不静默回退。
 
 此次迁移不修改业务提示词和政策基准文件。
 

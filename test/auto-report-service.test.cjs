@@ -410,7 +410,7 @@ test('defaultCallLlm reports missing API key environment variable clearly', asyn
           throw new Error('fetch should not be called');
         },
       }),
-      /环境变量 MISSING_AUTO_REPORT_KEY 未配置/
+    error => error.status === 503 && error.code === 'MODEL_API_KEY_MISSING' && error.message.includes('MISSING_AUTO_REPORT_KEY')
     );
   } finally {
     if (previous === undefined) {

@@ -9,6 +9,10 @@ const ok = content => ({ choices: [{ finish_reason: 'stop', message: { content }
 const jsonResponse = data => new Response(JSON.stringify(data));
 const models = () => jsonResponse({ data: [{ id: modelConfig.model }] });
 
+test('missing gateway credentials returns an actionable configuration error before network access',async()=>{
+ await assert.rejects(completeChat(messages,{modelConfig:{...modelConfig,apiKey:'KEYDIGEST_TEST_ABSENT_KEY'},fetchImpl:()=>{throw new Error('unexpected network request');}}),error=>error.status===503&&error.code==='MODEL_API_KEY_MISSING'&&error.message.includes('KEYDIGEST_TEST_ABSENT_KEY'));
+});
+
 test('checks live model availability before posting and uses only the configured gateway key/model', async () => {
   const calls = [];
   const text = await completeChat(messages, { modelConfig, fetchImpl: async (url, options) => {

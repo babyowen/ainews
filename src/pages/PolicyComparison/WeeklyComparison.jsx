@@ -678,11 +678,49 @@ const PolicyMarkdown = ({ report }) => {
   );
 };
 
+  const toLocalYMD = (value) => {
+    try {
+      const d = new Date(value);
+      if (Number.isNaN(d.getTime())) return String(value).slice(0, 10);
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+    } catch {
+      return String(value).slice(0, 10);
+    }
+  };
+
+const PolicyValue = ({ value }) => {
+  if (value == null || value === '') return <span className="policy-value-empty">未提供</span>;
+  if (Array.isArray(value)) return <div className="policy-value-list">{value.map((item, i) => <div key={i}><PolicyValue value={item} /></div>)}</div>;
+  if (typeof value === 'object') return <dl className="policy-value-fields">{Object.entries(value).map(([key, item]) => <div key={key}><dt>{key}</dt><dd><PolicyValue value={item} /></dd></div>)}</dl>;
+  return <span>{String(value)}</span>;
+};
+
+const ExtractionPreview = ({ policy }) => {
+  const rows = (policy?.政策领域 || []).flatMap(domain => (domain.政策类别 || []).flatMap(category => (category.政策明细 || []).map(detail => ({ domain: domain.领域名称, category: category.类别名称, detail }))));
+  return (
+    <div className="extraction-table-wrap" role="region" aria-label="提取的政策明细" tabIndex={0}>
+      <table className="extraction-table">
+        <thead><tr><th scope="col">领域 / 类别</th><th scope="col">政策要点</th><th scope="col">依据文件</th></tr></thead>
+        <tbody>{rows.map(({ domain, category, detail }, i) => <tr key={i}>
+          <td><span className="extraction-domain">{domain}</span><strong>{category}</strong></td>
+          <td>{detail.明细项 && <h4>{detail.明细项}</h4>}<PolicyValue value={detail.内容} />
+            <PolicyValue value={Object.fromEntries(Object.entries(detail).filter(([key]) => !['明细项', '内容', '依据文件'].includes(key)))} />
+          </td>
+          <td><PolicyValue value={detail.依据文件} /></td>
+        </tr>)}</tbody>
+      </table>
+    </div>
+  );
+};
+
 const STEPS = [
   { id: 'select', label: '选择周报', icon: <FileText size={20} /> },
-  { id: 'extract', label: '提取政策', icon: <FileJson size={20} /> },
+  { id: 'extract', label: '核对政策', icon: <FileJson size={20} /> },
   { id: 'compare', label: '对比分析', icon: <Scale size={20} /> },
-  { id: 'result', label: '生成报告', icon: <Check size={20} /> }
+  { id: 'result', label: '查看报告', icon: <Check size={20} /> }
 ];
 
 const WeeklyComparison = () => {
@@ -706,6 +744,12 @@ const WeeklyComparison = () => {
   const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [policyModels, setPolicyModels] = useState([]);
   const reportRef = useRef(null);
+  const workflowRef = useRef(null);
+  const [newsPeriod, setNewsPeriod] = useState('');
+
+  useEffect(() => {
+    if (currentStep !== 'select') workflowRef.current?.scrollIntoView({ block: 'start' });
+  }, [currentStep]);
   const structuredReport = useMemo(
     () => buildStructuredPolicyComparisonReport(comparisonResult),
     [comparisonResult]
@@ -729,60 +773,47 @@ const WeeklyComparison = () => {
   };
 
   useEffect(() => {
-    if (sourceMode !== 'news') return;
-    if (!selectedReport?.start_date || !selectedReport?.end_date) return;
-    fetchWeeklyNews(selectedReport.start_date, selectedReport.end_date);
-  }, [sourceMode, selectedReport?.id]);
+    let cancelled = false;
+    const controller = new AbortController();
+    setWeeklyNews([]);
+    setSelectedNews([]);
+    setNewsPeriod('');
+    setNewsLoading(false);
+    if (sourceMode === 'news' && selectedReport?.start_date && selectedReport?.end_date) {
+      setNewsLoading(true);
+      const startDate = selectedReport.start_date, endDate = selectedReport.end_date;
+      const params = new URLSearchParams({ keyword: '公积金', startDate: toLocalYMD(startDate), endDate: toLocalYMD(endDate), minScore: '4' });
+      (async () => {
+        try {
+          const res = await apiFetch(`/api/weekly-news?${params}`, { signal: controller.signal });
+          if (!res.ok) throw new Error('获取新闻失败');
+          const data = await res.json();
+          if (cancelled) return;
+          const list = Array.isArray(data) ? data : [];
+          setNewsPeriod(`${startDate}|${endDate}`);
+          setWeeklyNews(list);
+          setSelectedNews(list);
+        } catch (err) {
+          if (!cancelled) setError('获取当周新闻失败: ' + err.message);
+        } finally {
+          if (!cancelled) setNewsLoading(false);
+        }
+      })();
+    }
+    return () => { cancelled = true; controller.abort(); };
+  }, [apiFetch, sourceMode, selectedReport?.id, selectedReport?.start_date, selectedReport?.end_date]);
 
   const fetchReports = async () => {
     setLoading(true);
     try {
       const res = await apiFetch('/api/reports/history?keyword=公积金&limit=20');
+      if (!res.ok) throw new Error('获取周报列表失败');
       const data = await res.json();
       setReports(data.data || []);
     } catch (err) {
       setError('获取周报列表失败');
     } finally {
       setLoading(false);
-    }
-  };
-
-  const toLocalYMD = (value) => {
-    try {
-      const d = new Date(value);
-      if (Number.isNaN(d.getTime())) return String(value).slice(0, 10);
-      const y = d.getFullYear();
-      const m = String(d.getMonth() + 1).padStart(2, '0');
-      const day = String(d.getDate()).padStart(2, '0');
-      return `${y}-${m}-${day}`;
-    } catch {
-      return String(value).slice(0, 10);
-    }
-  };
-
-  const fetchWeeklyNews = async (startDate, endDate) => {
-    setNewsLoading(true);
-    try {
-      const start = toLocalYMD(startDate);
-      const end = toLocalYMD(endDate);
-      const params = new URLSearchParams({
-        keyword: '公积金',
-        startDate: start,
-        endDate: end,
-        minScore: '4'
-      });
-      const res = await apiFetch(`/api/weekly-news?${params.toString()}`);
-      if (!res.ok) throw new Error('获取新闻失败');
-      const data = await res.json();
-      const list = Array.isArray(data) ? data : [];
-      setWeeklyNews(list);
-      setSelectedNews(list);
-    } catch (err) {
-      setWeeklyNews([]);
-      setSelectedNews([]);
-      setError('获取当周新闻失败: ' + err.message);
-    } finally {
-      setNewsLoading(false);
     }
   };
 
@@ -901,8 +932,9 @@ const WeeklyComparison = () => {
   };
 
   const handleExtract = async () => {
-    if (!selectedReport) return;
-    
+    if (!selectedReport || loading || (sourceMode === 'news' && (newsLoading || !selectedNews.length || newsPeriod !== `${selectedReport.start_date}|${selectedReport.end_date}`))) return;
+    setExtractedPolicy(null);
+    setComparisonResult('');
     setLoading(true);
     setCurrentStep('extract');
     setError('');
@@ -1080,7 +1112,7 @@ const WeeklyComparison = () => {
   };
 
   const handleCompare = async () => {
-    if (!extractedPolicy) return;
+    if (!countPolicyDetails(extractedPolicy) || loading) return;
     
     setLoading(true);
     setCurrentStep('compare');
@@ -1374,7 +1406,7 @@ const WeeklyComparison = () => {
   };
 
   const renderStepIndicator = () => (
-    <div className="wizard-steps">
+    <div className="wizard-steps" aria-label="政策对比步骤">
       {STEPS.map((step, index) => {
         const isActive = step.id === currentStep;
         const stepIndex = STEPS.findIndex(s => s.id === step.id);
@@ -1382,7 +1414,7 @@ const WeeklyComparison = () => {
         const isCompleted = stepIndex < currentIndex;
 
         return (
-          <div key={step.id} className={`step-item ${isActive ? 'active' : ''} ${isCompleted ? 'completed' : ''}`}>
+          <div key={step.id} aria-current={isActive ? 'step' : undefined} className={`step-item ${isActive ? 'active' : ''} ${isCompleted ? 'completed' : ''}`}>
             <div className="step-circle">
               {isCompleted ? <Check size={20} /> : index + 1}
             </div>
@@ -1428,17 +1460,29 @@ const WeeklyComparison = () => {
   );
 
   return (
-    <div className="weekly-comparison-container">
+    <div className="weekly-comparison-container" ref={workflowRef}>
       <div className="header-section" style={{ marginBottom: '2rem' }}>
-        <h1>📑 周报政策对比</h1>
+        <div className="weekly-eyebrow">扬州公积金专区</div><h1>周报政策对比</h1>
         <p>基于历史周报提取政策要点，与现行政策库进行智能比对分析</p>
       </div>
 
       {renderStepIndicator()}
-      {renderExportCapabilityBar()}
-      <div className="policy-model-selector">
-        <span>分析模型：{policyModels.find(model => model.isDefault)?.label || 'DeepSeek V4.1 Flash'}</span>
+      <div className="weekly-workflow-bar">
+        <div className="weekly-workflow-context" aria-live="polite">
+          <strong>{currentStep === 'select' ? (selectedReport ? '已选择周报' : '先选择一份周报') : currentStep === 'extract' ? (loading ? '正在提取政策要点' : `已提取 ${countPolicyDetails(extractedPolicy)} 条政策明细`) : currentStep === 'compare' ? '正在与扬州现行政策库对比' : '对比报告已生成'}</strong>
+          <span>{selectedReport ? `${toLocalYMD(selectedReport.start_date)} — ${toLocalYMD(selectedReport.end_date)}${sourceMode === 'news' ? ` · 已选 ${selectedNews.length} 条新闻` : ' · 已生成周报'}` : '选择后，点击右侧按钮开始提取政策'}</span>
+        </div>
+        <div className="weekly-workflow-actions">
+          {currentStep === 'select' && <button className="action-btn btn-primary" onClick={handleExtract} disabled={loading || !selectedReport || (sourceMode === 'news' && (newsLoading || !selectedNews.length || newsPeriod !== `${selectedReport.start_date}|${selectedReport.end_date}`))}>下一步：提取政策 <ArrowRight size={18} /></button>}
+          {currentStep === 'extract' && <>
+            <button className="action-btn btn-secondary" disabled={loading} onClick={() => { setCurrentStep('select'); setError(''); }}>重新选择周报</button>
+            <button className="action-btn btn-primary" disabled={loading || !countPolicyDetails(extractedPolicy)} onClick={handleCompare}>{loading ? '提取完成后可对比' : '开始对比分析'} <ArrowRight size={18} /></button>
+          </>}
+          {currentStep === 'compare' && <button className="action-btn btn-primary" disabled><Loader2 size={18} className="animate-spin" />正在生成对比报告</button>}
+          {isResultReady && renderExportCapabilityBar()}
+        </div>
       </div>
+      <div className="weekly-model-note">分析模型：{policyModels.find(model => model.isDefault)?.label || 'DeepSeek V4.1 Flash'}</div>
 
       {error && (
         <div className="error-banner" style={{
@@ -1474,6 +1518,7 @@ const WeeklyComparison = () => {
               使用当周全部新闻（公积金≥4分）
             </button>
           </div>
+          {!loading && reports.length === 0 && <div className="weekly-empty">暂无可用的公积金周报，请先生成一份周报后再来对比。</div>}
           {loading ? (
             <div className="loading-container">
               <div className="loading-spinner"></div>
@@ -1482,25 +1527,27 @@ const WeeklyComparison = () => {
           ) : (
             <div className="report-grid">
               {reports.map(report => (
-                <div 
+                <button
+                  type="button"
+                  aria-pressed={selectedReport?.id === report.id}
                   key={report.id} 
-                  className={`report-card ${selectedReport?.id === report.id ? 'selected' : ''}`}
+                  className={`weekly-report-option ${selectedReport?.id === report.id ? 'selected' : ''}`}
                   onClick={() => {
                     setSelectedReport(report);
                     setNewsDigest('');
+                    setError('');
                   }}
                 >
-                  <div className="report-date">
-                    {new Date(report.start_date).toLocaleDateString()} - {new Date(report.end_date).toLocaleDateString()}
-                  </div>
-                  <div className="report-title">
-                    {report.keyword}周报
-                  </div>
-                  <div className="report-meta">
-                    <span>📰 {report.news_count} 条新闻</span>
-                    <span>🤖 {report.model_used}</span>
-                  </div>
-                </div>
+                  <span className="weekly-report-mark" aria-hidden="true">{selectedReport?.id === report.id ? <Check size={15} /> : null}</span>
+                  <span className="weekly-report-date">
+                    {toLocalYMD(report.start_date)} — {toLocalYMD(report.end_date)}
+                  </span>
+                  <span className="weekly-report-title">{report.keyword}周报</span>
+                  <span className="weekly-report-meta">
+                    <span>{report.news_count} 条新闻</span>
+                    <span title={report.model_used}>{report.model_used}</span>
+                  </span>
+                </button>
               ))}
             </div>
           )}
@@ -1517,6 +1564,7 @@ const WeeklyComparison = () => {
                 <div className="news-loading">正在加载当周新闻...</div>
               ) : (
                 <div className="news-list">
+                  {weeklyNews.length === 0 && <p className="weekly-empty">本周暂无评分达到 4 分的公积金新闻，可切换为已生成周报或选择其他周报。</p>}
                   {weeklyNews.map((news) => {
                     const checked = selectedNews.some(n => n.id === news.id);
                     const summary = String(news.short_summary || news.content || '').slice(0, 500);
@@ -1547,15 +1595,6 @@ const WeeklyComparison = () => {
             </div>
           )}
           
-          <div className="action-bar" style={{ marginTop: '2rem', display: 'flex', justifyContent: 'flex-end' }}>
-            <button 
-              className="action-btn btn-primary"
-              disabled={sourceMode === 'news' ? (!selectedReport || selectedNews.length === 0) : !selectedReport}
-              onClick={handleExtract}
-            >
-              下一步：提取政策 <ArrowRight size={18} />
-            </button>
-          </div>
         </div>
       )}
 
@@ -1569,6 +1608,7 @@ const WeeklyComparison = () => {
                 <p className="loading-text">
                   {sourceMode === 'news' ? '正在提取当周新闻政策要点...' : '正在提取周报政策要点...'}
                 </p>
+                <p className="loading-subtext">正在整理政策内容、业务类别和依据文件。完成后可核对明细并开始对比。</p>
                 {sourceMode === 'news' && extractionBatchTotal > 1 ? (
                   <div className="batch-progress">
                     <div className="batch-progress-row">
@@ -1592,81 +1632,13 @@ const WeeklyComparison = () => {
                 ) : null}
               </div>
               
-              {/* Show extraction prompt while loading */}
-              {debugInfo.extraction ? (
-                 renderPromptViewer(debugInfo.extraction, '提取阶段 - 实时预览', true)
-              ) : (
-                selectedReport && (
-                   <div className="debug-prompt-container" style={{ marginTop: '2rem', borderTop: '1px solid #e2e8f0', paddingTop: '1rem', textAlign: 'left' }}>
-                      <div style={{ background: '#f8fafc', padding: '1rem', borderRadius: '8px', border: '1px solid #e2e8f0', textAlign: 'left' }}>
-                         <div style={{ marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                            <Loader2 className="animate-spin" size={16} color="#3b82f6" />
-                            <h4 style={{ fontSize: '0.875rem', color: '#475569', margin: 0 }}>正在使用的提取提示词:</h4>
-                         </div>
-                         <p style={{ fontSize: '0.8rem', color: '#64748b', marginBottom: '1rem' }}>系统将使用以下指令从周报中提取结构化数据</p>
-                         <div style={{ fontSize: '0.8rem', color: '#334155', background: '#fff', padding: '0.75rem', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
-                            <p>正在请求服务器生成最终 Prompt 并进行提取...</p>
-                            <p>请稍候，结果生成后将显示完整 Prompt。</p>
-                         </div>
-                      </div>
-                   </div>
-                )
-              )}
+              {renderPromptViewer(debugInfo.extraction, '提取阶段')}
             </>
           ) : (
-            <div className="extraction-container" style={{
-              background: 'white',
-              borderRadius: '16px',
-              padding: '2rem',
-              boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)'
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                <h3 style={{ margin: 0 }}>🔍 提取结果预览</h3>
-                {extractedPolicy && (
-                  <div style={{ 
-                    background: '#e0f2fe', 
-                    color: '#0284c7', 
-                    padding: '0.25rem 0.75rem', 
-                    borderRadius: '9999px', 
-                    fontSize: '0.875rem', 
-                    fontWeight: 600,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.25rem'
-                  }}>
-                    <span>📊</span>
-                    <span>
-                      共提取 {countPolicyDetails(extractedPolicy)} 条政策明细
-                     </span>
-                  </div>
-                )}
-              </div>
-              <p style={{ marginTop: 0, marginBottom: '1rem' }}>系统已从周报中提取以下政策结构信息：</p>
-              
-              <style>{`
-                .json-preview::-webkit-scrollbar { width: 8px; height: 8px; }
-                .json-preview::-webkit-scrollbar-track { background: #0f172a; border-radius: 4px; }
-                .json-preview::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
-                .json-preview::-webkit-scrollbar-thumb:hover { background: #475569; }
-              `}</style>
-              <div className="json-preview" style={{
-                background: '#1e293b',
-                color: '#a5b3ce',
-                padding: '1.5rem',
-                borderRadius: '8px',
-                fontFamily: "'Fira Code', 'Menlo', 'Monaco', 'Courier New', monospace",
-                fontSize: '0.875rem',
-                maxHeight: '500px',
-                overflowY: 'auto',
-                margin: '1.5rem 0',
-                whiteSpace: 'pre',
-                tabSize: 2,
-                lineHeight: 1.5,
-                border: '1px solid #334155',
-                textAlign: 'left'
-              }}>
-                <pre>{JSON.stringify(extractedPolicy, null, 2)}</pre>
-              </div>
+            <div className="extraction-container">
+              <div className="weekly-section-heading"><div><h2>核对政策要点</h2><p>确认提取内容后，点击上方“开始对比分析”，与扬州现行政策逐项比较。</p></div><span className="weekly-count">{countPolicyDetails(extractedPolicy)} 条明细</span></div>
+              <ExtractionPreview policy={extractedPolicy} />
+              <details className="raw-llm-output"><summary>查看结构化原始数据</summary><pre>{JSON.stringify(extractedPolicy, null, 2)}</pre></details>
 
               {sourceMode === 'news' && extractionBatchTotal > 1 && extractionBatches.length > 0 ? (
                 <details className="raw-llm-output">
@@ -1694,20 +1666,6 @@ const WeeklyComparison = () => {
 
               {renderPromptViewer(debugInfo.extraction, '提取阶段')}
 
-              <div className="action-bar" style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <button 
-                  className="action-btn btn-secondary"
-                  onClick={() => setCurrentStep('select')}
-                >
-                  上一步
-                </button>
-                <button 
-                  className="action-btn btn-primary"
-                  onClick={handleCompare}
-                >
-                  开始对比分析 <ArrowRight size={18} />
-                </button>
-              </div>
             </div>
           )}
         </div>
@@ -1716,33 +1674,18 @@ const WeeklyComparison = () => {
       {/* Step 3: Comparing (Loading only, usually) */}
       {currentStep === 'compare' && (
         <div className="step-content">
+          <div className="weekly-comparison-inputs">
+            <div><span>本次提取</span><strong>{countPolicyDetails(extractedPolicy)} 条政策明细</strong><p>各地公积金政策要点</p></div>
+            <Scale size={24} aria-hidden="true" />
+            <div><span>对比基准</span><strong>扬州现行政策库</strong><p>逐项核对政策差异与适用条件</p></div>
+          </div>
           <div className="loading-container compact">
             <div className="loading-spinner"></div>
             <p className="loading-text">正在与现行政策库进行比对...</p>
-            <div className="loading-subtext">深度思考中</div>
+            <div className="loading-subtext">正在整理各地政策与扬州政策的差异、适用条件和可借鉴做法。完成后会自动显示报告。</div>
           </div>
           
-          {/* Show the comparison prompt while loading */}
-          {debugInfo.comparison ? (
-              renderPromptViewer(debugInfo.comparison, '对比阶段 - 实时预览', true)
-          ) : (
-            extractedPolicy && (
-               <div className="debug-prompt-container" style={{ marginTop: '2rem', borderTop: '1px solid #e2e8f0', paddingTop: '1rem', textAlign: 'left' }}>
-                  <div style={{ background: '#f8fafc', padding: '1rem', borderRadius: '8px', border: '1px solid #e2e8f0', textAlign: 'left' }}>
-                     <div style={{ marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                        <Loader2 className="animate-spin" size={16} color="#3b82f6" />
-                        <h4 style={{ fontSize: '0.875rem', color: '#475569', margin: 0 }}>正在使用的对比提示词:</h4>
-                     </div>
-                     <p style={{ fontSize: '0.8rem', color: '#64748b', marginBottom: '1rem' }}>系统将使用以下指令进行分析（已自动填入提取的政策和现行政策）</p>
-                     {/* We don't have the final prompt yet (it's generated on server), but we can show the template or explanation */}
-                     <div style={{ fontSize: '0.8rem', color: '#334155', background: '#fff', padding: '0.75rem', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
-                        <p>正在请求服务器生成最终 Prompt 并进行推理...</p>
-                        <p>请稍候，结果生成后将显示完整 Prompt。</p>
-                     </div>
-                  </div>
-               </div>
-            )
-          )}
+          {renderPromptViewer(debugInfo.comparison, '对比阶段')}
         </div>
       )}
 
@@ -1759,9 +1702,9 @@ const WeeklyComparison = () => {
                   {selectedReport?.start_date && selectedReport?.end_date ? (
                     <div className="report-header-meta">
                       <div className="report-subtitle">
-                        周报区间：{new Date(selectedReport.start_date).toLocaleDateString()} ~ {new Date(selectedReport.end_date).toLocaleDateString()}
+                        周报区间：{toLocalYMD(selectedReport.start_date)} — {toLocalYMD(selectedReport.end_date)}
                       </div>
-                      <div className="report-subtitle report-subtitle-secondary">建议手机横屏查看</div>
+                      <div className="report-subtitle report-subtitle-secondary">各地政策 · 扬州条款 · 差异分析</div>
                     </div>
                   ) : null}
                 </div>

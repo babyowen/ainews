@@ -221,11 +221,14 @@ test('Login returns dynamic keywords and routes from config', async () => {
   assert.equal(login.status, 200);
   const profile = login.body.user;
   assert.ok(profile.keywords.length > 0, 'admin should have keywords');
+  assert.ok(profile.keywords.includes('江苏机关事务'), 'admin should see the new government affairs keyword');
+  assert.ok(!profile.keywords.includes('江苏省国资委'), 'do not add unrelated default keywords to the configured profile');
   assert.ok(profile.routes.includes('/user-management'), 'admin routes should include /user-management');
   assert.ok(profile.routes.includes('/summary'), 'admin routes should include /summary');
   // yzgjj 不应包含 /user-management
   const yzgjj = await request('POST', '/api/auth/login', { username: 'yzgjj', password: passwords.yzgjj });
   assert.equal(yzgjj.status, 200);
+  assert.ok(!yzgjj.body.user.keywords.includes('江苏机关事务'), 'restricted users retain their configured keywords');
   assert.ok(!yzgjj.body.user.routes.includes('/user-management'), 'yzgjj should not have /user-management');
   assert.ok(yzgjj.body.user.routes.includes('/summary'), 'yzgjj should have /summary');
 });

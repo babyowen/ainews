@@ -96,6 +96,11 @@ function getRegionPolicySourceText(news = {}) {
   return [news.title, news.short_summary, news.content].filter(Boolean).join('\n');
 }
 
+function isPolicyGuidanceNews(news = {}) {
+  const titleAndSummary = `${news.title || ''}\n${news.short_summary || ''}`;
+  return REGION_POLICY_NOISE_PATTERNS.some((pattern) => pattern.test(titleAndSummary));
+}
+
 function analyzeRegionPolicyNews(news = {}) {
   const title = String(news.title || '').trim();
   const sourceText = getRegionPolicySourceText(news);
@@ -107,7 +112,7 @@ function analyzeRegionPolicyNews(news = {}) {
     return { includedInAnalysis: false, filterReason: '企业财务公积金/公告类内容' };
   }
 
-  if (REGION_POLICY_NOISE_PATTERNS.some((pattern) => pattern.test(titleAndSummary))) {
+  if (isPolicyGuidanceNews(news)) {
     return { includedInAnalysis: false, filterReason: '政策问答/指南类内容' };
   }
 
@@ -127,4 +132,4 @@ function analyzeRegionPolicyNews(news = {}) {
 }
 
 
-module.exports = {analyzeRegionPolicyNews};
+module.exports = {analyzeRegionPolicyNews, isPolicyGuidanceNews};
