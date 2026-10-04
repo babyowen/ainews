@@ -6,7 +6,7 @@ import {useAuth} from '../auth/AuthContext';
 import {fetchPolicyJson,fetchPolicyBusinessFacets} from '../api/policyBusiness';
 import {parsePolicyBusinessSearch,serializePolicyBusinessSearch,updatePolicySearch,safeNewsUrl} from '../utils/policyBusinessFilters';
 import BusinessTypeFilter from './BusinessTypeFilter';
-import BusinessTypeTags from './BusinessTypeTags';
+import ReportMaterialTable from './ReportMaterialTable';
 import PolicyRegionFilter from './PolicyRegionFilter';
 import './ProvidentFund.css';
 export default function ProvidentFundReportView({reportKind}) {
@@ -15,10 +15,10 @@ export default function ProvidentFundReportView({reportKind}) {
   const {user,apiFetch}=useAuth();
   const [params,setParams]=useSearchParams();
   const search=params.toString();
-  const filters=useMemo(()=>({...parsePolicyBusinessSearch(search),page:1}),[search]);
+  const filters=useMemo(()=>({...parsePolicyBusinessSearch(search,business?'daily':'region'),...(business?{regions:[],tagState:'all'}:{}),page:1}),[search,business]);
   const filtersKey=reportKind+serializePolicyBusinessSearch(filters);
   const [facets,setFacets]=useState(null),[prompts,setPrompts]=useState([]);
-  const [promptId,setPromptId]=useState(business?'business-topic-comparison-v1':filters.regions.length===1?'single-region-default':'multi-region-default');
+  const [promptId,setPromptId]=useState(business?'business-topic-brief-v3':filters.regions.length===1?'single-region-default':'multi-region-default');
   const [userPrompt,setUserPrompt]=useState('');
   const [previewState,setPreview]=useState(null),[overridesState,setOverrides]=useState(null),[reportState,setReport]=useState(null);
   const preview=previewState?.key===filtersKey?previewState.data:null;
@@ -29,7 +29,7 @@ export default function ProvidentFundReportView({reportKind}) {
   const [error,setError]=useState(''),[busy,setBusy]=useState(''),[editor,setEditor]=useState(null);
   const current=useRef(formKey);current.current=formKey;
   const operation=useRef(null);
-  const update=changes=>setParams(updatePolicySearch(search,changes));
+  const update=changes=>setParams(updatePolicySearch(search,{...changes,...(business?{regions:[],tagState:'all'}:{})},business?'daily':'region'));
   useEffect(()=>{
     operation.current?.abort();setBusy('');setError('');
     return ()=>operation.current?.abort();
@@ -72,37 +72,47 @@ export default function ProvidentFundReportView({reportKind}) {
     }catch(e){setError(e.message);}finally{setBusy('');}
   }
   const included=preview?.rows.filter(row=>manualOverrides[String(row.id)]??row.includedInAnalysis)||[];
-  const coverage=filters.regions.map(s=>({...s,count:included.filter(row=>row.matchedSelections.some(x=>x.name===s.name&&x.level===s.level)).length}));
-  const canPreview=filters.regions.length>0&&filters.regions.length<=10&&(!business||(filters.regions.length>=2&&filters.businessTypes.length===1));
-  const canGenerate=preview&&included.length>0&&(!business||coverage.filter(x=>x.count>0).length>=2)&&prompt;
-  return <div className="pf-page">
-    <header className="pf-header"><div><p className="pf-eyebrow">公积金专区 / {business?'业务类型浏览':'地区浏览'}</p><h1>{business?'业务政策 AI 报告':'地区 AI 报告'}</h1><p className="pf-muted">{business?'选择一个业务和 2–10 个地区，先核对材料，再生成政策比较。':'选择 1–10 个地区，分析单地区变化或比较地区差异。'}</p></div></header>
-    <div className="pf-toolbar"><label>开始日期<input type="date" value={filters.startDate} onChange={e=>update({startDate:e.target.value})}/></label><label>结束日期<input type="date" value={filters.endDate} onChange={e=>update({endDate:e.target.value})}/></label>
-      <label>报告模板<select aria-label="报告模板" value={promptId} onChange={e=>setPromptId(e.target.value)}>{!prompt&&<option value={promptId}>所选模板不可用，请重新选择</option>}{prompts.filter(x=>business||x.id!=='business-topic-comparison-v1').map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
-      {user?.role==='admin'&&<button onClick={()=>setEditor(prompt?{...prompt}:{name:'',description:'',systemPrompt:'',userPromptSingle:'',userPromptMulti:'',isDefault:false})}>管理 Prompt</button>}
-    </div>
+  const coverage=(preview?.regionCoverage||filters.regions).map(s=>({...s,count:included.filter(row=>row.matchedSelections.some(x=>x.name===s.name&&x.level===s.level)).length}));
+  const canPreview=business?filters.businessTypes.length===1:filters.regions.length>0&&filters.regions.length<=10;
+  const canGenerate=preview&&included.length>0&&prompt;
+  return <div className="pf-page pf-report-page">
+    <header className="pf-header"><div><p className="pf-eyebrow">公积金专区 / {business?'业务类型浏览':'地区浏览'}</p><h1>{business?'业务政策 AI 报告':'地区 AI 报告'}</h1><p className="pf-muted">{business?'选择一项业务，核对各地新闻材料，生成业务专题分析。':'选择 1–10 个地区，分析单地区变化或比较地区差异。'}</p></div></header>
+    <nav className="pf-report-steps" aria-label="报告操作步骤">
+      {[['time','选择时间'],['scope',business?'选择业务类型':'选择地区'],['materials','核对材料'],['generate','生成报告']].map(([id,label],index)=><a key={id} href={`#report-${id}`}><span>{index+1}</span>{label}</a>)}
+    </nav>
+    <section id="report-time" className="pf-report-time"><h2 className="pf-step-heading"><span>1</span>选择时间</h2><p className="pf-hint">先确定要分析的新闻采集日期范围。</p>
+      <div className="pf-toolbar"><label>开始日期<input type="date" value={filters.startDate} max={filters.endDate} onChange={e=>update({startDate:e.target.value})}/></label><label>结束日期<input type="date" value={filters.endDate} min={filters.startDate} onChange={e=>update({endDate:e.target.value})}/></label></div>
+    </section>
     <div className="pf-workspace"><aside className="pf-filters">
-      {business&&<BusinessTypeFilter single value={filters.businessTypes} options={facets?.businessFacets} onChange={businessTypes=>update({businessTypes,tagState:'all'})}/>}
-      <PolicyRegionFilter value={filters.regions} tree={facets?.regionTree} onChange={regions=>update({regions})}/>
+      <h2 id="report-scope" className="pf-step-heading"><span>2</span>{business?'选择业务类型':'选择地区'}</h2>
+      <p className="pf-hint">{business?'选择一项一级或二级业务后，即可预览所选时间内各地的相关新闻。':'选择 1 个地区看政策变化，选择多个地区做对比（最多 10 个）。'}</p>
+      {business?<BusinessTypeFilter single collapsible value={filters.businessTypes} options={facets?.businessFacets} onChange={businessTypes=>update({businessTypes,tagState:'all'})}/>:<PolicyRegionFilter value={filters.regions} tree={facets?.regionTree} onChange={regions=>update({regions})}/>}
+      {business&&filters.businessTypes.length===1&&<p className="pf-hint">已选：{[filters.businessTypes[0].level1,filters.businessTypes[0].level2].filter(Boolean).join(' · ')} · 不限定地区</p>}
       {!business&&<details><summary>限定业务范围（可选）</summary><BusinessTypeFilter value={filters.businessTypes} options={facets?.businessFacets} onChange={businessTypes=>update({businessTypes,tagState:'all'})}/></details>}
     </aside><main className="pf-report-main">
-      <section className="pf-results"><div className="pf-results-heading"><strong>01 · 核对材料</strong><button className="pf-primary" disabled={!canPreview||!!busy} onClick={()=>run('preview')}>{busy==='preview'?'读取中…':'预览新闻'}</button></div>
-        {!canPreview&&<p className="pf-hint">{business?'请选一项业务和 2–10 个地区。':'请选择 1–10 个地区。'}</p>}
+      <section id="report-materials" className="pf-results"><div className="pf-results-heading"><h2 className="pf-step-heading"><span>3</span>核对材料</h2><button className="pf-primary" disabled={!canPreview||!!busy} onClick={()=>run('preview')}>{busy==='preview'?'读取中…':'预览新闻'}</button></div>
+        <p className="pf-hint">点击“预览新闻”读取候选材料，再用表格中的复选框决定哪些新闻参与分析。</p>
+        {!canPreview&&<p className="pf-hint">{business?'请选择一项业务类型。':'请选择 1–10 个地区。'}</p>}
+        {business&&<p className="pf-hint">自动排除企业财务公积金、纯活动和临时服务通知等材料；保留有具体规则的指南、草案及合规案例，并注明性质。请核对筛选原因，必要时手工调整。</p>}
         {!preview?<p className="pf-empty">{previewState?'筛选已变更，请重新预览。':'预览后可逐条决定是否纳入分析。'}</p>:<>
           <p>候选 {preview.rows.length} 条 · 纳入 {included.length} 条 · 排除 {preview.rows.length-included.length} 条</p>
           <div className="pf-tags">{coverage.map(s=><span className="pf-tag" key={`${s.level}:${s.name}`}>{s.label||s.name}：{s.count} 条{s.count?'':' · 本次样本未覆盖'}</span>)}</div>
           <p className="pf-hint">多地区新闻可命中多个地区，新闻总量按 ID 去重。材料归属仍以正文为准。</p>
-          <div className="pf-preview-list">{preview.rows.map(row=><article className="pf-preview-row" key={row.id}>
-            <label><input aria-label={`纳入 N${row.id}`} type="checkbox" disabled={row.evidenceKind==='financial-reserve'} checked={manualOverrides[String(row.id)]??row.includedInAnalysis} onChange={e=>setOverrides({key:filtersKey,values:{...manualOverrides,[row.id]:e.target.checked}})}/><strong>[N{row.id}] {row.title}</strong></label>
-            <p className="pf-hint">{row.fetchdate} · {row.region} · {Object.hasOwn(manualOverrides,String(row.id))?(manualOverrides[String(row.id)]?'人工纳入':'人工排除'):row.filterReason}</p>
-            <BusinessTypeTags tags={row.businessTypes} status={row.businessTypeStatus}/>
-            <details><summary>查看材料与来源</summary><p>{row.short_summary}</p><div className="pf-article-content">{row.content}</div>{safeNewsUrl(row.link)&&<a href={row.link} target="_blank" rel="noopener noreferrer">查看原文</a>}</details>
-          </article>)}</div>
+          <ReportMaterialTable rows={preview.rows} manualOverrides={manualOverrides} onToggle={(id,checked)=>setOverrides({key:filtersKey,values:{...manualOverrides,[id]:checked}})}/>
         </>}
       </section>
-      <section className="pf-results"><div className="pf-results-heading"><strong>02 · 生成分析报告</strong><button className="pf-primary" disabled={!canGenerate||!!busy} onClick={()=>run('generate')}>{busy==='generate'?'正在生成…':'生成报告'}</button></div>
+      <section id="report-generate" className="pf-results"><div className="pf-results-heading"><h2 className="pf-step-heading"><span>4</span>生成报告</h2></div>
+        <p className="pf-hint">核对材料后选择模板，可补充关注点，再点击“生成报告”。</p>
+        <div className="pf-report-template"><label>报告模板<select aria-label="报告模板" value={promptId} onChange={e=>setPromptId(e.target.value)}>{!prompt&&<option value={promptId}>所选模板不可用，请重新选择</option>}{prompts.filter(x=>business?!['single-region-default','multi-region-default'].includes(x.id):!x.id.startsWith('business-topic-')).map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
+          {user?.role==='admin'&&<button onClick={()=>setEditor(prompt?{...prompt}:{name:'',description:'',systemPrompt:'',userPromptSingle:'',userPromptMulti:'',isDefault:false})}>管理 Prompt</button>}
+        </div>
+        {business&&prompt&&<p className="pf-hint">{prompt.description} · {prompt.source==='runtime'?'管理员自定义版本':'系统预置版本'}</p>}
+        {business&&<p className="pf-hint">生成时每条新闻使用最多 500 字摘要；缺少摘要时使用正文开头摘录。摘要未覆盖的细节需通过原文核对。</p>}
         <label className="pf-report-notes">补充分析要求<textarea rows={3} value={userPrompt} onChange={e=>setUserPrompt(e.target.value)} placeholder="例如：重点比较贷款额度、适用人群和生效时间"/></label>
-        {business&&preview&&coverage.filter(x=>x.count>0).length<2&&<p className="pf-hint">至少两个地区有纳入材料后才能生成比较。</p>}
+        {business&&preview&&<p className="pf-hint">仅有一个地区或地区不明的材料也可生成报告；跨地区差异以正文证据为准。</p>}
+        {!preview&&<p className="pf-hint">请先完成第 3 步“预览新闻”。</p>}
+        {preview&&!included.length&&<p className="pf-hint">请在第 3 步至少勾选一条可分析材料。</p>}
+        <div className="pf-report-actions"><span className="pf-hint">{preview?`已纳入 ${included.length} 条材料`:'尚未核对材料'}</span><button className="pf-primary" disabled={!canGenerate||!!busy} onClick={()=>run('generate')}>{busy==='generate'?'正在生成…':'生成报告'}</button></div>
         {error&&<div role="alert" className="pf-error">{error}</div>}
         {report?<>
           <div className="pf-report-actions"><span className="pf-hint">{report.snapshot.promptVersionName} · {report.snapshot.modelName}</span><button disabled={!!busy} onClick={()=>run('export')}>{busy==='export'?'导出中…':'导出 PDF'}</button></div>

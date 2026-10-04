@@ -4,7 +4,7 @@ export function defaultPolicyDates(mode = 'region') {
   const format = date => `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
   if (mode === 'daily') now.setDate(now.getDate()-1);
   const endDate = format(now);
-  if (mode !== 'daily') now.setDate(now.getDate()-29);
+  now.setDate(now.getDate()-(mode==='daily'?6:29));
   return {startDate:format(now),endDate};
 }
 export function parsePolicyBusinessSearch(search, mode = 'region') {

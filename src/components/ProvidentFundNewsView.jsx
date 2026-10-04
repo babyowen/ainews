@@ -7,6 +7,8 @@ import {parsePolicyBusinessSearch,serializePolicyBusinessSearch,updatePolicySear
 import BusinessTypeFilter from './BusinessTypeFilter';
 import BusinessTypeTags from './BusinessTypeTags';
 import PolicyRegionFilter from './PolicyRegionFilter';
+import FundDailyFilters from './FundDailyFilters';
+import FundDailyTable from './FundDailyTable';
 import './ProvidentFund.css';
 const titles={daily:'公积金每日新闻',region:'地区新闻浏览',business:'业务类型浏览'};
 export default function ProvidentFundNewsView({mode}) {
@@ -34,27 +36,27 @@ export default function ProvidentFundNewsView({mode}) {
   const businessFilter=<BusinessTypeFilter value={filters.businessTypes} options={data?.businessFacets} onChange={businessTypes=>update({businessTypes,tagState:'all'})}/>;
   const regionFilter=<PolicyRegionFilter value={filters.regions} tree={data?.regionTree} onChange={regions=>update({regions})}/>;
   return <div className="pf-page">
-    <header className="pf-header"><div><p className="pf-eyebrow">公积金专区 / 全国资讯</p><h1>{titles[mode]}</h1><p className="pf-muted">{mode==='daily'?'按日查看住房公积金资讯，点击标签继续浏览。':'按地区和业务筛选新闻；同类条件取并集，不同维度取交集。'}</p></div>
+    <header className="pf-header"><div><p className="pf-eyebrow">公积金专区 / 全国资讯</p><h1>{titles[mode]}</h1><p className="pf-muted">{mode==='daily'?'按日期区间、地区和业务查看住房公积金资讯。':'按地区和业务筛选新闻；同类条件取并集，不同维度取交集。'}</p></div>
       {mode!=='daily'&&canAccessRoute(user,reportPath)&&(reportInvalid?<span className="pf-hint">选择一项业务后进入政策 AI 报告</span>:<Link className="pf-primary" to={`${reportPath}?${serializePolicyBusinessSearch({...filters,page:1})}`}>{mode==='business'?'业务政策 AI 报告':'地区 AI 报告'} →</Link>)}
     </header>
-    <div className="pf-toolbar">
-      <label>{mode==='daily'?'新闻日期':'开始日期'}<input type="date" value={filters.startDate} onChange={e=>update(mode==='daily'?{startDate:e.target.value,endDate:e.target.value}:{startDate:e.target.value})}/></label>
-      {mode!=='daily'&&<label>结束日期<input type="date" value={filters.endDate} onChange={e=>update({endDate:e.target.value})}/></label>}
+    {mode==='daily'?<FundDailyFilters filters={filters} data={data} onChange={update}/>:<div className="pf-toolbar">
+      <label>开始日期<input type="date" value={filters.startDate} onChange={e=>update({startDate:e.target.value})}/></label>
+      <label>结束日期<input type="date" value={filters.endDate} onChange={e=>update({endDate:e.target.value})}/></label>
       <label>标注状态<select value={filters.tagState} onChange={e=>update({tagState:e.target.value,businessTypes:[]})}><option value="all">全部新闻</option><option value="without-valid-tags">暂无有效业务标签</option></select></label>
       <button onClick={()=>update({regions:[],businessTypes:[],tagState:'all'})}>清空筛选</button>
-    </div>
+    </div>}
     <div className={`pf-workspace ${mode==='daily'?'pf-daily':''}`}>
       {mode!=='daily'&&<aside className="pf-filters">{mode==='business'?businessFilter:regionFilter}<details><summary>{mode==='business'?'按地区进一步筛选':'按业务进一步筛选'}</summary>{mode==='business'?regionFilter:businessFilter}</details></aside>}
       <main className="pf-results" aria-busy={loading&&!error}>
         <div className="pf-results-heading"><strong>{loading?'正在读取…':`${data?.total||0} 条新闻`}</strong><span>评分 ≥ 3 · 按采集日期倒序</span></div>
         <p className="pf-hint">日期按采集时间筛选，不代表政策发布或生效日期。多标签、多地区新闻只计一次，各分类数量之和可能大于总数。</p>
         {data?.coverage&&<p className="pf-hint">业务标注：待标注 {data.coverage.pending} · 未识别 {data.coverage.unidentified} · 异常 {data.coverage.invalid}</p>}
-        {!!filters.regions.length&&<p className="pf-hint">地区：{filters.regions.map(x=>x.label||x.name).join('、')}</p>}
-        {!!filters.businessTypes.length&&<p className="pf-hint">业务：{filters.businessTypes.map(x=>[x.level1,x.level2].filter(Boolean).join(' · ')).join('、')}</p>}
+        {mode!=='daily'&&!!filters.regions.length&&<p className="pf-hint">地区：{filters.regions.map(x=>x.label||x.name).join('、')}</p>}
+        {mode!=='daily'&&!!filters.businessTypes.length&&<p className="pf-hint">业务：{filters.businessTypes.map(x=>[x.level1,x.level2].filter(Boolean).join(' · ')).join('、')}</p>}
         {error?<div role="alert" className="pf-error">{error}<button onClick={()=>setRetry(x=>x+1)}>重试</button></div>:loading?<p role="status">正在读取新闻…</p>:<>
           {data?.coverage?.warnings?.map(w=><p className="pf-error" key={w}>{w}</p>)}
           {!data?.rows.length&&<div className="pf-empty"><h2>当前条件下暂无新闻</h2><p>可调整日期、地区或业务类型。</p></div>}
-          {data?.rows.map(row=><article className="pf-news-row" key={row.id}>
+          {mode==='daily'?(!!data?.rows.length&&<FundDailyTable rows={data.rows} selectedBusiness={filters.businessTypes} onRegionSelect={canAccessRoute(user,'/policy/regions')?region=>jump('/policy/regions',{regions:[{name:region.name,level:region.level}]}):undefined} onBusinessSelect={canAccessRoute(user,'/provident-fund/business')?tag=>jump('/provident-fund/business',{businessTypes:[tag],tagState:'all'}):undefined}/>):data?.rows.map(row=><article className="pf-news-row" key={row.id}>
             <div className="pf-news-meta"><time>{row.fetchdate?.slice(0,10)}</time><span>{row.source||'来源未标明'}</span><span>{row.score} 分</span></div>
             <h2>{safeNewsUrl(row.link)?<a href={row.link} target="_blank" rel="noopener noreferrer">{row.title}</a>:row.title}</h2>
             <div className="pf-region-line">地区：{row.regions?.length ? row.regions.map(region=>canAccessRoute(user,'/policy/regions')?<button className="pf-text-button" key={region.name} onClick={()=>jump('/policy/regions',{regions:[{name:region.name,level:region.level}]})}>{region.name} · </button>:<span key={region.name}>{region.name} </span>):'未识别地区'}</div>

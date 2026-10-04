@@ -52,7 +52,7 @@ async function withModelResponse(messages, options, consume) {
     timeoutMs = 180000, fetchImpl = fetch,
   } = options;
   const apiKey = process.env[modelConfig.apiKey];
-  if (!apiKey) throw new Error(`环境变量 ${modelConfig.apiKey} 未配置`);
+  if (!apiKey) throw Object.assign(new Error(`模型服务未配置，请联系管理员设置 ${modelConfig.apiKey} 后重试`),{status:503,code:'MODEL_API_KEY_MISSING'});
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` };

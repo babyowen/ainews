@@ -112,7 +112,7 @@ const AUTH_USERS = {
     role: 'admin',
     defaultPath: '/summary',
     passwordEnv: 'KEYDIGEST_ADMIN_PASSWORD',
-    keywords: ['养老', '公积金', '数字政务', '政府基金', '中国烟草', '烟草服务银行', '江苏省国资委'],
+    keywords: ['养老', '公积金', '数字政务', '政府基金', '中国烟草', '烟草服务银行', '江苏省国资委', '江苏机关事务'],
     routes: [
       '/summary',
       '/analysis',
@@ -157,7 +157,7 @@ function getPublicUserProfile(user) {
     displayName: user.displayName,
     role: user.role,
     defaultPath: user.defaultPath,
-    keywords: user.keywords,
+    keywords: user.role === 'admin' ? [...new Set([...(user.keywords || []), '江苏机关事务'])] : user.keywords,
     routes: user.role === 'admin' ? AVAILABLE_ROUTES.map(route => route.path) : (user.routes || []),
   };
 }
@@ -509,14 +509,7 @@ app.post('/api/auth/login', (req, res) => {
     return res.status(401).json({ error: '用户名或密码错误' });
   }
 
-  const profile = {
-    username: user.username,
-    displayName: user.displayName,
-    role: user.role,
-    defaultPath: '/summary',
-    keywords: user.keywords,
-    routes: user.role === 'admin' ? AVAILABLE_ROUTES.map(route => route.path) : (user.routes || []),
-  };
+  const profile = getPublicUserProfile({...user, defaultPath: '/summary'});
   try {
     appendLoginAudit(LOGIN_AUDIT_PATH, {
       username: user.username,
@@ -2683,7 +2676,7 @@ app.post('/api/google-search', async (req, res) => {
 // 字数统计API
 app.get('/api/word-count-stats', async (req, res) => {
   try {
-    const keywords = ['养老', '公积金', '政府基金', '江苏省国资委', '数字政务', '高考', '中国烟草', '烟草服务银行', '潜在招标客户', '江苏地区银行'];
+    const keywords = ['养老', '公积金', '政府基金', '江苏省国资委', '江苏机关事务', '数字政务', '高考', '中国烟草', '烟草服务银行', '潜在招标客户', '江苏地区银行'];
     const { days = 90 } = req.query; // 默认显示最近90天
     
     // 计算日期范围
@@ -3066,9 +3059,10 @@ for (const [url, page] of [
     try {
       let filters = req.query;
       if (page === '/provident-fund/news') {
-        const date = req.query.date || req.query.startDate;
-        if (!date || req.query.endDate && req.query.endDate !== date) return res.status(400).json({error:'请选择单个日期'});
-        filters = {...filters, startDate:date, endDate:date};
+        const startDate = req.query.startDate || req.query.date;
+        const endDate = req.query.endDate || req.query.date || startDate;
+        if (!startDate) return res.status(400).json({error:'请选择日期区间'});
+        filters = {...filters, startDate, endDate};
       }
       res.json(await policyNewsQuery.query(filters, req.query));
     } catch (error) {fundQueryError(res,error);}
@@ -3101,13 +3095,13 @@ app.get('/api/provident-fund/business-types', async (req, res) => {
   } catch (error) {fundQueryError(res,error);}
 });
 
-const {buildBusinessTopicPreview, buildBusinessTopicInput, validateBusinessTopicOutput} = require('./services/businessTopicReport.cjs');
+const {buildBusinessTopicPreview, buildBusinessTopicInput, validateBusinessTopicOutput, normalizeReportFilters} = require('./services/businessTopicReport.cjs');
 for (const [reportKind, prefix, page] of [
   ['region','/api/policy/region-report','/policy/region-report'],
   ['business','/api/provident-fund/business-report','/provident-fund/business-report'],
 ]) {
   async function preview(input) {
-    const result = await policyNewsQuery.reportCandidates(input);
+    const result = await policyNewsQuery.reportCandidates(normalizeReportFilters(input,reportKind));
     return buildBusinessTopicPreview({...result, reportKind});
   }
   app.get(`${prefix}/news`, async (req,res) => {
@@ -3122,21 +3116,34 @@ for (const [reportKind, prefix, page] of [
       if (!input.previewHash) return res.status(400).json({error:'请先预览并确认本次材料'});
       const current=await preview(input);
       if (current.previewHash !== input.previewHash) return res.status(409).json({error:'材料已更新，请重新预览后生成'});
-      const promptId=input.promptId || (reportKind==='business'?'business-topic-comparison-v1':current.filters.regions.length===1?'single-region-default':'multi-region-default');
+      const promptId=input.promptId || (reportKind==='business'?'business-topic-brief-v3':current.filters.regions.length===1?'single-region-default':'multi-region-default');
       const prompt=promptStore.findRegionPrompt(promptId);
       const {messages,snapshot}=buildBusinessTopicInput({preview:current,manualOverrides:input.manualOverrides,prompt,userPrompt:input.userPrompt});
       const modelConfig=getWeeklyReportModel();
-      const reportContent=await completeChat(messages,{modelConfig});
-      const validation=validateBusinessTopicOutput({reportContent,newsReferences:snapshot.newsReferences,reportKind});
-      if (!validation.valid) return res.status(502).json({error:validation.errors.join('；')});
+      let draft=await completeChat(messages,{modelConfig});
+      let validation=validateBusinessTopicOutput({reportContent:draft,newsReferences:snapshot.newsReferences,reportKind});
+      let citationRepairAttempted=false;
+      if (!validation.valid && validation.citationIssue) {
+        console.warn(`[${reportKind} report] 引用校验未通过`,JSON.stringify({invalidCitationIds:validation.invalidCitationIds,malformedCitationCount:validation.malformedCitations.length}));
+        const repairMessages=[...messages,{role:'assistant',content:draft},{role:'user',content:`请对照上面原始证据校正刚才的报告。校验问题：${validation.errors.join('；')}。允许引用的编号仅有：${snapshot.newsReferences.map(row=>`[N${row.id}]`).join(' ')}。不能把顺序号当作新闻ID，也不能将错误编号随意替换为某个有效编号。逐项确认事实与摘要的对应关系；证据不足的结论请删除或明确写为待核实。保留要求的章节结构，重新输出完整 Markdown 报告，不输出纠错说明。每个引用使用独立的 [N数字编号]。`}];
+        if (repairMessages.reduce((n,m)=>n+m.content.length,0)<=180000) {
+          citationRepairAttempted=true;
+          draft=await completeChat(repairMessages,{modelConfig});
+          validation=validateBusinessTopicOutput({reportContent:draft,newsReferences:snapshot.newsReferences,reportKind});
+        }
+      }
+      if (!validation.valid) return res.status(502).json({error:validation.errors.join('；')+(citationRepairAttempted?'；自动校正后仍未通过，请重试':''),code:'REPORT_VALIDATION_FAILED',invalidCitationIds:validation.invalidCitationIds,citationRepairAttempted});
+      const reportContent=validation.reportContent;
+      snapshot.citationRepairAttempted=citationRepairAttempted;
       snapshot.modelName=modelConfig.model;
       const exportSignature=signSessionPayload(`fund-report:${JSON.stringify({snapshot,reportContent})}`);
       res.json({reportContent,snapshot,exportSignature,
         debug:{systemPrompt:messages[0].content,userPrompt:messages[1].content},
-        meta:{...snapshot,...snapshot.filters,regions:snapshot.filters.regions.map(x=>x.label),regionCount:snapshot.filters.regions.length,promptVersion:prompt.name},
+        meta:{...snapshot,...snapshot.filters,regions:(reportKind==='business'?snapshot.regionCoverage.filter(x=>x.count):snapshot.filters.regions).map(x=>x.label),regionCount:(reportKind==='business'?snapshot.regionCoverage.filter(x=>x.count):snapshot.filters.regions).length,promptVersion:prompt.name},
       });
     } catch (error) {
-      res.status(error.status || 500).json({error:error.status ? error.message : '报告生成失败，请重试；输入过长时请缩小范围'});
+      console.error(`[${reportKind} report]`,redactError(error.message));
+      res.status(error.status || 500).json({error:error.status ? error.message : '报告生成失败，请稍后重试或联系管理员检查模型服务',...(error.code==='MODEL_API_KEY_MISSING'?{code:error.code}:{})});
     }
   });
   app.post(`${prefix}/export-pdf`, async (req,res) => {
@@ -3148,7 +3155,7 @@ for (const [reportKind, prefix, page] of [
     }
     try {
       const title=reportKind==='business'?`公积金业务政策报告 · ${snapshot.businessTopic}`:'地区政策报告';
-      const payload={...snapshot,...snapshot.filters,title,reportContent,regions:snapshot.filters.regions.map(x=>x.label)};
+      const payload={...snapshot,...snapshot.filters,title,reportContent,regions:(reportKind==='business'?snapshot.regionCoverage.filter(x=>x.count):snapshot.filters.regions).map(x=>x.label)};
       const pdf=await renderRegionPolicyReportPdf(payload);
       const filename=buildRegionPolicyReportPdfFilename(payload);
       res.setHeader('Content-Type','application/pdf');

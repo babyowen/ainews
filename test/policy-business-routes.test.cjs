@@ -26,3 +26,11 @@ test('接口执行叶子权限；未登录401、无关键词403、不隐式授�
  const missing=await fixture(t,{role:'restricted',keywords:['养老'],routes:['/policy/regions']});
  assert.equal((await missing.request('GET','/api/policy/region-news?'+query,null,missing.token)).status,403);
 });
+test('每日新闻接受日期区间，并交叉应用地区与业务筛选',async t=>{
+ const {request,token}=await fixture(t);
+ const result=await request('GET','/api/provident-fund/news?'+query,null,token);
+ assert.equal(result.status,200);
+ assert.equal(result.body.filters.startDate,'2026-10-01');
+ assert.equal(result.body.filters.endDate,'2026-10-03');
+ assert.deepEqual(result.body.rows.map(r=>r.id),[2,1]);
+});
