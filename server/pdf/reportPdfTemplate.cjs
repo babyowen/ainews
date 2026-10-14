@@ -18,6 +18,15 @@ function formatDate(dateString) {
   });
 }
 
+function formatDateRange(startDate, endDate) {
+  const start = formatDate(startDate).replace(/\//g, '.');
+  const end = formatDate(endDate).replace(/\//g, '.');
+  const sameYear = /^\d{4}\.\d{2}\.\d{2}$/.test(start)
+    && /^\d{4}\.\d{2}\.\d{2}$/.test(end)
+    && start.slice(0, 4) === end.slice(0, 4);
+  return `${start} - ${sameYear ? end.slice(5) : end}`;
+}
+
 function formatGeneratedAt(date = new Date()) {
   return date.toLocaleString('zh-CN', {
     year: 'numeric',
@@ -31,7 +40,8 @@ function formatGeneratedAt(date = new Date()) {
 
 function buildReportPdfHtml({ keyword, startDate, endDate, newsCount, modelName, reportContentHtml, includeContact = false }) {
   const reportTitle = keyword === '江苏省国资委' ? '省属国企新闻周报' : `${keyword}新闻周报`;
-  const dateRange = `${formatDate(startDate)} - ${formatDate(endDate)}`;
+  const dateRange = formatDateRange(startDate, endDate);
+  const modelLabel = String(modelName || 'DeepSeek R1');
 
   return `<!doctype html>
 <html lang="zh-CN">
@@ -81,95 +91,103 @@ function buildReportPdfHtml({ keyword, startDate, endDate, newsCount, modelName,
 
       .report-cover {
         position: relative;
-        margin: 0 0 12mm;
-        padding: 11mm 13mm 8.5mm;
-        border-radius: 7mm;
+        margin: 0 0 9mm;
+        padding: 8mm 10mm 6mm;
+        border-radius: 2.5mm;
+        border-top: 1mm solid #5ba7a7;
         overflow: hidden;
         color: #ffffff;
-        background:
-          radial-gradient(circle at right top, rgba(123, 191, 255, 0.28), transparent 28%),
-          linear-gradient(135deg, #203547 0%, #1f5d68 58%, #38a6a5 100%);
-      }
-
-      .report-cover::after {
-        content: "";
-        position: absolute;
-        inset: auto -18mm -22mm auto;
-        width: 52mm;
-        height: 52mm;
-        border-radius: 999px;
-        background: rgba(255, 255, 255, 0.12);
-      }
-
-      .report-cover-inner {
-        position: relative;
-        z-index: 1;
+        background: linear-gradient(115deg, #192f40 0%, #244958 100%);
+        page-break-inside: avoid;
+        break-inside: avoid;
       }
 
       .report-brand {
-        display: inline-flex;
+        display: flex;
         align-items: center;
-        padding: 2.5mm 4.5mm;
-        margin-bottom: 3.4mm;
-        border-radius: 999px;
-        border: 0.35mm solid rgba(255, 255, 255, 0.18);
-        background: rgba(255, 255, 255, 0.10);
-        font-size: 9pt;
+        gap: 2.5mm;
+        margin-bottom: 3.5mm;
+        color: #b5d4d8;
+        font-size: 8pt;
         font-weight: 600;
-        letter-spacing: 0.08em;
+        letter-spacing: 0.16em;
+      }
+
+      .report-brand::before {
+        content: "";
+        width: 7mm;
+        height: 0.5mm;
+        background: #78b9b7;
       }
 
       .report-title {
-        margin: 0 0 2.1mm;
-        max-width: 125mm;
-        font-size: 27pt;
-        line-height: 1.12;
-        font-weight: 800;
-        letter-spacing: 0.02em;
+        margin: 0 0 2.5mm;
+        font-size: 31.5pt;
+        line-height: 1.25;
+        font-weight: 700;
+        letter-spacing: 0.025em;
+        overflow-wrap: anywhere;
       }
 
       .report-subtitle {
         margin: 0;
-        max-width: 110mm;
-        color: rgba(255, 255, 255, 0.84);
-        font-size: 10.5pt;
-        line-height: 1.62;
+        color: #bbccd4;
+        font-size: 9pt;
+        line-height: 1.6;
+        letter-spacing: 0.04em;
       }
 
       .report-meta {
         display: grid;
-        grid-template-columns: minmax(56mm, 1.5fr) minmax(32mm, 0.75fr) minmax(38mm, 1fr);
-        gap: 3mm;
-        margin-top: 5.5mm;
-        max-width: 100%;
+        grid-template-columns: minmax(0, 1.08fr) minmax(0, 0.52fr) minmax(0, 1.4fr);
+        gap: 4mm;
+        margin-top: 5mm;
+        padding-top: 4mm;
+        border-top: 0.25mm solid rgba(214, 233, 239, 0.25);
       }
 
       .report-meta-card {
-        padding: 3.2mm 4mm;
-        border-radius: 4.5mm;
-        background: rgba(255, 255, 255, 0.94);
-        color: var(--ink);
+        min-width: 0;
+      }
+
+      .report-meta-card + .report-meta-card {
+        border-left: 0.25mm solid rgba(214, 233, 239, 0.22);
+        padding-left: 4mm;
       }
 
       .report-meta-label {
         display: block;
-        margin-bottom: 1.5mm;
-        color: #667b92;
-        font-size: 7.7pt;
+        margin-bottom: 1.2mm;
+        color: #b2c8d1;
+        font-size: 7.5pt;
+        line-height: 1.4;
         letter-spacing: 0.08em;
       }
 
       .report-meta-value {
         display: block;
-        font-size: 10.8pt;
+        color: #ffffff;
+        font-size: 10.5pt;
         line-height: 1.4;
-        font-weight: 700;
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+        overflow-wrap: anywhere;
+      }
+
+      .report-model-value {
+        white-space: nowrap;
+      }
+
+      /* Preserve unusually long custom model labels instead of clipping them. */
+      .report-model-value.is-long {
+        white-space: normal;
+        font-size: 9.5pt;
       }
 
       .report-contact {
-        margin-top: 3.2mm;
+        margin-top: 3.5mm;
         text-align: right;
-        color: rgba(255, 255, 255, 0.66);
+        color: #b2c8d1;
         font-size: 7.5pt;
         line-height: 1.45;
         letter-spacing: 0.01em;
@@ -361,10 +379,10 @@ function buildReportPdfHtml({ keyword, startDate, endDate, newsCount, modelName,
         <div class="report-cover-inner">
           <div class="report-brand">AI新闻周报</div>
           <h1 class="report-title">${escapeHtml(reportTitle)}</h1>
-          <p class="report-subtitle">人工智能驱动的新闻分析与洞察</p>
+          <p class="report-subtitle">每周要闻 · 行业动态 · 重点洞察</p>
           <div class="report-meta">
             <div class="report-meta-card">
-              <span class="report-meta-label">时间区间</span>
+              <span class="report-meta-label">报告周期</span>
               <strong class="report-meta-value">${escapeHtml(dateRange)}</strong>
             </div>
             <div class="report-meta-card">
@@ -373,7 +391,7 @@ function buildReportPdfHtml({ keyword, startDate, endDate, newsCount, modelName,
             </div>
             <div class="report-meta-card">
               <span class="report-meta-label">AI 模型</span>
-              <strong class="report-meta-value">${escapeHtml(modelName || 'DeepSeek R1')}</strong>
+              <strong class="report-meta-value report-model-value${modelLabel.length > 28 ? ' is-long' : ''}">${escapeHtml(modelLabel)}</strong>
             </div>
           </div>
           ${includeContact ? '<div class="report-contact">定制关键词联系人：顾芷西-13305150560</div>' : ''}
@@ -413,4 +431,5 @@ module.exports = {
   buildFooterTemplate,
   buildReportPdfHtml,
   formatGeneratedAt,
+  formatDateRange,
 };
