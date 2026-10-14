@@ -18,6 +18,15 @@ function formatDate(dateString) {
   });
 }
 
+function formatDateRange(startDate, endDate) {
+  const start = formatDate(startDate).replace(/\//g, '.');
+  const end = formatDate(endDate).replace(/\//g, '.');
+  const sameYear = /^\d{4}\.\d{2}\.\d{2}$/.test(start)
+    && /^\d{4}\.\d{2}\.\d{2}$/.test(end)
+    && start.slice(0, 4) === end.slice(0, 4);
+  return `${start} - ${sameYear ? end.slice(5) : end}`;
+}
+
 function formatGeneratedAt(date = new Date()) {
   return date.toLocaleString('zh-CN', {
     year: 'numeric',
@@ -31,7 +40,8 @@ function formatGeneratedAt(date = new Date()) {
 
 function buildReportPdfHtml({ keyword, startDate, endDate, newsCount, modelName, reportContentHtml, includeContact = false }) {
   const reportTitle = keyword === '江苏省国资委' ? '省属国企新闻周报' : `${keyword}新闻周报`;
-  const dateRange = `${formatDate(startDate)} - ${formatDate(endDate)}`;
+  const dateRange = formatDateRange(startDate, endDate);
+  const modelLabel = String(modelName || 'DeepSeek R1');
 
   return `<!doctype html>
 <html lang="zh-CN">
@@ -72,7 +82,7 @@ function buildReportPdfHtml({ keyword, startDate, endDate, newsCount, modelName,
 
       body {
         font-size: 12pt;
-        line-height: 1.84;
+        line-height: 1.8;
       }
 
       .report-document {
@@ -81,95 +91,123 @@ function buildReportPdfHtml({ keyword, startDate, endDate, newsCount, modelName,
 
       .report-cover {
         position: relative;
-        margin: 0 0 12mm;
-        padding: 11mm 13mm 8.5mm;
-        border-radius: 7mm;
+        margin: 0 0 9mm;
+        padding: 8mm 10mm 6mm;
+        border-radius: 4mm;
+        border-top: 1mm solid #5ba7a7;
         overflow: hidden;
         color: #ffffff;
-        background:
-          radial-gradient(circle at right top, rgba(123, 191, 255, 0.28), transparent 28%),
-          linear-gradient(135deg, #203547 0%, #1f5d68 58%, #38a6a5 100%);
-      }
-
-      .report-cover::after {
-        content: "";
-        position: absolute;
-        inset: auto -18mm -22mm auto;
-        width: 52mm;
-        height: 52mm;
-        border-radius: 999px;
-        background: rgba(255, 255, 255, 0.12);
-      }
-
-      .report-cover-inner {
-        position: relative;
-        z-index: 1;
+        background: linear-gradient(115deg, #1c3448 0%, #245361 65%, #32757b 100%);
+        page-break-inside: avoid;
+        break-inside: avoid;
       }
 
       .report-brand {
-        display: inline-flex;
+        display: flex;
         align-items: center;
-        padding: 2.5mm 4.5mm;
-        margin-bottom: 3.4mm;
-        border-radius: 999px;
-        border: 0.35mm solid rgba(255, 255, 255, 0.18);
-        background: rgba(255, 255, 255, 0.10);
-        font-size: 9pt;
+        gap: 2.5mm;
+        margin-bottom: 3.5mm;
+        color: #b5d4d8;
+        font-size: 8pt;
         font-weight: 600;
-        letter-spacing: 0.08em;
+        letter-spacing: 0.16em;
+      }
+
+      .report-brand::before {
+        content: "";
+        width: 7mm;
+        height: 0.5mm;
+        background: #78b9b7;
       }
 
       .report-title {
-        margin: 0 0 2.1mm;
-        max-width: 125mm;
-        font-size: 27pt;
-        line-height: 1.12;
-        font-weight: 800;
-        letter-spacing: 0.02em;
+        margin: 0 0 2.5mm;
+        font-size: 31.5pt;
+        line-height: 1.25;
+        font-weight: 700;
+        letter-spacing: 0.025em;
+        overflow-wrap: anywhere;
       }
 
       .report-subtitle {
         margin: 0;
-        max-width: 110mm;
-        color: rgba(255, 255, 255, 0.84);
-        font-size: 10.5pt;
-        line-height: 1.62;
+        color: #bbccd4;
+        font-size: 9pt;
+        line-height: 1.6;
+        letter-spacing: 0.04em;
       }
 
       .report-meta {
         display: grid;
-        grid-template-columns: minmax(56mm, 1.5fr) minmax(32mm, 0.75fr) minmax(38mm, 1fr);
+        grid-template-columns: minmax(0, 1.08fr) minmax(0, 0.52fr) minmax(0, 1.4fr);
         gap: 3mm;
-        margin-top: 5.5mm;
-        max-width: 100%;
+        margin-top: 5mm;
       }
 
       .report-meta-card {
-        padding: 3.2mm 4mm;
-        border-radius: 4.5mm;
-        background: rgba(255, 255, 255, 0.94);
-        color: var(--ink);
+        min-width: 0;
+        padding: 3mm 3.5mm;
+        border-radius: 2.8mm;
+        background: #edf4fb;
+        color: #375f80;
+      }
+
+      .report-meta-card:nth-child(2) {
+        background: #e9f5f1;
+        color: #367969;
+      }
+
+      .report-meta-card:nth-child(3) {
+        background: #f0f2fa;
+        color: #586b96;
       }
 
       .report-meta-label {
-        display: block;
-        margin-bottom: 1.5mm;
-        color: #667b92;
-        font-size: 7.7pt;
+        display: flex;
+        align-items: center;
+        gap: 1.6mm;
+        margin-bottom: 1.8mm;
+        color: inherit;
+        font-size: 7.5pt;
+        line-height: 1.4;
         letter-spacing: 0.08em;
+      }
+
+      .report-meta-label svg {
+        width: 3.4mm;
+        height: 3.4mm;
+        flex: none;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 1.7;
+        stroke-linecap: round;
+        stroke-linejoin: round;
       }
 
       .report-meta-value {
         display: block;
-        font-size: 10.8pt;
+        color: #20394e;
+        font-size: 10.5pt;
         line-height: 1.4;
-        font-weight: 700;
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+        overflow-wrap: anywhere;
+      }
+
+      .report-model-value {
+        white-space: nowrap;
+      }
+
+      /* Preserve unusually long custom model labels instead of clipping them. */
+      .report-model-value.is-long {
+        white-space: normal;
+        font-size: 9.5pt;
       }
 
       .report-contact {
-        margin-top: 3.2mm;
+        margin-top: 3.5mm;
         text-align: right;
-        color: rgba(255, 255, 255, 0.66);
+        color: #b2c8d1;
         font-size: 7.5pt;
         line-height: 1.45;
         letter-spacing: 0.01em;
@@ -203,13 +241,13 @@ function buildReportPdfHtml({ keyword, startDate, endDate, newsCount, modelName,
       }
 
       .report-body h2 {
-        margin: 8mm 0 3mm;
+        margin: 7mm 0 3mm;
         font-size: 18pt;
         line-height: 1.34;
       }
 
       .report-body h3 {
-        margin: 6mm 0 2.4mm;
+        margin: 5mm 0 2.4mm;
         font-size: 14pt;
         line-height: 1.42;
       }
@@ -237,13 +275,19 @@ function buildReportPdfHtml({ keyword, startDate, endDate, newsCount, modelName,
         widows: 3;
       }
 
+      /* Keep a concluding italic summary together instead of a one-line tail. */
+      .report-body > p:last-child:has(> em:only-child) {
+        page-break-inside: avoid;
+        break-inside: avoid;
+      }
+
       .report-body ul,
       .report-body ol,
       .report-body blockquote,
       .report-body pre,
       .report-body table {
-        page-break-inside: avoid;
-        break-inside: avoid;
+        page-break-inside: auto;
+        break-inside: auto;
       }
 
       .report-body ul,
@@ -252,10 +296,23 @@ function buildReportPdfHtml({ keyword, startDate, endDate, newsCount, modelName,
       }
 
       .report-body li {
-        margin: 0 0 2.3mm;
+        margin: 0 0 2mm;
         color: #2b3f56;
         orphans: 2;
         widows: 2;
+        page-break-inside: avoid;
+        break-inside: avoid;
+      }
+
+      /* A parent list item must not keep its entire nested list together. */
+      .report-body li:has(> ul),
+      .report-body li:has(> ol) {
+        page-break-inside: auto;
+        break-inside: auto;
+      }
+
+      .report-body li:last-child {
+        margin-bottom: 0;
       }
 
       .report-body strong {
@@ -325,6 +382,15 @@ function buildReportPdfHtml({ keyword, startDate, endDate, newsCount, modelName,
         color: #1f3d5e;
         font-weight: 700;
       }
+
+      .report-body thead {
+        display: table-header-group;
+      }
+
+      .report-body tr {
+        page-break-inside: avoid;
+        break-inside: avoid;
+      }
     </style>
   </head>
   <body>
@@ -336,16 +402,16 @@ function buildReportPdfHtml({ keyword, startDate, endDate, newsCount, modelName,
           <p class="report-subtitle">人工智能驱动的新闻分析与洞察</p>
           <div class="report-meta">
             <div class="report-meta-card">
-              <span class="report-meta-label">时间区间</span>
+              <span class="report-meta-label"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4m10-4v4M3 11h18m-13 4h2m4 0h2"/></svg>报告周期</span>
               <strong class="report-meta-value">${escapeHtml(dateRange)}</strong>
             </div>
             <div class="report-meta-card">
-              <span class="report-meta-label">新闻数量</span>
+              <span class="report-meta-label"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h8M8 11h8M8 15h3m3 0h2M8 18h8"/></svg>新闻数量</span>
               <strong class="report-meta-value">${escapeHtml(newsCount)} 条</strong>
             </div>
             <div class="report-meta-card">
-              <span class="report-meta-label">AI 模型</span>
-              <strong class="report-meta-value">${escapeHtml(modelName || 'DeepSeek R1')}</strong>
+              <span class="report-meta-label"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/><rect x="9" y="9" width="6" height="6" rx="1"/><path d="M9 3v3m6-3v3M9 18v3m6-3v3M3 9h3m-3 6h3m12-6h3m-3 6h3"/></svg>AI 模型</span>
+              <strong class="report-meta-value report-model-value${modelLabel.length > 28 ? ' is-long' : ''}">${escapeHtml(modelLabel)}</strong>
             </div>
           </div>
           ${includeContact ? '<div class="report-contact">定制关键词联系人：顾芷西-13305150560</div>' : ''}
@@ -385,4 +451,5 @@ module.exports = {
   buildFooterTemplate,
   buildReportPdfHtml,
   formatGeneratedAt,
+  formatDateRange,
 };

@@ -1,4 +1,4 @@
-const { renderMarkdownToPrintHtml } = require('./markdownToPrintHtml.cjs');
+const { renderWeeklyReportMarkdown } = require('./weeklyReportMarkdown.cjs');
 const { PdfRendererUnavailableError, getPdfBrowser } = require('./playwrightBrowser.cjs');
 const { buildFooterTemplate, buildReportPdfHtml, formatGeneratedAt } = require('./reportPdfTemplate.cjs');
 
@@ -29,7 +29,7 @@ async function renderReportPdf(payload) {
 
   try {
     const generatedAt = formatGeneratedAt(new Date());
-    const reportContentHtml = renderMarkdownToPrintHtml(payload.reportContent);
+    const reportContentHtml = renderWeeklyReportMarkdown(payload.reportContent);
     const html = buildReportPdfHtml({
       ...payload,
       reportContentHtml,

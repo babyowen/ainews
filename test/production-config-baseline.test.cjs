@@ -125,7 +125,7 @@ test('production auto-report execution uses the layered promptStore without chan
   }
 });
 
-test('production-edited keyword prompts stay byte stable through the refactor', () => {
+test('audited keyword prompts stay byte stable except approved version updates', () => {
   const config = readJson('keyword-prompts.json');
   const expected = [
     {
@@ -143,7 +143,8 @@ test('production-edited keyword prompts stay byte stable through the refactor', 
     {
       keyword: '烟草服务银行',
       id: 'v1',
-      systemHash: '36c87e25303f24230e4f9d45c195f82d556c6d21a1c4c81aaec0c4be579efd49',
+      // Issue #31: production baseline plus explicit Markdown heading guidance.
+      systemHash: 'ea3e589d34542700f31e972ff7165f47fa5ab21e704e410f09461635b494ac93',
       userHash: '10f87e3a50de9ea2ccb2e91c89b8af9a54df02835311503f8a64e417a93aa9aa',
     },
   ];
