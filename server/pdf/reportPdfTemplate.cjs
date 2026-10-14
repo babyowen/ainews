@@ -93,11 +93,11 @@ function buildReportPdfHtml({ keyword, startDate, endDate, newsCount, modelName,
         position: relative;
         margin: 0 0 9mm;
         padding: 8mm 10mm 6mm;
-        border-radius: 2.5mm;
+        border-radius: 4mm;
         border-top: 1mm solid #5ba7a7;
         overflow: hidden;
         color: #ffffff;
-        background: linear-gradient(115deg, #192f40 0%, #244958 100%);
+        background: linear-gradient(115deg, #1c3448 0%, #245361 65%, #32757b 100%);
         page-break-inside: avoid;
         break-inside: avoid;
       }
@@ -140,33 +140,53 @@ function buildReportPdfHtml({ keyword, startDate, endDate, newsCount, modelName,
       .report-meta {
         display: grid;
         grid-template-columns: minmax(0, 1.08fr) minmax(0, 0.52fr) minmax(0, 1.4fr);
-        gap: 4mm;
+        gap: 3mm;
         margin-top: 5mm;
-        padding-top: 4mm;
-        border-top: 0.25mm solid rgba(214, 233, 239, 0.25);
       }
 
       .report-meta-card {
         min-width: 0;
+        padding: 3mm 3.5mm;
+        border-radius: 2.8mm;
+        background: #edf4fb;
+        color: #375f80;
       }
 
-      .report-meta-card + .report-meta-card {
-        border-left: 0.25mm solid rgba(214, 233, 239, 0.22);
-        padding-left: 4mm;
+      .report-meta-card:nth-child(2) {
+        background: #e9f5f1;
+        color: #367969;
+      }
+
+      .report-meta-card:nth-child(3) {
+        background: #f0f2fa;
+        color: #586b96;
       }
 
       .report-meta-label {
-        display: block;
-        margin-bottom: 1.2mm;
-        color: #b2c8d1;
+        display: flex;
+        align-items: center;
+        gap: 1.6mm;
+        margin-bottom: 1.8mm;
+        color: inherit;
         font-size: 7.5pt;
         line-height: 1.4;
         letter-spacing: 0.08em;
       }
 
+      .report-meta-label svg {
+        width: 3.4mm;
+        height: 3.4mm;
+        flex: none;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 1.7;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+
       .report-meta-value {
         display: block;
-        color: #ffffff;
+        color: #20394e;
         font-size: 10.5pt;
         line-height: 1.4;
         font-weight: 600;
@@ -379,18 +399,18 @@ function buildReportPdfHtml({ keyword, startDate, endDate, newsCount, modelName,
         <div class="report-cover-inner">
           <div class="report-brand">AI新闻周报</div>
           <h1 class="report-title">${escapeHtml(reportTitle)}</h1>
-          <p class="report-subtitle">每周要闻 · 行业动态 · 重点洞察</p>
+          <p class="report-subtitle">人工智能驱动的新闻分析与洞察</p>
           <div class="report-meta">
             <div class="report-meta-card">
-              <span class="report-meta-label">报告周期</span>
+              <span class="report-meta-label"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4m10-4v4M3 11h18m-13 4h2m4 0h2"/></svg>报告周期</span>
               <strong class="report-meta-value">${escapeHtml(dateRange)}</strong>
             </div>
             <div class="report-meta-card">
-              <span class="report-meta-label">新闻数量</span>
+              <span class="report-meta-label"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h8M8 11h8M8 15h3m3 0h2M8 18h8"/></svg>新闻数量</span>
               <strong class="report-meta-value">${escapeHtml(newsCount)} 条</strong>
             </div>
             <div class="report-meta-card">
-              <span class="report-meta-label">AI 模型</span>
+              <span class="report-meta-label"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/><rect x="9" y="9" width="6" height="6" rx="1"/><path d="M9 3v3m6-3v3M9 18v3m6-3v3M3 9h3m-3 6h3m12-6h3m-3 6h3"/></svg>AI 模型</span>
               <strong class="report-meta-value report-model-value${modelLabel.length > 28 ? ' is-long' : ''}">${escapeHtml(modelLabel)}</strong>
             </div>
           </div>
