@@ -72,7 +72,7 @@ function buildReportPdfHtml({ keyword, startDate, endDate, newsCount, modelName,
 
       body {
         font-size: 12pt;
-        line-height: 1.84;
+        line-height: 1.8;
       }
 
       .report-document {
@@ -203,13 +203,13 @@ function buildReportPdfHtml({ keyword, startDate, endDate, newsCount, modelName,
       }
 
       .report-body h2 {
-        margin: 8mm 0 3mm;
+        margin: 7mm 0 3mm;
         font-size: 18pt;
         line-height: 1.34;
       }
 
       .report-body h3 {
-        margin: 6mm 0 2.4mm;
+        margin: 5mm 0 2.4mm;
         font-size: 14pt;
         line-height: 1.42;
       }
@@ -237,13 +237,19 @@ function buildReportPdfHtml({ keyword, startDate, endDate, newsCount, modelName,
         widows: 3;
       }
 
+      /* Keep a concluding italic summary together instead of a one-line tail. */
+      .report-body > p:last-child:has(> em:only-child) {
+        page-break-inside: avoid;
+        break-inside: avoid;
+      }
+
       .report-body ul,
       .report-body ol,
       .report-body blockquote,
       .report-body pre,
       .report-body table {
-        page-break-inside: avoid;
-        break-inside: avoid;
+        page-break-inside: auto;
+        break-inside: auto;
       }
 
       .report-body ul,
@@ -252,10 +258,23 @@ function buildReportPdfHtml({ keyword, startDate, endDate, newsCount, modelName,
       }
 
       .report-body li {
-        margin: 0 0 2.3mm;
+        margin: 0 0 2mm;
         color: #2b3f56;
         orphans: 2;
         widows: 2;
+        page-break-inside: avoid;
+        break-inside: avoid;
+      }
+
+      /* A parent list item must not keep its entire nested list together. */
+      .report-body li:has(> ul),
+      .report-body li:has(> ol) {
+        page-break-inside: auto;
+        break-inside: auto;
+      }
+
+      .report-body li:last-child {
+        margin-bottom: 0;
       }
 
       .report-body strong {
@@ -324,6 +343,15 @@ function buildReportPdfHtml({ keyword, startDate, endDate, newsCount, modelName,
         background: #f3f7fb;
         color: #1f3d5e;
         font-weight: 700;
+      }
+
+      .report-body thead {
+        display: table-header-group;
+      }
+
+      .report-body tr {
+        page-break-inside: avoid;
+        break-inside: avoid;
       }
     </style>
   </head>
