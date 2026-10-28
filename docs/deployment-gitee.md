@@ -124,7 +124,7 @@ find /www/wwwroot/keydigest/shared/data/auto-report-pdfs -maxdepth 1 -name '*.pd
 - 生产 admin 和 `yzgjj` 原密码均能登录；
 - `yzgjj` 仅有“公积金”关键词；
 - 自动周报页启停状态、关键词集合与本次审计确认的配置一致；当前 Git 默认层包含 6 个关键词；
-- 所有报告工作流均使用 Agent Router / DeepSeek V4.1 Flash；模型不由用户切换；
+- 自动周报使用 Agent Router / `deepseek-v4-pro-0813` 并开启思考；手动报告与政策分析的默认模型仍为 DeepSeek V4.1 Flash。自动任务的 Prompt、评分门槛、摘要版本及启停状态按发布前快照核对；
 - “中国烟草”“江苏地区银行”“烟草服务银行”分别命中现有 Prompt，烟草服务银行为 `v1`；
 - 周报、政策提取/对比、地区政策报告均能读取原有模板；
 - Prompt 管理页面能显示“默认/生产自定义”来源，保存后只新增 `shared/config/runtime/` 差异；

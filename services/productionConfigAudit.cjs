@@ -49,9 +49,12 @@ function auditProductionConfig({ sourceConfig, baselineConfig = path.join(__dirn
   const transforms = [];
   let sourceKeywords;
   let targetModelKey;
+  let targetAutoReportModelKey;
   try {
     sourceKeywords = readConfig(sourceConfig, 'keyword-prompts.json');
-    targetModelKey = readConfig(baselineConfig, 'weekly-report-models.json').defaultModelKey;
+    const modelConfig = readConfig(baselineConfig, 'weekly-report-models.json');
+    targetModelKey = modelConfig.defaultModelKey;
+    targetAutoReportModelKey = modelConfig.autoReportModelKey || targetModelKey;
     if (!targetModelKey) throw new Error('模型默认 key 为空');
   } catch {
     throw new Error('迁移配置审计失败：keyword-prompts.json 或 weekly-report-models.json 缺失或格式不正确');
@@ -83,7 +86,7 @@ function auditProductionConfig({ sourceConfig, baselineConfig = path.join(__dirn
       if (name === 'auto-report-config.json') {
         const groups = [source.defaults, ...Object.values(source.keywords || {})];
         for (const group of groups) {
-          if (group && LEGACY_KEYS.has(group.modelKey || '')) group.modelKey = targetModelKey;
+          if (group && LEGACY_KEYS.has(group.modelKey || '')) group.modelKey = targetAutoReportModelKey;
         }
         const tobacco = source.keywords?.['烟草服务银行'];
         const prompts = sourceKeywords.keywords?.['烟草服务银行']?.prompts || [];
@@ -92,7 +95,7 @@ function auditProductionConfig({ sourceConfig, baselineConfig = path.join(__dirn
         }
         // Empty keyword modelKey inherits the fixed default and is equivalent.
         for (const group of Object.values(canonical.keywords || {})) {
-          if (group && !group.modelKey) group.modelKey = targetModelKey;
+          if (group && !group.modelKey) group.modelKey = targetAutoReportModelKey;
         }
       }
       if (semanticHash(source) !== semanticHash(canonical)) differences.push(name);

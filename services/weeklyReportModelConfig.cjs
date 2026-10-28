@@ -24,6 +24,11 @@ function getWeeklyReportModel(modelKey) {
   return { key, ...model };
 }
 
+function getAutomaticReportModel() {
+  const config = loadWeeklyReportModelConfig();
+  return getWeeklyReportModel(config.autoReportModelKey || config.defaultModelKey);
+}
+
 function listWeeklyReportModels() {
   const config = loadWeeklyReportModelConfig();
   return Object.entries(config.models).map(([key, model]) => ({
@@ -34,7 +39,8 @@ function listWeeklyReportModels() {
     contextWindow: model.contextWindow,
     maxOutputTokens: model.maxOutputTokens,
     description: model.description,
-    isDefault: key === config.defaultModelKey
+    isDefault: key === config.defaultModelKey,
+    isAutoReportDefault: key === (config.autoReportModelKey || config.defaultModelKey)
   }));
 }
 
@@ -61,6 +67,7 @@ function buildDeepSeekChatPayload(modelConfig, messages, stream = false, extra =
 
 module.exports = {
   buildDeepSeekChatPayload,
+  getAutomaticReportModel,
   getWeeklyReportModel,
   listWeeklyReportModels,
   loadWeeklyReportModelConfig
