@@ -94,7 +94,7 @@ test('getAutoReportWeekRange handles Saturday and cross-year ranges', () => {
 test('normalizeAutoReportConfig supplies safe disabled defaults', () => {
   const config = normalizeAutoReportConfig(null);
   assert.equal(config.enabled, false);
-  assert.equal(config.defaults.modelKey, 'deepseek-v4.1-flash');
+  assert.equal(config.defaults.modelKey, 'deepseek-v4-pro-0813');
   assert.equal(config.defaults.minScore, 3);
   assert.deepEqual(config.keywords, {});
 });
@@ -124,7 +124,7 @@ test('buildAutoReportConfig merges keyword overrides with defaults', () => {
   assert.deepEqual(config.enabledKeywords, [
     {
       keyword: '公积金',
-      modelKey: 'deepseek-v4.1-flash',
+      modelKey: 'deepseek-v4-pro-0813',
       promptId: 'housing',
       minScore: 4.5,
       summaryVersion: 'short',
@@ -140,7 +140,7 @@ test('validateAutoReportConfigReferences rejects missing explicit prompts and mo
   );
   const getWeeklyPrompts = () => ({ systemPrompt: 'global system', userPrompt: 'global user' });
   const getModel = (modelKey) => {
-    assert.equal(modelKey, 'deepseek-v4.1-flash');
+    assert.equal(modelKey, 'deepseek-v4-pro-0813');
     return { key: modelKey };
   };
 
@@ -548,7 +548,7 @@ test('sanitizeAutoReportRecord hides pdfPath from API responses', () => {
   assert.equal(record.pdf_filename, 'report.pdf');
 });
 
-test('automatic cycles reload runtime enablement and prompts while retaining the fixed model', async () => {
+test('automatic cycles reload runtime enablement and prompts while retaining the dedicated Pro model', async () => {
   const { createConfigStore } = require('../services/configStore.cjs');
   const { createPromptStore } = require('../services/promptStore.cjs');
   const { getWeeklyReportModel } = require('../services/weeklyReportModelConfig.cjs');
@@ -580,6 +580,7 @@ test('automatic cycles reload runtime enablement and prompts while retaining the
     assert.equal(result.results.length, 1);
     assert.equal(result.results[0].status, 'success');
     assert.equal(calls[0].systemPrompt, 'AUTO_RUNTIME');
-    assert.equal(calls[0].modelConfig.model, 'DeepSeek-V4.1-Flash');
+    assert.equal(calls[0].modelConfig.model, 'deepseek-v4-pro-0813');
+    assert.deepEqual(calls[0].modelConfig.thinking, { type: 'enabled' });
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

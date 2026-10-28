@@ -5,17 +5,17 @@ const config = require('../config/keyword-prompts.json');
 const auto = require('../config/auto-report-config.json');
 const sha = value => crypto.createHash('sha256').update(value).digest('hex');
 
-// Read-only production audit on 2026-10-14: no runtime prompt overrides.
-// Removing only the approved formatting clarification must recover each exact
-// production prompt, protecting business guidance and the selected Prompt IDs.
+// Production heading guidance plus the approved 2026-10-28 reporting-period
+// revision for 养老/公积金. 烟草服务银行 remains unchanged. Removing the heading
+// clarification protects the rest of each approved prompt and selected ID.
 const baseline = [
-  ['养老', 'prompt-1760599514629', '54bf0b11cfab278acea2fd02d04a7ecdb73c262193c3cbc4f4b02b0a63650653', '7965ea2699fb617a8076b489b3e2fb4b459c7346a0b9e4891164e639c3d75940'],
-  ['公积金', 'prompt-1760599287921', '84a55a923680620742826843573d4e52d1452c54acc8d904b868b03fdfe68162', '85610ec1974a3f79127be296afc386a5f87d65b5b429746c6d1856908a60bc30'],
+  ['养老', 'prompt-1760599514629', '8b88dbf0d40121c57d2b9ef98382bcb0d7efc72c950b475e4adc14f8be9fd5b6', '684cab8992941df0b07626cfe338001da986de77b2283d1131fe70af0b2d01d2'],
+  ['公积金', 'prompt-1760599287921', 'ed4fccc21973c3b66059ffa52bb9712c6d0a787c802be3fa3c83fd55642a6f1d', '69a5c1f743e5b36321a171c210550601b7e0566d567606614ae40a8ab5059320'],
   ['烟草服务银行', 'v1', '36c87e25303f24230e4f9d45c195f82d556c6d21a1c4c81aaec0c4be579efd49', '10f87e3a50de9ea2ccb2e91c89b8af9a54df02835311503f8a64e417a93aa9aa'],
 ];
 
 for (const [keyword, id, systemHash, userHash] of baseline) {
-  test(`${keyword}: clarify heading format while preserving production business content and selection`, () => {
+  test(`${keyword}: preserve heading format, approved editorial content and prompt selection`, () => {
     const prompt = config.keywords[keyword].prompts.find(item => item.id === id);
     assert.equal(auto.keywords[keyword].promptId, id);
     assert.equal(prompt.isDefault, true);

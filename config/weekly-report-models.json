@@ -1,5 +1,6 @@
 {
   "defaultModelKey": "deepseek-v4.1-flash",
+  "autoReportModelKey": "deepseek-v4-pro-0813",
   "models": {
     "deepseek-v4.1-flash": {
       "label": "DeepSeek V4.1 Flash",
@@ -13,7 +14,21 @@
       "thinking": {
         "type": "disabled"
       },
-      "description": "全站统一模型，由 Agent Router 提供"
+      "description": "手动报告与其他分析的默认模型，由 Agent Router 提供"
+    },
+    "deepseek-v4-pro-0813": {
+      "label": "DeepSeek V4 Pro",
+      "provider": "agent-router",
+      "model": "deepseek-v4-pro-0813",
+      "apiKey": "AGENT_ROUTER_API_KEY",
+      "endpoint": "http://api.agent-router.cn/v1/chat/completions",
+      "contextWindow": 1000000,
+      "maxOutputTokens": 393216,
+      "requestMaxTokens": 65536,
+      "thinking": {
+        "type": "enabled"
+      },
+      "description": "自动周报默认模型，开启思考，由 Agent Router 提供"
     }
   }
 }

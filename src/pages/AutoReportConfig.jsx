@@ -12,7 +12,7 @@ import './AutoReportConfig.css';
 const EMPTY_CONFIG = {
   enabled: false,
   defaults: {
-    modelKey: 'deepseek-v4.1-flash',
+    modelKey: 'deepseek-v4-pro-0813',
     promptId: '',
     minScore: 3,
     summaryVersion: 'short',
@@ -256,7 +256,7 @@ export default function AutoReportConfigPage() {
           <div className="kd-panel-header">
             <div>
               <h2>自动运行设置</h2>
-              <p>先打开关键词的自动运行开关，再设置 Prompt、最低分和摘要版本；模型统一为 DeepSeek V4.1 Flash。</p>
+              <p>先打开关键词的自动运行开关，再设置 Prompt、最低分和摘要版本；自动周报统一使用 {models.find(model => model.isAutoReportDefault)?.label || 'DeepSeek V4 Pro'}，开启思考。</p>
             </div>
           </div>
 
@@ -295,7 +295,7 @@ export default function AutoReportConfigPage() {
                         <span className={`arc-keyword-name ${enabled ? 'enabled' : 'disabled'}`}>{keyword}</span>
                       </td>
                       <td>
-                        <span>{models.find(model => model.isDefault)?.label || 'DeepSeek V4.1 Flash'}</span>
+                        <span>{models.find(model => model.key === (item.modelKey || config.defaults.modelKey))?.label || 'DeepSeek V4 Pro'}</span>
                       </td>
                       <td>
                         <select value={item.promptId || ''} onChange={event => updateKeyword(keyword, 'promptId', event.target.value)}>

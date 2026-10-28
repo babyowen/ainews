@@ -2,12 +2,12 @@ const fs = require('fs');
 const path = require('path');
 const { extractSection: sharedExtractSection } = require('./promptStore.cjs');
 const { completeChat } = require('./modelClient.cjs');
-const { getWeeklyReportModel: getUnifiedModel } = require('./weeklyReportModelConfig.cjs');
+const { getAutomaticReportModel } = require('./weeklyReportModelConfig.cjs');
 
 const DEFAULT_AUTO_REPORT_CONFIG = {
   enabled: false,
   defaults: {
-    modelKey: 'deepseek-v4.1-flash',
+    modelKey: getAutomaticReportModel().key,
     promptId: '',
     minScore: 3,
     summaryVersion: 'short',
@@ -28,7 +28,7 @@ function normalizeAutoReportConfig(input) {
   return {
     enabled: Boolean(raw.enabled),
     defaults: {
-      modelKey: getUnifiedModel().key,
+      modelKey: getAutomaticReportModel().key,
       promptId: String(defaults.promptId || DEFAULT_AUTO_REPORT_CONFIG.defaults.promptId),
       minScore: toFiniteScore(defaults.minScore, DEFAULT_AUTO_REPORT_CONFIG.defaults.minScore),
       summaryVersion: defaults.summaryVersion === 'full' ? 'full' : 'short',
@@ -38,7 +38,7 @@ function normalizeAutoReportConfig(input) {
         const item = cfg && typeof cfg === 'object' ? cfg : {};
         return [keyword, {
           enabled: Boolean(item.enabled),
-          modelKey: getUnifiedModel().key,
+          modelKey: getAutomaticReportModel().key,
           promptId: item.promptId ? String(item.promptId) : '',
           minScore: item.minScore === '' || item.minScore === undefined ? '' : toFiniteScore(item.minScore, ''),
           summaryVersion: item.summaryVersion === 'full' ? 'full' : (item.summaryVersion === 'short' ? 'short' : ''),
@@ -594,7 +594,7 @@ function createAutoReportService(options) {
   };
 }
 
-async function defaultCallLlm({ modelConfig, systemPrompt, userPrompt, timeoutMs = 180000, fetchImpl = fetch }) {
+async function defaultCallLlm({ modelConfig, systemPrompt, userPrompt, timeoutMs = 480000, fetchImpl = fetch }) {
   return completeChat([
     { role: 'system', content: systemPrompt },
     { role: 'user', content: userPrompt },
