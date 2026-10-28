@@ -138,7 +138,7 @@ test('audited keyword prompts stay byte stable except approved version updates',
       keyword: '中国烟草',
       id: '启动v1-202511151621',
       // 2026-10-28: approved reporting-period rules; same prompt ID and selection.
-      systemHash: '7f65850dd5bf2ecc8925b95f0837e7ac083c4b367d34fc3a23689ab9339f10a0',
+      systemHash: 'd2f830ac6e59e8b5808583963f2e8fb1f7063679138dbec80287a6d78422990e',
       userHash: 'ffac042ba90c08b96984229e2b6ee48b8176d3eed6debd996aac139e71f38818',
     },
     {
