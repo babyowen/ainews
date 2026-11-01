@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const { applyWeeklyReportEditorialRules } = require('../services/weeklyReportEditorial.cjs');
 
 const {
   buildAutoReportConfig,
@@ -20,13 +21,16 @@ function makeTempDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'auto-report-test-'));
 }
 
-function makePool(rowsByKeyword = {}) {
+function makePool(rowsByKeyword = {}, totalsByKeyword = {}) {
   const calls = [];
   let nextId = 100;
   return {
     calls,
     async query(sql, params = []) {
       calls.push({ sql, params });
+      if (sql.includes('COUNT(*) AS total_news_count')) {
+        return [[{ total_news_count: totalsByKeyword[params[0]] ?? (rowsByKeyword[params[0]] || []).length }]];
+      }
       if (sql.includes('FROM scored_news')) {
         return [rowsByKeyword[params[0]] || []];
       }
@@ -167,7 +171,11 @@ test('generateReportForKeyword queries fetchdate as yyyy-mm-dd closed range and 
     pool,
     config: baseConfig,
     getWeeklyReportModel: () => ({ key: 'deepseek-v4-pro', model: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro' }),
-    callLlm: async () => '周报内容',
+    callLlm: async ({ userPrompt }) => {
+      assert.match(userPrompt, /本次报告期严格为 2026-05-23 至 2026-05-30/);
+      assert.ok(userPrompt.indexOf('短摘要') < userPrompt.indexOf('【出稿前必须完成的核对'));
+      return '周报内容';
+    },
     renderPdf: async () => Buffer.from('pdf'),
     now: () => new Date('2026-05-31T05:00:00+08:00'),
     outputDir: makeTempDir(),
@@ -349,6 +357,7 @@ test('runAutoReportCycle preserves original keyword error when failure logging a
   });
   pool.query = async (sql, params = []) => {
     pool.calls.push({ sql, params });
+    if (sql.includes('COUNT(*) AS total_news_count')) return [[{ total_news_count: 7 }]];
     if (sql.includes('FROM scored_news')) return [[{ id: 1, title: 'A', short_summary: '短摘要', score: '4.5' }]];
     if (sql.includes('INSERT INTO auto_report_log')) throw new Error('log failed');
     return [[]];
@@ -436,6 +445,7 @@ test('defaultCallLlm aborts hung requests after timeout', async () => {
           systemPrompt: 'system',
           userPrompt: 'user',
           timeoutMs: 5,
+          retryDelayMs: 0,
           fetchImpl: (_url, options) => new Promise((_resolve, reject) => {
             options.signal.addEventListener('abort', () => {
               const error = new Error('aborted');
@@ -470,10 +480,8 @@ test('defaultCallLlm sends configured API key in authorization header', async ()
       userPrompt: 'user',
       fetchImpl: async (_url, options) => {
         assert.equal(options.headers.Authorization, 'Bearer configured-key');
-        return {
-          ok: true,
-          json: async () => ({ choices: [{ message: { content: 'ok' } }] }),
-        };
+        assert.equal(JSON.parse(options.body).stream, true);
+        return new Response('data: {"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n');
       },
     });
     assert.equal(content, 'ok');
@@ -579,8 +587,78 @@ test('automatic cycles reload runtime enablement and prompts while retaining the
     const result = await service.runAutoReportCycle();
     assert.equal(result.results.length, 1);
     assert.equal(result.results[0].status, 'success');
-    assert.equal(calls[0].systemPrompt, 'AUTO_RUNTIME');
+    assert.equal(calls[0].systemPrompt, applyWeeklyReportEditorialRules('AUTO_RUNTIME'));
     assert.equal(calls[0].modelConfig.model, 'deepseek-v4-pro-0813');
     assert.deepEqual(calls[0].modelConfig.thinking, { type: 'enabled' });
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('PDF and audit denominator includes low-scored/unscored news, not just selected rows', async () => {
+  let payload;
+  const pool = makePool({ 公积金: [{ id: 1, title: '已选', short_summary: '摘要' }] }, { 公积金: 123 });
+  const service = createAutoReportService({ pool, config: baseConfig,
+    getWeeklyReportModel: () => ({ model: 'test' }), callLlm: async () => '完整周报',
+    renderPdf: async p => { payload = p; return Buffer.from('pdf'); }, outputDir: makeTempDir() });
+  const result = await service.generateReportForKeyword({ keyword: '公积金', startDate: '2026-10-25', endDate: '2026-10-31', minScore: 4, promptId: 'default' });
+  assert.equal(payload.newsCount, 1);
+  assert.equal(payload.totalNewsCount, 123);
+  assert.equal(result.totalNewsCount, 123);
+  const countQuery = pool.calls.find(c => c.sql.includes('COUNT(*)'));
+  assert.deepEqual(countQuery.params, ['公积金', '2026-10-25', '2026-10-31']);
+  assert.doesNotMatch(countQuery.sql, /\bscore\b|LIMIT/);
+  assert.equal(pool.calls.find(c => c.sql.includes('INSERT INTO auto_report_log')).params.at(-1), 123);
+});
+
+test('failure retains selected counts and input metrics and blocks PDF instead of no-news skip', async () => {
+  const pool = makePool({ 公积金: [{ id: 1, title: '已选', short_summary: '具体内容', wordcount: 200 }] }, { 公积金: 123 });
+  const service = createAutoReportService({ pool, config: baseConfig,
+    getWeeklyReportModel: () => ({ model: 'test' }),
+    callLlm: async () => { await new Promise(r => setTimeout(r, 5)); throw new Error('连接超时'); },
+    renderPdf: async () => { throw new Error('must not render'); } });
+  const { results: [failed] } = await service.runAutoReportCycle();
+  assert.equal(failed.status, 'error');
+  assert.equal(failed.pdfStatus, 'blocked');
+  assert.equal(failed.newsCount, 1);
+  assert.equal(failed.totalNewsCount, 123);
+  assert.equal(failed.sourceWordCount, 200);
+  assert.ok(failed.promptCharCount > 0 && failed.durationMs >= 5);
+  assert.equal(pool.calls.some(c => c.sql.includes('INSERT INTO weekly_reports')), false);
+});
+
+test('no-news skip explains empty collection versus score filtering', async () => {
+  for (const total of [0, 123]) {
+    const service = createAutoReportService({ pool: makePool({}, { 公积金: total }), config: baseConfig,
+      getWeeklyReportModel: () => ({ model: 'test' }), callLlm: async () => { throw new Error('must not call'); } });
+    const { results: [result] } = await service.runAutoReportCycle();
+    assert.equal(result.status, 'skipped');
+    assert.match(result.errorMessage, total ? /123 条新闻.*4 分门槛/ : /没有采集到/);
+  }
+});
+
+test('automatic streaming retries transient failures once and discards partial output', async () => {
+  process.env.AUTO_RETRY_TEST_KEY = 'fake-test-key';
+  const args = { modelConfig: { endpoint: 'https://example.invalid/chat', apiKey: 'AUTO_RETRY_TEST_KEY' }, systemPrompt: 'system', userPrompt: 'user', retryDelayMs: 0 };
+  const complete = () => new Response('data: {"choices":[{"delta":{"content":"完整结果"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n');
+  try {
+    for (const failure of ['network', 'http', 'partial']) {
+      let calls = 0;
+      const result = await defaultCallLlm({ ...args, fetchImpl: async (_url, options) => {
+        assert.equal(JSON.parse(options.body).stream, true);
+        if (++calls > 1) return complete();
+        if (failure === 'network') throw new TypeError('fetch failed', { cause: Object.assign(new Error('Headers Timeout Error'), { code: 'UND_ERR_HEADERS_TIMEOUT' }) });
+        if (failure === 'http') return new Response('暂时不可用', { status: 503 });
+        return new Response('data: {"choices":[{"delta":{"content":"丢弃半成品"}}]}\n\n');
+      } });
+      assert.equal(result, '完整结果');
+      assert.equal(calls, 2);
+    }
+    let attempts = 0;
+    await assert.rejects(defaultCallLlm({ ...args, fetchImpl: async () => { attempts++; throw new TypeError('fetch failed'); } }), /已尝试 2 次/);
+    assert.equal(attempts, 2);
+    for (const response of [() => new Response('invalid key', { status: 401 }), () => new Response('data: {"choices":[{"delta":{"content":"截断"},"finish_reason":"length"}]}\n\n')]) {
+      let calls = 0;
+      await assert.rejects(defaultCallLlm({ ...args, fetchImpl: async () => { calls++; return response(); } }));
+      assert.equal(calls, 1, 'permanent/truncated failures must not be retried');
+    }
+  } finally { delete process.env.AUTO_RETRY_TEST_KEY; }
 });

@@ -36,7 +36,7 @@ const lines = [
 ];
 const payload = {
   keyword: '排版回归测试', startDate: '2026-10-04', endDate: '2026-10-10',
-  newsCount: 1, modelName: '固定正文，无模型调用', reportContent: lines.join('\n'), includeContact: false,
+  newsCount: 1, totalNewsCount: 123, modelName: '固定正文，无模型调用', reportContent: lines.join('\n'), includeContact: false,
 };
 
 (async () => {
@@ -52,10 +52,34 @@ const payload = {
     assert.ok(headings.every(h => h.size === '24px' && h.weight === '700'));
     await page.close();
 
+    // Match the A4 printable width (210 - 14 * 2 mm), not a desktop viewport.
+    const header = await browser.newPage({ viewport: { width: 688, height: 1000 } });
+    for (const includeContact of [false, true]) {
+      for (const [newsCount, totalNewsCount] of [[0, 0], [21, 123], [241, 931], [99999, 999999]]) {
+        for (const modelName of ['DeepSeek V4 Pro', 'DeepSeek V4.1 Flash']) {
+          await header.setContent(buildReportPdfHtml({ ...payload, keyword: '烟草服务银行', newsCount, totalNewsCount, modelName, includeContact, reportContentHtml: '<p>测试正文</p>' }));
+          await header.emulateMedia({ media: 'print' });
+          await header.evaluate(() => document.fonts.ready);
+          const metrics = await header.evaluate(() => {
+            const count = document.querySelector('.report-news-count');
+            const box = count.getBoundingClientRect();
+            const style = getComputedStyle(count);
+            return { text: count.textContent, height: box.height, lineHeight: parseFloat(style.lineHeight), fits: count.scrollWidth <= count.clientWidth,
+              cardsFit: [...document.querySelectorAll('.report-meta-value')].every(el => el.scrollWidth <= el.clientWidth) };
+          });
+          assert.equal(metrics.text, `${newsCount}/${totalNewsCount}`);
+          assert.ok(metrics.height <= metrics.lineHeight + 1, 'count must occupy exactly one line');
+          assert.ok(metrics.fits && metrics.cardsFit, `header must not overflow: ${JSON.stringify({ newsCount, totalNewsCount, modelName, metrics })}`);
+        }
+      }
+    }
+    await header.close();
+
     fs.mkdirSync(output, { recursive: true });
     const pdf = path.join(output, 'pagination-edge-cases.pdf');
     fs.writeFileSync(pdf, await renderReportPdf(payload));
     const text = execFileSync(process.env.PDFTOTEXT_BIN || 'pdftotext', ['-layout', pdf, '-'], { encoding: 'utf8' });
+    assert.match(text, /1\s*\/\s*123/);
     for (const value of markers) {
       assert.equal(text.split(value).length - 1, 1, `${value} must appear exactly once, including oversized rows/items`);
     }

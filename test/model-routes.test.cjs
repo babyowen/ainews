@@ -4,6 +4,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const { createRequire } = require('node:module');
 const test = require('node:test');
+const { applyWeeklyReportEditorialRules } = require('../services/weeklyReportEditorial.cjs');
 const root = path.resolve(__dirname, '..');
 const actualRequire = createRequire(path.join(root, 'server.cjs'));
 const actualPolicy = actualRequire('./services/policyExtraction.cjs');
@@ -83,6 +84,8 @@ test('manual and legacy KIMI/SiliconFlow report routes use the unified model and
     const res = await app.request(route, reportBody);
     assert.equal(res.statusCode, 200);
     assert.equal(app.calls[0].options.modelConfig.model, 'DeepSeek-V4.1-Flash');
+    assert.match(app.calls[0].messages[1].content, /本次报告期严格为 2026-09-13 至 2026-09-19/);
+    assert.ok(app.calls[0].messages[1].content.indexOf('测试政策正文') < app.calls[0].messages[1].content.indexOf('【出稿前必须完成的核对'));
     assert.equal(app.writes[0][4], 'DeepSeek-V4.1-Flash');
     assert.equal(res.data.debug.model, 'DeepSeek V4.1 Flash');
   }
@@ -172,12 +175,12 @@ test('unified generation routes consume runtime prompts without modifying Git de
     for (const route of ['/api/generate-report', '/api/generate-kimi-report', '/api/generate-siliconflow-report']) {
       const response = await app.request(route, reportBody);
       assert.equal(response.statusCode, 200);
-      assert.equal(app.calls.at(-1).messages[0].content, 'RUNTIME_WEEKLY');
+      assert.equal(app.calls.at(-1).messages[0].content, applyWeeklyReportEditorialRules('RUNTIME_WEEKLY'));
     }
     await app.request('/api/generate-report', { ...reportBody, promptId: keywordPrompt.id });
-    assert.equal(app.calls.at(-1).messages[0].content, 'RUNTIME_KEYWORD');
+    assert.equal(app.calls.at(-1).messages[0].content, applyWeeklyReportEditorialRules('RUNTIME_KEYWORD'));
     await app.request('/api/modify-report', { ...reportBody, originalReport: '报告', modifyRequest: '精简' });
-    assert.equal(app.calls.at(-1).messages[0].content, 'RUNTIME_MODIFY');
+    assert.equal(app.calls.at(-1).messages[0].content, applyWeeklyReportEditorialRules('RUNTIME_MODIFY'));
     await app.request('/api/policy/extract', { reportContent: '正文' });
     assert.match(app.calls.at(-1).messages[1].content, /RUNTIME_EXTRACT/);
     await app.request('/api/policy/compare', { extractedPolicy: policy, currentPolicy: policy });

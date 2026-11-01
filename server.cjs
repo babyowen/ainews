@@ -5,6 +5,8 @@ const mysql = require('mysql2/promise');
 const cors = require('cors');
 const path = require('path');
 const crypto = require('crypto');
+const { countPeriodNews } = require('./services/reportNewsCount.cjs');
+const { applyWeeklyReportEditorialRules, appendWeeklyReportDateReminder } = require('./services/weeklyReportEditorial.cjs');
 const cron = require('node-cron');
 const { isIntroductionPart, renderIntroductionPdf } = require('./server/pdf/renderIntroductionPdf.cjs');
 const {
@@ -1211,16 +1213,16 @@ app.post('/api/preview-modify-message', async (req, res) => {
   try {
     // 读取提示词（默认层 + 运行时层合并后的生效配置）
     const weeklyPrompts = promptStore.getWeeklyPrompts();
-    const modifySystemPrompt = weeklyPrompts.modifySystemPrompt;
+    const modifySystemPrompt = applyWeeklyReportEditorialRules(weeklyPrompts.modifySystemPrompt);
     const modifyUserPromptTemplate = weeklyPrompts.modifyUserPrompt;
 
     // 替换修改用户提示词中的变量
-    const finalModifyUserPrompt = modifyUserPromptTemplate
+    const finalModifyUserPrompt = appendWeeklyReportDateReminder(modifyUserPromptTemplate
       .replace('{originalReport}', originalReport)
       .replace('{modifyRequest}', modifyRequest)
       .replace('{keyword}', keyword)
       .replace('{startDate}', startDate)
-      .replace('{endDate}', endDate);
+      .replace('{endDate}', endDate), { startDate, endDate });
 
     // 计算字数和Token估算
     const totalContent = modifySystemPrompt + finalModifyUserPrompt;
@@ -1264,16 +1266,16 @@ app.post('/api/modify-report', async (req, res) => {
     const modelConfig = getWeeklyReportModel();
     // 读取提示词（默认层 + 运行时层合并后的生效配置）
     const weeklyPrompts = promptStore.getWeeklyPrompts();
-    const modifySystemPrompt = weeklyPrompts.modifySystemPrompt;
+    const modifySystemPrompt = applyWeeklyReportEditorialRules(weeklyPrompts.modifySystemPrompt);
     const modifyUserPromptTemplate = weeklyPrompts.modifyUserPrompt;
 
     // 替换修改用户提示词中的变量
-    const finalModifyUserPrompt = modifyUserPromptTemplate
+    const finalModifyUserPrompt = appendWeeklyReportDateReminder(modifyUserPromptTemplate
       .replace('{originalReport}', originalReport)
       .replace('{modifyRequest}', modifyRequest)
       .replace('{keyword}', keyword)
       .replace('{startDate}', startDate)
-      .replace('{endDate}', endDate);
+      .replace('{endDate}', endDate), { startDate, endDate });
 
     // Token估算函数 (基于DeepSeek官方标准: 1个中文字符≈0.6token, 1个英文字符≈0.3token)
     const estimateTokens = (text) => {
@@ -1335,7 +1337,7 @@ app.post('/api/preview-report-message', async (req, res) => {
   try {
     // 读取标准提示词（默认层 + 运行时层合并后的生效配置）
     const weeklyPrompts = promptStore.getWeeklyPrompts();
-    const systemPrompt = weeklyPrompts.systemPrompt;
+    const systemPrompt = applyWeeklyReportEditorialRules(weeklyPrompts.systemPrompt);
     const userPromptTemplate = weeklyPrompts.userPrompt;
 
     // 拼接新闻内容
@@ -1351,13 +1353,13 @@ app.post('/api/preview-report-message', async (req, res) => {
     }).join('\n\n');
     
     // 替换用户提示词中的变量
-    const finalUserPrompt = userPromptTemplate
+    const finalUserPrompt = appendWeeklyReportDateReminder(userPromptTemplate
       .replace('{keyword}', keyword)
       .replace('{startDate}', startDate)
       .replace('{endDate}', endDate)
       .replace('{news}', newsContent)
       .replace('{qianzai_news}', qianzaiNewsContent)
-      .replace('{usertopic}', userPrompt || '无特别要求');
+      .replace('{usertopic}', userPrompt || '无特别要求'), { startDate, endDate });
     
     // 计算字数和Token估算
     const totalContent = systemPrompt + finalUserPrompt;
@@ -1609,6 +1611,8 @@ app.post(['/api/generate-report', '/api/generate-kimi-report', '/api/generate-si
       userPromptTemplate = weeklyPrompts.userPrompt;
     }
 
+    systemPrompt = applyWeeklyReportEditorialRules(systemPrompt);
+
     // 拼接新闻内容
     const newsContent = selectedNews.map((news, index) => {
       const text = summaryVersion === 'short' ? (news.short_summary || news.content || '内容不详') : (news.content || news.short_summary || '内容不详');
@@ -1622,13 +1626,13 @@ app.post(['/api/generate-report', '/api/generate-kimi-report', '/api/generate-si
     }).join('\n\n');
     
     // 替换用户提示词中的变量
-    const finalUserPrompt = userPromptTemplate
+    const finalUserPrompt = appendWeeklyReportDateReminder(userPromptTemplate
       .replace('{keyword}', keyword)
       .replace('{startDate}', startDate)
       .replace('{endDate}', endDate)
       .replace('{news}', newsContent)
       .replace('{qianzai_news}', qianzaiNewsContent)
-      .replace('{usertopic}', userPrompt || '无特别要求');
+      .replace('{usertopic}', userPrompt || '无特别要求'), { startDate, endDate });
 
     // Token估算函数 (基于DeepSeek官方标准: 1个中文字符≈0.6token, 1个英文字符≈0.3token)
     const estimateTokens = (text) => {
@@ -2828,11 +2832,13 @@ app.post('/api/reports/export-pdf', async (req, res) => {
   }
 
   try {
+    const totalNewsCount = await countPeriodNews(pool, { keyword, startDate, endDate });
     const pdfBuffer = await renderReportPdf({
       keyword,
       startDate,
       endDate,
       newsCount: Number(newsCount) || 0,
+      totalNewsCount,
       modelName,
       reportContent,
       includeContact: Boolean(includeContact),

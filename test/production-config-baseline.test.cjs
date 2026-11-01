@@ -13,6 +13,7 @@ const {
 const { createConfigStore } = require('../services/configStore.cjs');
 const { createPromptStore } = require('../services/promptStore.cjs');
 const { getWeeklyReportModel } = require('../services/weeklyReportModelConfig.cjs');
+const { applyWeeklyReportEditorialRules } = require('../services/weeklyReportEditorial.cjs');
 
 const rootDir = path.join(__dirname, '..');
 const configDir = path.join(rootDir, 'config');
@@ -88,6 +89,7 @@ test('production auto-report execution uses the layered promptStore without chan
   let nextId = 1;
   const pool = {
     async query(sql, params = []) {
+      if (sql.includes('COUNT(*) AS total_news_count')) return [[{ total_news_count: (rowsByKeyword[params[0]] || []).length }]];
       if (sql.includes('FROM scored_news')) return [rowsByKeyword[params[0]] || []];
       if (sql.includes('INSERT INTO weekly_reports') || sql.includes('INSERT INTO auto_report_log')) {
         return [{ insertId: nextId++ }];
@@ -120,7 +122,7 @@ test('production auto-report execution uses the layered promptStore without chan
     });
     const selected = promptStore.findKeywordPrompt(item.keyword, item.promptId);
     assert.ok(selected, `${item.keyword}/${item.promptId} must exist in layered promptStore`);
-    assert.equal(calls.get(item.keyword).systemPrompt, selected.systemPrompt);
+    assert.equal(calls.get(item.keyword).systemPrompt, applyWeeklyReportEditorialRules(selected.systemPrompt));
     assert.ok(calls.get(item.keyword).userPrompt.includes(`${item.keyword}测试新闻`));
   }
 });

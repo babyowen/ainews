@@ -50,6 +50,13 @@ test('gateway errors are visible but credentials are redacted', async () => {
   ) }), error => /401/.test(error.message) && /REDACTED/.test(error.message) && !error.message.includes('test-key-not-a-real-secret'));
 });
 
+test('network failures preserve a redacted actionable cause and retry classification', async () => {
+  await assert.rejects(completeChat(messages, { modelConfig, fetchImpl: async () => {
+    throw new TypeError('fetch failed', { cause: Object.assign(new Error('timeout test-key-not-a-real-secret'), { code: 'UND_ERR_HEADERS_TIMEOUT' }) });
+  } }), error => error.code === 'UND_ERR_HEADERS_TIMEOUT' && error.retryable === true
+    && /UND_ERR_HEADERS_TIMEOUT/.test(error.message) && !error.message.includes('test-key-not-a-real-secret'));
+});
+
 function sseResponse(lines, byteSize = 3) {
   const bytes = new TextEncoder().encode(lines.join('\n\n'));
   return new Response(new ReadableStream({ start(controller) {

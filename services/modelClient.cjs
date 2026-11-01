@@ -29,7 +29,10 @@ function readCompletion(data) {
 async function checkResponse(response) {
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(`模型供应商 HTTP ${response.status}: ${redactError(text)}`);
+    throw Object.assign(new Error(`模型供应商 HTTP ${response.status}: ${redactError(text)}`), {
+      status: response.status,
+      retryable: [408, 429, 500, 502, 503, 504].includes(response.status),
+    });
   }
 }
 
@@ -67,8 +70,15 @@ async function withModelResponse(messages, options, consume) {
     await checkResponse(response);
     return await consume(response);
   } catch (error) {
-    if (controller.signal.aborted) throw new Error(`LLM API request timed out after ${timeoutMs}ms；模型响应超时，请减少输入后重试`);
-    throw new Error(redactError(error.message));
+    if (controller.signal.aborted) throw Object.assign(new Error(`LLM API request timed out after ${timeoutMs}ms；模型响应超时，请减少输入后重试`), { code: 'MODEL_TIMEOUT', retryable: true });
+    const code = error.cause?.code || error.code;
+    const detail = error.cause?.message;
+    const message = [error.message, code, detail].filter(Boolean).join('；');
+    throw Object.assign(new Error(redactError(message)), {
+      code,
+      status: error.status,
+      retryable: error.retryable === true || /^(UND_ERR_|ECONNRESET|ETIMEDOUT|EAI_AGAIN)/.test(code || '') || error.message === 'fetch failed',
+    });
   } finally {
     clearTimeout(timer);
   }
@@ -110,7 +120,7 @@ async function streamChat(messages, onDelta, options = {}) {
         for (const line of lines) consumeLine(line);
         if (part.done) { if (buffer.trim()) consumeLine(buffer); break; }
       }
-      if (!finishReason) throw new Error('模型流式响应中断，未收到完成标记；请重试');
+      if (!finishReason) throw Object.assign(new Error('模型流式响应中断，未收到完成标记；请重试'), { code: 'MODEL_STREAM_INTERRUPTED', retryable: true });
       return readCompletion({ choices: [{ finish_reason: finishReason, message: { content } }] });
     } finally {
       await reader.cancel().catch(() => {});

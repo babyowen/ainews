@@ -38,10 +38,12 @@ function formatGeneratedAt(date = new Date()) {
   });
 }
 
-function buildReportPdfHtml({ keyword, startDate, endDate, newsCount, modelName, reportContentHtml, includeContact = false }) {
+function buildReportPdfHtml({ keyword, startDate, endDate, newsCount, totalNewsCount, modelName, reportContentHtml, includeContact = false }) {
   const reportTitle = keyword === '江苏省国资委' ? '省属国企新闻周报' : `${keyword}新闻周报`;
   const dateRange = formatDateRange(startDate, endDate);
   const modelLabel = String(modelName || 'DeepSeek R1');
+  // Historical callers without a known total must not imply selected = all.
+  const totalCountLabel = totalNewsCount == null ? '—' : totalNewsCount;
 
   return `<!doctype html>
 <html lang="zh-CN">
@@ -139,7 +141,7 @@ function buildReportPdfHtml({ keyword, startDate, endDate, newsCount, modelName,
 
       .report-meta {
         display: grid;
-        grid-template-columns: minmax(0, 1.08fr) minmax(0, 0.52fr) minmax(0, 1.4fr);
+        grid-template-columns: minmax(0, 1.08fr) minmax(0, 0.72fr) minmax(0, 1.2fr);
         gap: 3mm;
         margin-top: 5mm;
       }
@@ -196,6 +198,18 @@ function buildReportPdfHtml({ keyword, startDate, endDate, newsCount, modelName,
 
       .report-model-value {
         white-space: nowrap;
+      }
+
+      .report-news-count {
+        white-space: nowrap;
+        overflow-wrap: normal;
+        font-size: 12pt;
+        letter-spacing: -0.02em;
+      }
+
+      .report-news-total {
+        font-size: 9pt;
+        font-weight: 500;
       }
 
       /* Preserve unusually long custom model labels instead of clipping them. */
@@ -407,7 +421,7 @@ function buildReportPdfHtml({ keyword, startDate, endDate, newsCount, modelName,
             </div>
             <div class="report-meta-card">
               <span class="report-meta-label"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h8M8 11h8M8 15h3m3 0h2M8 18h8"/></svg>新闻数量</span>
-              <strong class="report-meta-value">${escapeHtml(newsCount)} 条</strong>
+              <strong class="report-meta-value report-news-count"><span>${escapeHtml(newsCount)}</span><span class="report-news-total">/${escapeHtml(totalCountLabel)}</span></strong>
             </div>
             <div class="report-meta-card">
               <span class="report-meta-label"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/><rect x="9" y="9" width="6" height="6" rx="1"/><path d="M9 3v3m6-3v3M9 18v3m6-3v3M3 9h3m-3 6h3m12-6h3m-3 6h3"/></svg>AI 模型</span>

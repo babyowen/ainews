@@ -9,7 +9,7 @@ const actualRequire = createRequire(path.join(root, 'server.cjs'));
 
 // Execute the real Express handlers with test-owned files and SQL. Never load .env,
 // listen on a port, register cron jobs, or connect to a real database/model provider.
-function createIsolatedApp({ configDir, dataDir, readiness = false, env = {}, pool: suppliedPool, model, pdfRenderer }) {
+function createIsolatedApp({ configDir, dataDir, readiness = false, env = {}, pool: suppliedPool, model, pdfRenderer, reportPdfRenderer }) {
   const pool = suppliedPool || { async query(sql) {
     if (sql.includes('SELECT DISTINCT keyword FROM scored_news')) return [[{ keyword: '公积金' }, { keyword: '养老' }]];
     if (readiness && (/CREATE TABLE IF NOT EXISTS auto_report_log|SHOW COLUMNS FROM auto_report_log|ALTER TABLE auto_report_log|SELECT 1 AS ready/.test(sql))) return [[]];
@@ -30,6 +30,7 @@ function createIsolatedApp({ configDir, dataDir, readiness = false, env = {}, po
       resolveAppDataDir: () => dataDir,
     };
     if (name === './server/pdf/renderRegionPolicyReportPdf.cjs' && pdfRenderer) return pdfRenderer;
+    if (name === './server/pdf/renderReportPdf.cjs' && reportPdfRenderer) return { ...actualRequire(name), renderReportPdf: reportPdfRenderer };
     if (name === './services/modelClient.cjs' && model) return {redactError:String,...model};
     if (name === './services/modelClient.cjs') return {
       redactError: String,

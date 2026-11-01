@@ -36,6 +36,7 @@ function statusText(status) {
     error: '失败',
     skipped: '跳过',
     pending: '等待',
+    blocked: '报告失败，未生成',
   }[status] || status || '-';
 }
 
@@ -387,7 +388,7 @@ export default function AutoReportConfigPage() {
                     <td>{record.news_count || 0}</td>
                     <td>{formatNumber(record.source_word_count)}</td>
                     <td>{record.model_used || '-'}</td>
-                    <td>{statusText(record.pdf_status)}</td>
+                    <td>{record.status === 'error' && record.pdf_status === 'skipped' ? statusText('blocked') : statusText(record.pdf_status)}</td>
                     <td>{formatDateTime(record.run_at)}</td>
                     <td>
                       <button
@@ -411,12 +412,13 @@ export default function AutoReportConfigPage() {
                           <span><strong>最低分</strong>{record.min_score ?? '-'}</span>
                           <span><strong>摘要版本</strong>{summaryVersionText(record.summary_version)}</span>
                           <span><strong>入选新闻</strong>{formatNumber(record.news_count)} 条</span>
+                          {record.total_news_count != null && <span><strong>期间全部新闻</strong>{formatNumber(record.total_news_count)} 条</span>}
                           <span><strong>素材字数</strong>{formatNumber(record.source_word_count)} 字</span>
                           <span><strong>Prompt字符</strong>{formatNumber(record.prompt_char_count)}</span>
                           <span><strong>耗时</strong>{formatNumber(record.duration_ms)} ms</span>
                           <span><strong>PDF文件</strong>{record.pdf_filename || '-'}</span>
                           {(record.error_message || record.pdf_error_message) && (
-                            <span className="arc-log-error"><strong>错误</strong>{record.error_message || record.pdf_error_message}</span>
+                            <span className="arc-log-error"><strong>{record.status === 'skipped' ? '说明' : '错误'}</strong>{record.error_message || record.pdf_error_message}</span>
                           )}
                         </div>
                       </td>

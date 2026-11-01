@@ -1,8 +1,10 @@
 const fs = require('fs');
 const path = require('path');
 const { extractSection: sharedExtractSection } = require('./promptStore.cjs');
-const { completeChat } = require('./modelClient.cjs');
+const { streamChat } = require('./modelClient.cjs');
 const { getAutomaticReportModel } = require('./weeklyReportModelConfig.cjs');
+const { applyWeeklyReportEditorialRules, appendWeeklyReportDateReminder } = require('./weeklyReportEditorial.cjs');
+const { countPeriodNews } = require('./reportNewsCount.cjs');
 
 const DEFAULT_AUTO_REPORT_CONFIG = {
   enabled: false,
@@ -201,13 +203,14 @@ function buildPotentialCustomerNewsContent(newsList, summaryVersion) {
 }
 
 function buildFinalUserPrompt({ template, keyword, startDate, endDate, newsList, summaryVersion, userTopic = '无特别要求' }) {
-  return String(template || '')
+  const prompt = String(template || '')
     .replaceAll('{keyword}', keyword)
     .replaceAll('{startDate}', startDate)
     .replaceAll('{endDate}', endDate)
     .replaceAll('{news}', buildNewsContent(newsList, summaryVersion))
     .replaceAll('{qianzai_news}', buildPotentialCustomerNewsContent(newsList, summaryVersion))
     .replaceAll('{usertopic}', userTopic || '无特别要求');
+  return appendWeeklyReportDateReminder(prompt, { startDate, endDate });
 }
 
 function getNewsText(news, summaryVersion) {
@@ -314,6 +317,7 @@ function createAutoReportService(options) {
         status VARCHAR(20) NOT NULL,
         report_id INT NULL,
         news_count INT DEFAULT 0,
+        total_news_count INT NULL,
         model_used VARCHAR(100),
         error_message TEXT,
         duration_ms INT,
@@ -347,6 +351,7 @@ function createAutoReportService(options) {
       ['summary_version', 'VARCHAR(20)'],
       ['source_word_count', 'INT DEFAULT 0'],
       ['prompt_char_count', 'INT DEFAULT 0'],
+      ['total_news_count', 'INT NULL'],
     ];
     for (const [column, definition] of additions) {
       if (!existing.has(column)) {
@@ -359,8 +364,8 @@ function createAutoReportService(options) {
     const [result] = await pool.query(
       `INSERT INTO auto_report_log
        (run_at, trigger_type, week_start, week_end, keyword, status, report_id, news_count, model_used, error_message, duration_ms, pdf_status, pdf_path, pdf_filename, pdf_error_message,
-        model_key, prompt_id, prompt_name, min_score, summary_version, source_word_count, prompt_char_count)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        model_key, prompt_id, prompt_name, min_score, summary_version, source_word_count, prompt_char_count, total_news_count)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         entry.runAt || now(),
         entry.triggerType || 'cron',
@@ -384,6 +389,7 @@ function createAutoReportService(options) {
         entry.summaryVersion || null,
         entry.sourceWordCount || 0,
         entry.promptCharCount || 0,
+        entry.totalNewsCount ?? null,
       ]
     );
     return result.insertId;
@@ -411,6 +417,16 @@ function createAutoReportService(options) {
   }
 
   async function generateReportForKeyword(params) {
+    const metrics = { startedAt: Date.now() };
+    try {
+      return await generateReportWithMetrics(params, metrics);
+    } catch (error) {
+      error.reportMetrics = { ...metrics, durationMs: Date.now() - metrics.startedAt };
+      throw error;
+    }
+  }
+
+  async function generateReportWithMetrics(params, metrics) {
     const startedAt = Date.now();
     const {
       keyword,
@@ -426,7 +442,12 @@ function createAutoReportService(options) {
     // 先解析模型和 Prompt；即使本周期没有新闻，也不能把损坏的显式引用静默记为 skipped。
     const modelConfig = getWeeklyReportModel(modelKey);
     const promptPair = resolvePromptPair(keyword, promptId);
+    promptPair.systemPrompt = applyWeeklyReportEditorialRules(promptPair.systemPrompt);
+    Object.assign(metrics, { modelUsed: modelConfig.model, promptName: promptPair.promptName });
     const newsRows = await queryNews({ keyword, startDate, endDate, minScore });
+    metrics.newsCount = newsRows.length;
+    const totalNewsCount = await countPeriodNews(pool, { keyword, startDate, endDate });
+    metrics.totalNewsCount = totalNewsCount;
     if (newsRows.length === 0) {
       const skipped = {
         keyword,
@@ -434,6 +455,8 @@ function createAutoReportService(options) {
         endDate,
         status: 'skipped',
         newsCount: 0,
+        totalNewsCount,
+        errorMessage: totalNewsCount === 0 ? '本报告期没有采集到该关键词新闻' : `本报告期共 ${totalNewsCount} 条新闻，无新闻达到 ${minScore} 分门槛`,
         modelUsed: null,
         durationMs: Date.now() - startedAt,
         pdfStatus: 'skipped',
@@ -460,6 +483,7 @@ function createAutoReportService(options) {
     });
     const promptCharCount = promptPair.systemPrompt.length + userPrompt.length;
     const sourceWordCount = getSourceWordCount(newsRows, summaryVersion);
+    Object.assign(metrics, { promptCharCount, sourceWordCount });
 
     let reportContent;
     if (callLlm) {
@@ -500,6 +524,7 @@ function createAutoReportService(options) {
         startDate,
         endDate,
         newsCount: newsRows.length,
+        totalNewsCount,
         modelName,
         reportContent,
         includeContact: true,
@@ -520,6 +545,7 @@ function createAutoReportService(options) {
       status: 'success',
       reportId: insertResult.insertId,
       newsCount: newsRows.length,
+      totalNewsCount,
       modelUsed: modelConfig.model,
       durationMs: Date.now() - startedAt,
       pdfStatus,
@@ -557,22 +583,25 @@ function createAutoReportService(options) {
         });
         results.push(result);
       } catch (error) {
+        const metrics = error.reportMetrics || {};
         const failed = {
           keyword: keywordConfig.keyword,
           startDate: range.startDate,
           endDate: range.endDate,
           status: 'error',
-          newsCount: 0,
-          modelUsed: keywordConfig.modelKey,
+          newsCount: metrics.newsCount || 0,
+          totalNewsCount: metrics.totalNewsCount ?? null,
+          modelUsed: metrics.modelUsed || keywordConfig.modelKey,
           errorMessage: error.message,
-          durationMs: 0,
-          pdfStatus: 'skipped',
+          durationMs: metrics.durationMs || 0,
+          pdfStatus: 'blocked',
           modelKey: keywordConfig.modelKey,
           promptId: keywordConfig.promptId,
+          promptName: metrics.promptName,
           minScore: keywordConfig.minScore,
           summaryVersion: keywordConfig.summaryVersion,
-          sourceWordCount: 0,
-          promptCharCount: 0,
+          sourceWordCount: metrics.sourceWordCount || 0,
+          promptCharCount: metrics.promptCharCount || 0,
         };
         const failedLogEntry = { ...failed, triggerType };
         failed.logId = await tryWriteLog(failedLogEntry);
@@ -594,11 +623,24 @@ function createAutoReportService(options) {
   };
 }
 
-async function defaultCallLlm({ modelConfig, systemPrompt, userPrompt, timeoutMs = 480000, fetchImpl = fetch }) {
-  return completeChat([
+async function defaultCallLlm({ modelConfig, systemPrompt, userPrompt, timeoutMs = 480000, fetchImpl = fetch, retryDelayMs = 1500 }) {
+  const messages = [
     { role: 'system', content: systemPrompt },
     { role: 'user', content: userPrompt },
-  ], { modelConfig, timeoutMs, fetchImpl });
+  ];
+  // Streaming lets the gateway send headers/reasoning while a large report is
+  // being generated. Buffer locally and persist only a complete final response.
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      return await streamChat(messages, () => {}, { modelConfig, timeoutMs, fetchImpl });
+    } catch (error) {
+      if (!error.retryable || attempt === 2) {
+        if (attempt > 1) error.message = `模型请求失败（已尝试 ${attempt} 次）：${error.message}`;
+        throw error;
+      }
+      await new Promise(resolve => setTimeout(resolve, retryDelayMs));
+    }
+  }
 }
 
 module.exports = {
