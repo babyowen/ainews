@@ -216,6 +216,7 @@ test('government weekly manual and preview requests include independent verified
       assert.ok(user.includes(`新闻1标题:${governmentArticle.title}\n新闻1内容:${summaryVersion==='short'?governmentArticle.short_summary:governmentArticle.content}`));
       assert.match(system,/账号辖区不等于事件发生地/);
       assert.match(system,/转载/);
+      assert.match(system,/# 机关事务周报分组与地区呈现/);
       assert.deepEqual(input,before);
       if(route.includes('preview')) assert.equal(app.calls.length,0);
     }
@@ -227,6 +228,7 @@ test('streaming government weekly request receives the same geography as non-str
   await app.request('/api/generate-report',{...reportBody,keyword:'江苏机关事务',selectedNews:[governmentArticle],summaryVersion:'short',stream:true});
   assert.match(app.calls[0].messages[1].content,/福建省厦门市/);
   assert.match(app.calls[0].messages[0].content,/账号辖区不等于事件发生地/);
+  assert.match(app.calls[0].messages[0].content,/# 机关事务周报分组与地区呈现/);
 });
 
 test('weekly news query retains provider identity for subsequent manual selection',async()=>{
@@ -252,7 +254,7 @@ test('government generation preserves runtime prompts and non-government model m
     assert.match(app.calls[0].messages[1].content,/固定开头\n来源上下文/);
     assert.ok(app.calls[0].messages[1].content.includes('固定结尾'));
     await app.request('/api/generate-report',{...reportBody,selectedNews:[governmentArticle]});
-    assert.doesNotMatch(app.calls[1].messages.map(m=>m.content).join('\n'),/来源上下文|官微来源地域使用规则/);
+    assert.doesNotMatch(app.calls[1].messages.map(m=>m.content).join('\n'),/来源上下文|官微来源地域使用规则|机关事务周报分组与地区呈现/);
     assert.equal(crypto.createHash('sha256').update(fs.readFileSync(runtimePath)).digest('hex'),crypto.createHash('sha256').update(before).digest('hex'));
     assert.deepEqual(fs.readFileSync(path.join(configDir,'keyword-prompts.json')),defaultBefore);
   } finally {fs.rmSync(configDir,{recursive:true,force:true});}
@@ -262,4 +264,12 @@ test('shared builder preserves manual non-government empty-title payloads',async
   const app=loadApp();
   await app.request('/api/generate-report',{...reportBody,selectedNews:[{title:'',content:'保留正文'}],summaryVersion:'full'});
   assert.ok(app.calls[0].messages[1].content.includes('新闻1标题:\n新闻1内容:保留正文'));
+});
+
+
+test('manual government website-only report gets grouped layout without fabricated publisher evidence',async()=>{
+  const app=loadApp();
+  await app.request('/api/generate-report',{...reportBody,keyword:'江苏机关事务',selectedNews:[{...governmentArticle,sourceapi:'serp_bing',link:'https://example.org/news'}]});
+  assert.match(app.calls[0].messages[0].content,/# 机关事务周报分组与地区呈现/);
+  assert.doesNotMatch(app.calls[0].messages.map(m=>m.content).join('\n'),/来源上下文：|# 官微来源地域使用规则/);
 });

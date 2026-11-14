@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { sourceContext, applySourceContextRules, buildNewsContent, buildPotentialCustomerNewsContent } = require('../services/weeklyReportNews.cjs');
+const { sourceContext, applyWeeklyNewsRules, buildNewsContent, buildPotentialCustomerNewsContent } = require('../services/weeklyReportNews.cjs');
 const topic='江苏机关事务';
 const row={keyword:topic,sourceapi:'极致了api',source:'鹭岛后勤',
   link:'https://mp.weixin.qq.com/s?__biz=MzIwMTU0MzE1Nw%3D%3D&mid=123&idx=1',
@@ -39,20 +39,23 @@ test('unknown, disabled, malformed and conflicting identities do not enrich a re
   ];
   for(const [name,article,keyword] of cases)await t.test(name,()=>{
     assert.equal(sourceContext(article,keyword),null);
-    assert.equal(applySourceContextRules('固定提示词\n末尾空格  ',[article],keyword),'固定提示词\n末尾空格  ');
+    const prompt=applyWeeklyNewsRules('固定提示词\n末尾空格  ',[article],keyword);
+    assert.ok(prompt.startsWith('固定提示词\n末尾空格  '));
+    assert.doesNotMatch(prompt,/官微来源地域使用规则/);
+    if(keyword!==topic) assert.equal(prompt,'固定提示词\n末尾空格  ');
     assert.doesNotMatch(buildNewsContent([article],'short',keyword),/来源上下文/);
   });
 });
 
 test('source rule appends to the exact original prompt and leaves non-government requests untouched',()=>{
   const original='我的固定系统提示词\n## 自定义格式\n保留末尾空格  ';
-  const result=applySourceContextRules(original,[row],topic);
+  const result=applyWeeklyNewsRules(original,[row],topic);
   assert.ok(result.startsWith(original+'\n\n'));
   assert.match(result,/账号辖区不等于事件发生地/);
-  assert.match(result,/正文明确地点优先/);
+  assert.match(result,/正文明确的主体与地点关系优先/);
   assert.match(result,/不得因专题名含“江苏”/);
-  assert.equal(applySourceContextRules(original,[],topic),original);
-  assert.equal(applySourceContextRules(original,[row],'养老'),original);
+  assert.equal(applyWeeklyNewsRules(original,[],topic),original);
+  assert.equal(applyWeeklyNewsRules(original,[row],'养老'),original);
 });
 
 test('mixed-source input labels only verified articles and preserves source ordering',()=>{
@@ -74,4 +77,41 @@ test('central publisher and municipality level are distinguished without inferri
   assert.deepEqual(sourceContext(central,topic),{发布账号:'国管局',账号辖区:'中央机关',账号层级:'国家级'});
   const tianjin={...row,link:row.link.replace('MzIwMTU0MzE1Nw%3D%3D','Mzg2MjU5ODk0NA%3D%3D')};
   assert.deepEqual(sourceContext(tianjin,topic),{发布账号:'天津机关事务',账号辖区:'天津市',账号层级:'省级（直辖市）'});
+});
+
+
+test('government layout applies to website-only material without granting publisher inference',()=>{
+  const original='原有格式和日期规则  ';
+  const website={...row,sourceapi:'serp_bing',link:'https://example.org/news'};
+  const result=applyWeeklyNewsRules(original,[website],topic);
+  assert.ok(result.startsWith(original+'\n\n'));
+  assert.match(result,/# 机关事务周报分组与地区呈现/);
+  assert.match(result,/同一业务分类只出现一次/);
+  assert.match(result,/子列表/);
+  assert.doesNotMatch(result,/# 官微来源地域使用规则/);
+  assert.equal(applyWeeklyNewsRules(original,[website],'公积金'),original);
+  assert.equal(applyWeeklyNewsRules(original,[],topic),original);
+});
+
+test('source guidance resolves actor separately from destination, quotations and legal agency names',()=>{
+  const result=applyWeeklyNewsRules('原提示词',[row],topic);
+  assert.match(result,/我局.*本局.*我省.*我市/);
+  assert.match(result,/引语/);
+  assert.match(result,/访问地/);
+  assert.match(result,/不得.*法定全称/);
+  assert.match(result,/不保留没有明确先行主体的/);
+  assert.match(result,/仅合并分类标题/);
+});
+
+test('mixed articles explicitly mark missing publisher context instead of inheriting the previous row',()=>{
+  const unknown={...row,link:row.link.replace('MzIwMTU0MzE1Nw%3D%3D','Tm90VmVyaWZpZWQ%3D'),title:'无地区线索',content:'我局新增共享功能。',short_summary:''};
+  const value=buildNewsContent([row,unknown,row],'full',topic);
+  const pieces=value.split('\n\n');
+  assert.equal(pieces.length,3);
+  assert.ok(pieces[1].startsWith('来源核验：本条无已核验账号信息，地域仅依据本条标题和内容，不沿用其他新闻。\n'));
+  assert.ok(pieces[1].endsWith('新闻2标题:无地区线索\n新闻2内容:我局新增共享功能。'));
+  assert.doesNotMatch(pieces[1],/福建|厦门|来源上下文/);
+  assert.equal(sourceContext(unknown,topic),null);
+  assert.ok(buildPotentialCustomerNewsContent([unknown],'full',topic).startsWith('来源核验：本条无已核验账号信息'));
+  assert.equal(buildNewsContent([unknown],'full','公积金'),'新闻1标题:无地区线索\n新闻1内容:我局新增共享功能。');
 });

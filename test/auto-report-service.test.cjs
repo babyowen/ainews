@@ -679,7 +679,22 @@ test('automatic government weekly requests include verified geography, preserve 
     assert.match(received.userPrompt,/来源上下文[^\n]*鹭岛后勤[^\n]*福建省厦门市/);
     assert.ok(received.userPrompt.includes('我局赴浙江省杭州市交流。'));
     assert.match(received.systemPrompt,/账号辖区不等于事件发生地/);
+    assert.match(received.systemPrompt,/# 机关事务周报分组与地区呈现/);
     assert.match(pool.calls.find(c=>c.sql.includes('FROM scored_news')&&!c.sql.includes('COUNT')).sql,/\bsourceapi\b/);
     assert.deepEqual(row,before);
+  } finally {fs.rmSync(outputDir,{recursive:true,force:true});}
+});
+
+
+test('automatic government website-only report keeps grouped layout without source inference',async()=>{
+  const outputDir=makeTempDir();let received;
+  try {
+    const pool=makePool({'江苏机关事务':[{id:1,title:'广东推进公物仓管理',content:'广东省发布公物仓管理细则。',sourceapi:'serp_bing',link:'https://example.org/news',score:4}]});
+    const service=createAutoReportService({pool,config:baseConfig,outputDir,
+      getWeeklyReportModel:()=>({model:'test'}),callLlm:async p=>{received=p;return '测试周报';},renderPdf:async()=>Buffer.from('pdf')});
+    const result=await service.generateReportForKeyword({keyword:'江苏机关事务',startDate:'2026-11-07',endDate:'2026-11-13',minScore:4});
+    assert.equal(result.status,'success');
+    assert.match(received.systemPrompt,/# 机关事务周报分组与地区呈现/);
+    assert.doesNotMatch(received.systemPrompt+'\n'+received.userPrompt,/来源上下文：|# 官微来源地域使用规则/);
   } finally {fs.rmSync(outputDir,{recursive:true,force:true});}
 });
