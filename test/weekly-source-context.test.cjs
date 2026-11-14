@@ -102,3 +102,16 @@ test('source guidance resolves actor separately from destination, quotations and
   assert.match(result,/不保留没有明确先行主体的/);
   assert.match(result,/仅合并分类标题/);
 });
+
+test('mixed articles explicitly mark missing publisher context instead of inheriting the previous row',()=>{
+  const unknown={...row,link:row.link.replace('MzIwMTU0MzE1Nw%3D%3D','Tm90VmVyaWZpZWQ%3D'),title:'无地区线索',content:'我局新增共享功能。',short_summary:''};
+  const value=buildNewsContent([row,unknown,row],'full',topic);
+  const pieces=value.split('\n\n');
+  assert.equal(pieces.length,3);
+  assert.ok(pieces[1].startsWith('来源核验：本条无已核验账号信息，地域仅依据本条标题和内容，不沿用其他新闻。\n'));
+  assert.ok(pieces[1].endsWith('新闻2标题:无地区线索\n新闻2内容:我局新增共享功能。'));
+  assert.doesNotMatch(pieces[1],/福建|厦门|来源上下文/);
+  assert.equal(sourceContext(unknown,topic),null);
+  assert.ok(buildPotentialCustomerNewsContent([unknown],'full',topic).startsWith('来源核验：本条无已核验账号信息'));
+  assert.equal(buildNewsContent([unknown],'full','公积金'),'新闻1标题:无地区线索\n新闻1内容:我局新增共享功能。');
+});
