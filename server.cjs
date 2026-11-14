@@ -5,6 +5,7 @@ const mysql = require('mysql2/promise');
 const cors = require('cors');
 const path = require('path');
 const crypto = require('crypto');
+const { applySourceContextRules, buildNewsContent, buildPotentialCustomerNewsContent } = require('./services/weeklyReportNews.cjs');
 const { countPeriodNews } = require('./services/reportNewsCount.cjs');
 const { applyWeeklyReportEditorialRules, appendWeeklyReportDateReminder } = require('./services/weeklyReportEditorial.cjs');
 const cron = require('node-cron');
@@ -1171,7 +1172,7 @@ app.get('/api/weekly-news', async (req, res) => {
   }
   
   try {
-    let sql = `SELECT id, title, content, short_summary, source, fetchdate, score, link, keyword, search_keyword, wordcount 
+    let sql = `SELECT id, title, content, short_summary, source, fetchdate, score, link, keyword, search_keyword, wordcount, sourceapi
        FROM scored_news 
        WHERE keyword = ? AND DATE(fetchdate) BETWEEN ? AND ?`;
     
@@ -1337,20 +1338,14 @@ app.post('/api/preview-report-message', async (req, res) => {
   try {
     // 读取标准提示词（默认层 + 运行时层合并后的生效配置）
     const weeklyPrompts = promptStore.getWeeklyPrompts();
-    const systemPrompt = applyWeeklyReportEditorialRules(weeklyPrompts.systemPrompt);
+    const systemPrompt = applySourceContextRules(applyWeeklyReportEditorialRules(weeklyPrompts.systemPrompt), selectedNews, keyword);
     const userPromptTemplate = weeklyPrompts.userPrompt;
 
     // 拼接新闻内容
-  const newsContent = selectedNews.map((news, index) => {
-      const text = summaryVersion === 'short' ? (news.short_summary || news.content || '内容不详') : (news.content || news.short_summary || '内容不详');
-      return `新闻${index + 1}标题:${news.title}\n新闻${index + 1}内容:${text}`;
-    }).join('\n\n');
+    const newsContent = buildNewsContent(selectedNews, summaryVersion, keyword, false);
 
     // 拼接潜在客户专用新闻内容 {qianzai_news}
-    const qianzaiNewsContent = selectedNews.map((news, index) => {
-      const text = summaryVersion === 'short' ? (news.short_summary || news.content || '内容不详') : (news.content || news.short_summary || '内容不详');
-      return `这是我的潜在客户<${news.search_keyword || '未知客户'}>，以下是我搜索到的新闻<${text}>`;
-    }).join('\n\n');
+    const qianzaiNewsContent = buildPotentialCustomerNewsContent(selectedNews, summaryVersion, keyword);
     
     // 替换用户提示词中的变量
     const finalUserPrompt = appendWeeklyReportDateReminder(userPromptTemplate
@@ -1611,19 +1606,13 @@ app.post(['/api/generate-report', '/api/generate-kimi-report', '/api/generate-si
       userPromptTemplate = weeklyPrompts.userPrompt;
     }
 
-    systemPrompt = applyWeeklyReportEditorialRules(systemPrompt);
+    systemPrompt = applySourceContextRules(applyWeeklyReportEditorialRules(systemPrompt), selectedNews, keyword);
 
     // 拼接新闻内容
-    const newsContent = selectedNews.map((news, index) => {
-      const text = summaryVersion === 'short' ? (news.short_summary || news.content || '内容不详') : (news.content || news.short_summary || '内容不详');
-      return `新闻${index + 1}标题:${news.title}\n新闻${index + 1}内容:${text}`;
-    }).join('\n\n');
+    const newsContent = buildNewsContent(selectedNews, summaryVersion, keyword, false);
 
     // 拼接潜在客户专用新闻内容 {qianzai_news}
-    const qianzaiNewsContent = selectedNews.map((news, index) => {
-      const text = summaryVersion === 'short' ? (news.short_summary || news.content || '内容不详') : (news.content || news.short_summary || '内容不详');
-      return `这是我的潜在客户<${news.search_keyword || '未知客户'}>，以下是我搜索到的新闻<${text}>`;
-    }).join('\n\n');
+    const qianzaiNewsContent = buildPotentialCustomerNewsContent(selectedNews, summaryVersion, keyword);
     
     // 替换用户提示词中的变量
     const finalUserPrompt = appendWeeklyReportDateReminder(userPromptTemplate

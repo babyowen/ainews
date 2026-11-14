@@ -18,6 +18,7 @@ function loadApp({ failure, completion = '完整报告', configDir } = {}) {
   const token=sessionPayload+'.'+crypto.createHmac('sha256',sessionSecret).update(sessionPayload).digest('base64url');
   const calls = [];
   const writes = [];
+  const queries = [];
   const model = {
     redactError: String,
     async completeChat(messages, options) {
@@ -33,6 +34,7 @@ function loadApp({ failure, completion = '完整报告', configDir } = {}) {
     },
   };
   const fakePool = { async getConnection(){return {query:(sql,args)=>fakePool.query(sql,args),async rollback(){},release(){}};}, async query(sql, args) {
+    queries.push({sql,args});
     if (/^SET TRANSACTION|^START TRANSACTION/.test(sql) || sql.includes('news_business_type_aliases')) return [[]];
     if (sql.includes('INSERT INTO weekly_reports')) { writes.push(args); return [{ insertId: 1 }]; }
     if (sql.includes('FROM scored_news')) return [[{
@@ -74,7 +76,7 @@ function loadApp({ failure, completion = '完整报告', configDir } = {}) {
     await layer.route.stack[0].handle({ body, query: body || {}, headers: {authorization:`Bearer ${token}`}, get: name=>name.toLowerCase()==='authorization'?`Bearer ${token}`:undefined }, res);
     return res;
   }
-  return { calls, writes, request };
+  return { calls, writes, queries, request };
 }
 const reportBody = { keyword: '公积金', startDate: '2026-09-13', endDate: '2026-09-19', selectedNews: [{ title: '政策新闻', content: '测试政策正文' }], modelKey: 'deepseek-v4-pro' };
 
@@ -192,4 +194,72 @@ test('unified generation routes consume runtime prompts without modifying Git de
     assert.ok(app.calls.every(call => call.options.modelConfig.model === 'DeepSeek-V4.1-Flash'));
     assert.equal(fs.readFileSync(path.join(configDir, 'prompts.md'), 'utf8'), defaultWeekly);
   } finally { fs.rmSync(configDir, { recursive: true, force: true }); }
+});
+
+const governmentArticle = {
+  id: 160215, keyword: '江苏机关事务', sourceapi: '极致了api', source: '鹭岛后勤',
+  link: 'https://mp.weixin.qq.com/s?__biz=MzIwMTU0MzE1Nw%3D%3D&mid=123&idx=1',
+  title: '为民解忧办实事 锦旗致谢暖人心', content: '我局处理了办公用房渗水问题。全文保持原样。',
+  short_summary: '我局处理了办公用房渗水问题。', score: 3,
+};
+
+test('government weekly manual and preview requests include independent verified geography without changing articles', async () => {
+  for (const summaryVersion of ['short', 'full']) {
+    for (const route of ['/api/preview-report-message','/api/generate-report','/api/generate-kimi-report','/api/generate-siliconflow-report']) {
+      const input = { ...reportBody, keyword:'江苏机关事务', selectedNews:[structuredClone(governmentArticle)], summaryVersion };
+      const before=structuredClone(input);
+      const app=loadApp(); const res=await app.request(route,input);
+      assert.equal(res.statusCode,200);
+      const user=route.includes('preview')?res.data.debug.userPrompt:app.calls[0].messages[1].content;
+      const system=route.includes('preview')?res.data.debug.systemPrompt:app.calls[0].messages[0].content;
+      assert.match(user,/来源上下文[^\n]*鹭岛后勤[^\n]*福建省厦门市[^\n]*市级/);
+      assert.ok(user.includes(`新闻1标题:${governmentArticle.title}\n新闻1内容:${summaryVersion==='short'?governmentArticle.short_summary:governmentArticle.content}`));
+      assert.match(system,/账号辖区不等于事件发生地/);
+      assert.match(system,/转载/);
+      assert.deepEqual(input,before);
+      if(route.includes('preview')) assert.equal(app.calls.length,0);
+    }
+  }
+});
+
+test('streaming government weekly request receives the same geography as non-streaming',async()=>{
+  const app=loadApp();
+  await app.request('/api/generate-report',{...reportBody,keyword:'江苏机关事务',selectedNews:[governmentArticle],summaryVersion:'short',stream:true});
+  assert.match(app.calls[0].messages[1].content,/福建省厦门市/);
+  assert.match(app.calls[0].messages[0].content,/账号辖区不等于事件发生地/);
+});
+
+test('weekly news query retains provider identity for subsequent manual selection',async()=>{
+  const app=loadApp();
+  await app.request('/api/weekly-news',{keyword:'江苏机关事务',startDate:'2026-11-08',endDate:'2026-11-14'},'get');
+  assert.match(app.queries[0].sql,/\bsourceapi\b/);
+});
+
+test('government generation preserves runtime prompts and non-government model messages',async()=>{
+  const os=require('node:os');const crypto=require('node:crypto');
+  const {createConfigStore}=require('../services/configStore.cjs');
+  const {createPromptStore}=require('../services/promptStore.cjs');
+  const configDir=fs.mkdtempSync(path.join(os.tmpdir(),'government-runtime-prompts-'));
+  try {
+    fs.cpSync(path.join(root,'config'),configDir,{recursive:true,filter:p=>!path.relative(path.join(root,'config'),p).split(path.sep).includes('runtime')});
+    const store=createConfigStore({configDir}),prompts=createPromptStore({configStore:store});
+    prompts.saveKeywordPrompt({keyword:'江苏机关事务',promptId:'geo-test',name:'保持原样的生产自定义',description:'测试中创建的独立运行时模板',systemPrompt:'珍贵自定义提示词\n保留全部格式  ',userPrompt:'固定开头\n{news}\n固定结尾'});
+    const runtimePath=path.join(configDir,'runtime','keyword-prompts.json');
+    const before=fs.readFileSync(runtimePath);const defaultBefore=fs.readFileSync(path.join(configDir,'keyword-prompts.json'));
+    const app=loadApp({configDir});
+    await app.request('/api/generate-report',{...reportBody,keyword:'江苏机关事务',selectedNews:[governmentArticle],promptId:'geo-test',summaryVersion:'short'});
+    assert.ok(app.calls[0].messages[0].content.startsWith(applyWeeklyReportEditorialRules('珍贵自定义提示词\n保留全部格式  ')));
+    assert.match(app.calls[0].messages[1].content,/固定开头\n来源上下文/);
+    assert.ok(app.calls[0].messages[1].content.includes('固定结尾'));
+    await app.request('/api/generate-report',{...reportBody,selectedNews:[governmentArticle]});
+    assert.doesNotMatch(app.calls[1].messages.map(m=>m.content).join('\n'),/来源上下文|官微来源地域使用规则/);
+    assert.equal(crypto.createHash('sha256').update(fs.readFileSync(runtimePath)).digest('hex'),crypto.createHash('sha256').update(before).digest('hex'));
+    assert.deepEqual(fs.readFileSync(path.join(configDir,'keyword-prompts.json')),defaultBefore);
+  } finally {fs.rmSync(configDir,{recursive:true,force:true});}
+});
+
+test('shared builder preserves manual non-government empty-title payloads',async()=>{
+  const app=loadApp();
+  await app.request('/api/generate-report',{...reportBody,selectedNews:[{title:'',content:'保留正文'}],summaryVersion:'full'});
+  assert.ok(app.calls[0].messages[1].content.includes('新闻1标题:\n新闻1内容:保留正文'));
 });

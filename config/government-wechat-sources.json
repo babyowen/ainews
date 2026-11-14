@@ -1,0 +1,280 @@
+{
+  "version": 1,
+  "keyword": "江苏机关事务",
+  "source": {
+    "repository": "babyowen/serp_news",
+    "commit": "484ee28dbd7f432864f6552d566cc317bb13dfd3",
+    "path": "topic_packages/government_affairs_wechat.json",
+    "sha256": "7317dbb1171510c794e1c9b302a735b3a2f36f5a6a774f5f3b527d8bcebc8070",
+    "resolver_version": "government-wechat-source-v1",
+    "resolver_sha256": "2401aa2d151b5445247705b1701d3a6a8584a3c36811dac16ec5e74dcce6454d"
+  },
+  "accounts": [
+    {
+      "biz": "MzA3MDc2NzA4Nw==",
+      "ghid": "gh_7af7ed4664f7",
+      "name": "国管局",
+      "jurisdiction": "中央机关",
+      "level": "国家级"
+    },
+    {
+      "biz": "Mzg2MjU5ODk0NA==",
+      "ghid": "gh_dd06127bae42",
+      "name": "天津机关事务",
+      "jurisdiction": "天津市",
+      "level": "省级（直辖市）"
+    },
+    {
+      "biz": "MzI2NjU0NzU4OA==",
+      "ghid": "gh_ccf338e4b081",
+      "name": "河北省机关事务管理局",
+      "jurisdiction": "河北省",
+      "level": "省级"
+    },
+    {
+      "biz": "Mzg4MDYwMjc2Ng==",
+      "ghid": "gh_115a26692b58",
+      "name": "山西机关事务",
+      "jurisdiction": "山西省",
+      "level": "省级"
+    },
+    {
+      "biz": "MzIwNDU5MjI5OQ==",
+      "ghid": "gh_65565bf0cd06",
+      "name": "内蒙古自治区机关事务管理局",
+      "jurisdiction": "内蒙古自治区",
+      "level": "省级（自治区）"
+    },
+    {
+      "biz": "MzY5MzAyMjYzMA==",
+      "ghid": "gh_3a4858e832c2",
+      "name": "辽宁机关事务",
+      "jurisdiction": "辽宁省",
+      "level": "省级"
+    },
+    {
+      "biz": "MzAwNDc4NDAwNQ==",
+      "ghid": "gh_1a74eeea8279",
+      "name": "上海机关事务",
+      "jurisdiction": "上海市",
+      "level": "省级（直辖市）"
+    },
+    {
+      "biz": "Mzg3ODUzNTQ0OQ==",
+      "ghid": "gh_d58dc573aca4",
+      "name": "江苏省机关事务管理局",
+      "jurisdiction": "江苏省",
+      "level": "省级"
+    },
+    {
+      "biz": "MzkzNzM5OTM4Mw==",
+      "ghid": "gh_2774ca4a022f",
+      "name": "浙里好管家",
+      "jurisdiction": "浙江省",
+      "level": "省级"
+    },
+    {
+      "biz": "MzI4OTU3MTU1Nw==",
+      "ghid": "gh_b103c360dea3",
+      "name": "皖美管家",
+      "jurisdiction": "安徽省",
+      "level": "省级"
+    },
+    {
+      "biz": "MzU5MjEwMTc1NA==",
+      "ghid": "gh_208803538340",
+      "name": "江西机关事务",
+      "jurisdiction": "江西省",
+      "level": "省级"
+    },
+    {
+      "biz": "MzU1NjE1MjUzMg==",
+      "ghid": "gh_b2ab950d5d59",
+      "name": "山东省机关事务管理局",
+      "jurisdiction": "山东省",
+      "level": "省级"
+    },
+    {
+      "biz": "MzU4NTAyNjA3Mw==",
+      "ghid": "gh_5e30bc26d9a6",
+      "name": "河南省机关事务管理局",
+      "jurisdiction": "河南省",
+      "level": "省级"
+    },
+    {
+      "biz": "Mzg5MTU5Mjg1Mg==",
+      "ghid": "gh_feec4e9cdb69",
+      "name": "湖北省机关事务管理局",
+      "jurisdiction": "湖北省",
+      "level": "省级"
+    },
+    {
+      "biz": "Mzk0NDI3MDk0NQ==",
+      "ghid": "gh_cc2710bcb825",
+      "name": "湖南机关事务",
+      "jurisdiction": "湖南省",
+      "level": "省级"
+    },
+    {
+      "biz": "Mzg4ODcyNzQ4Ng==",
+      "ghid": "gh_7cc3f57ed5ce",
+      "name": "广东机关事务",
+      "jurisdiction": "广东省",
+      "level": "省级"
+    },
+    {
+      "biz": "MzU1MTQyOTE1Mw==",
+      "ghid": "gh_71c85f7baf15",
+      "name": "广西机关事务管理局",
+      "jurisdiction": "广西壮族自治区",
+      "level": "省级（自治区）"
+    },
+    {
+      "biz": "MzU5MDgzNjY0MQ==",
+      "ghid": "gh_eea73b3517b7",
+      "name": "重庆市机关事务管理局",
+      "jurisdiction": "重庆市",
+      "level": "省级（直辖市）"
+    },
+    {
+      "biz": "MzI4NjU4MjU3Ng==",
+      "ghid": "gh_8b6d55bd42c6",
+      "name": "四川机关事务官微",
+      "jurisdiction": "四川省",
+      "level": "省级"
+    },
+    {
+      "biz": "MzU3NzMyNDYyMQ==",
+      "ghid": "gh_7bc1accc3d37",
+      "name": "贵州省机关事务管理局",
+      "jurisdiction": "贵州省",
+      "level": "省级"
+    },
+    {
+      "biz": "MzUzODk2NjQwOQ==",
+      "ghid": "gh_20a8349fdf3d",
+      "name": "云南省机关事务管理局",
+      "jurisdiction": "云南省",
+      "level": "省级"
+    },
+    {
+      "biz": "MzE5MTIwMjg4NQ==",
+      "ghid": "gh_b941e8836133",
+      "name": "西藏机关事务",
+      "jurisdiction": "西藏自治区",
+      "level": "省级（自治区）"
+    },
+    {
+      "biz": "Mzg3NzU0MDM4Mw==",
+      "ghid": "gh_59b20959a80b",
+      "name": "陕西机关事务",
+      "jurisdiction": "陕西省",
+      "level": "省级"
+    },
+    {
+      "biz": "Mzg4Nzc2MDQ4OQ==",
+      "ghid": "gh_28878361c154",
+      "name": "青海省省直机关事务管理局",
+      "jurisdiction": "青海省",
+      "level": "省级"
+    },
+    {
+      "biz": "Mzk0OTAxNTcyOA==",
+      "ghid": "gh_de3c509877cf",
+      "name": "宁夏机关事务",
+      "jurisdiction": "宁夏回族自治区",
+      "level": "省级（自治区）"
+    },
+    {
+      "biz": "MzUyNDE4Mzc2MQ==",
+      "ghid": "gh_4b8116c415f0",
+      "name": "新疆机关事务",
+      "jurisdiction": "新疆维吾尔自治区",
+      "level": "省级（自治区）"
+    },
+    {
+      "biz": "Mzg4NjYxMzQ1MQ==",
+      "ghid": "gh_f17081a5433c",
+      "name": "沈阳机关事务服务号",
+      "jurisdiction": "辽宁省沈阳市",
+      "level": "市级"
+    },
+    {
+      "biz": "MzA3MzAzMTY4OA==",
+      "ghid": "gh_78dbeb6101f6",
+      "name": "大连机关事务",
+      "jurisdiction": "辽宁省大连市",
+      "level": "市级"
+    },
+    {
+      "biz": "MzkzMzQ5NzI1OQ==",
+      "ghid": "gh_662760e702f3",
+      "name": "长春机关事务",
+      "jurisdiction": "吉林省长春市",
+      "level": "市级"
+    },
+    {
+      "biz": "Mzg2MTY2NTI3MQ==",
+      "ghid": "gh_7c6adeb484cb",
+      "name": "哈尔滨机关事务",
+      "jurisdiction": "黑龙江省哈尔滨市",
+      "level": "市级"
+    },
+    {
+      "biz": "MzkxOTYwMDcyMg==",
+      "ghid": "gh_b658f8c01c4a",
+      "name": "勤惟宁",
+      "jurisdiction": "江苏省南京市",
+      "level": "市级"
+    },
+    {
+      "biz": "MzI2OTI5MTAwOA==",
+      "ghid": "gh_11f3e687ba98",
+      "name": "杭州机关后勤",
+      "jurisdiction": "浙江省杭州市",
+      "level": "市级"
+    },
+    {
+      "biz": "MzIwMTU0MzE1Nw==",
+      "ghid": "gh_58fac54e4e5f",
+      "name": "鹭岛后勤",
+      "jurisdiction": "福建省厦门市",
+      "level": "市级"
+    },
+    {
+      "biz": "MzI4OTExNzU2MA==",
+      "ghid": "gh_1bc11ea19ee8",
+      "name": "济南机关事务",
+      "jurisdiction": "山东省济南市",
+      "level": "市级"
+    },
+    {
+      "biz": "MzA5MTU3MjgyNQ==",
+      "ghid": "gh_be6255616a99",
+      "name": "青岛机关事务",
+      "jurisdiction": "山东省青岛市",
+      "level": "市级"
+    },
+    {
+      "biz": "MzIwOTYwMjAxOA==",
+      "ghid": "gh_6493535f6ef1",
+      "name": "武汉机关事务",
+      "jurisdiction": "湖北省武汉市",
+      "level": "市级"
+    },
+    {
+      "biz": "MzAwMjc5ODgyNA==",
+      "ghid": "gh_b8c658c5d05c",
+      "name": "深圳机关事务",
+      "jurisdiction": "广东省深圳市",
+      "level": "市级"
+    },
+    {
+      "biz": "MzU3NTcxMDQ4Mg==",
+      "ghid": "gh_f3256e1d1716",
+      "name": "蓉机管",
+      "jurisdiction": "四川省成都市",
+      "level": "市级"
+    }
+  ]
+}

@@ -114,3 +114,7 @@ NODE
 2. 关键词是否仍存在于 `config/users.json` 的 admin `keywords` 中。
 3. 对应 `promptId` 是否存在于 `config/keyword-prompts.json`。
 4. `AGENT_ROUTER_API_KEY` 是否已配置，`config/weekly-report-models.json` 的精确模型 ID 是否在供应商实时列表中；旧模型 key 会兼容映射到统一模型。
+
+## 已核验官微的来源地区
+
+「江苏机关事务」专题下已核验的极致了官微，在周报模型请求中独立附加发布账号、辖区和层级，帮助理解“我省、我市、我局”。手动与自动周报共用处理逻辑，来源地不直接视为事件发生地。固定和生产自定义提示词文件保持原样，规则只在符合条件的当次请求中追加。详见 [来源上下文与验证](weekly-wechat-context.md)。

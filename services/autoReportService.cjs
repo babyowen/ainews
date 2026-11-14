@@ -1,4 +1,5 @@
 const fs = require('fs');
+const { applySourceContextRules, buildNewsContent, buildPotentialCustomerNewsContent } = require('./weeklyReportNews.cjs');
 const path = require('path');
 const { extractSection: sharedExtractSection } = require('./promptStore.cjs');
 const { streamChat } = require('./modelClient.cjs');
@@ -184,31 +185,13 @@ function loadPromptPair({ keyword, promptId, promptConfigPath, fallbackPromptsPa
   };
 }
 
-function buildNewsContent(newsList, summaryVersion) {
-  return newsList.map((news, index) => {
-    const text = summaryVersion === 'short'
-      ? (news.short_summary || news.content || '内容不详')
-      : (news.content || news.short_summary || '内容不详');
-    return `新闻${index + 1}标题:${news.title || '标题不详'}\n新闻${index + 1}内容:${text}`;
-  }).join('\n\n');
-}
-
-function buildPotentialCustomerNewsContent(newsList, summaryVersion) {
-  return newsList.map((news) => {
-    const text = summaryVersion === 'short'
-      ? (news.short_summary || news.content || '内容不详')
-      : (news.content || news.short_summary || '内容不详');
-    return `这是我的潜在客户<${news.search_keyword || '未知客户'}>，以下是我搜索到的新闻<${text}>`;
-  }).join('\n\n');
-}
-
 function buildFinalUserPrompt({ template, keyword, startDate, endDate, newsList, summaryVersion, userTopic = '无特别要求' }) {
   const prompt = String(template || '')
     .replaceAll('{keyword}', keyword)
     .replaceAll('{startDate}', startDate)
     .replaceAll('{endDate}', endDate)
-    .replaceAll('{news}', buildNewsContent(newsList, summaryVersion))
-    .replaceAll('{qianzai_news}', buildPotentialCustomerNewsContent(newsList, summaryVersion))
+    .replaceAll('{news}', buildNewsContent(newsList, summaryVersion, keyword))
+    .replaceAll('{qianzai_news}', buildPotentialCustomerNewsContent(newsList, summaryVersion, keyword))
     .replaceAll('{usertopic}', userTopic || '无特别要求');
   return appendWeeklyReportDateReminder(prompt, { startDate, endDate });
 }
@@ -406,7 +389,7 @@ function createAutoReportService(options) {
 
   async function queryNews({ keyword, startDate, endDate, minScore }) {
     const [rows] = await pool.query(
-      `SELECT id, title, content, short_summary, source, fetchdate, score, link, keyword, search_keyword, wordcount
+      `SELECT id, title, content, short_summary, source, fetchdate, score, link, keyword, search_keyword, wordcount, sourceapi
        FROM scored_news
        WHERE keyword = ? AND fetchdate BETWEEN ? AND ?
          AND (score IS NOT NULL AND score != '' AND CAST(score AS DECIMAL) >= ?)
@@ -473,6 +456,7 @@ function createAutoReportService(options) {
       return skipped;
     }
 
+    const systemPrompt = applySourceContextRules(promptPair.systemPrompt, newsRows, keyword);
     const userPrompt = buildFinalUserPrompt({
       template: promptPair.userPromptTemplate,
       keyword,
@@ -481,7 +465,7 @@ function createAutoReportService(options) {
       newsList: newsRows,
       summaryVersion,
     });
-    const promptCharCount = promptPair.systemPrompt.length + userPrompt.length;
+    const promptCharCount = systemPrompt.length + userPrompt.length;
     const sourceWordCount = getSourceWordCount(newsRows, summaryVersion);
     Object.assign(metrics, { promptCharCount, sourceWordCount });
 
@@ -490,12 +474,12 @@ function createAutoReportService(options) {
       reportContent = await callLlm({
         keyword,
         modelConfig,
-        systemPrompt: promptPair.systemPrompt,
+        systemPrompt,
         userPrompt,
         newsRows,
       });
     } else {
-      reportContent = await defaultCallLlm({ modelConfig, systemPrompt: promptPair.systemPrompt, userPrompt });
+      reportContent = await defaultCallLlm({ modelConfig, systemPrompt, userPrompt });
     }
 
     if (typeof reportContent !== 'string' || !reportContent.trim()) {
