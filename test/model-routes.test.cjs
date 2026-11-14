@@ -273,3 +273,46 @@ test('manual government website-only report gets grouped layout without fabricat
   assert.match(app.calls[0].messages[0].content,/# 机关事务周报分组与地区呈现/);
   assert.doesNotMatch(app.calls[0].messages.map(m=>m.content).join('\n'),/来源上下文：|# 官微来源地域使用规则/);
 });
+
+test('preview is byte-identical to the selected runtime template and model used by all generation routes',async()=>{
+  const os=require('node:os');
+  const {createConfigStore}=require('../services/configStore.cjs');
+  const {createPromptStore}=require('../services/promptStore.cjs');
+  const configDir=fs.mkdtempSync(path.join(os.tmpdir(),'weekly-preview-parity-'));
+  try{
+    fs.cpSync(path.join(root,'config'),configDir,{recursive:true,filter:p=>!path.relative(path.join(root,'config'),p).split(path.sep).includes('runtime')});
+    const store=createConfigStore({configDir}),prompts=createPromptStore({configStore:store});
+    for(const keyword of ['江苏机关事务','公积金']) prompts.saveKeywordPrompt({keyword,promptId:'parity',name:'自定义测试模板',description:'预览一致性',systemPrompt:'CUSTOM_SYSTEM_'+keyword,userPrompt:'CUSTOM_USER\n{startDate}/{endDate}\n{news}\n{usertopic}'});
+    const files=['keyword-prompts.json','runtime/keyword-prompts.json','prompts.md'].map(p=>path.join(configDir,p));
+    const before=files.map(p=>fs.readFileSync(p));
+    for(const keyword of ['江苏机关事务','公积金'])for(const summaryVersion of ['short','full'])for(const promptId of ['parity','missing-id','']){
+      const input={...reportBody,keyword,promptId,modelKey:'deepseek-v4-pro-0813',selectedNews:[governmentArticle],userPrompt:'保留普通动态',summaryVersion};
+      const app=loadApp({configDir});const preview=await app.request('/api/preview-report-message',input);
+      assert.equal(preview.statusCode,200);assert.equal(app.calls.length,0);assert.equal(app.writes.length,0);
+      for(const route of ['/api/generate-report','/api/generate-kimi-report','/api/generate-siliconflow-report'])for(const stream of [false,true]){
+        const response=await app.request(route,{...input,stream});assert.equal(response.statusCode,200);
+        const call=app.calls.at(-1);
+        assert.equal(preview.data.debug.systemPrompt,call.messages[0].content);
+        assert.equal(preview.data.debug.userPrompt,call.messages[1].content);
+        const debug=stream?JSON.parse(response.text.split('\n').find(l=>l.startsWith('data: ')&&l.includes('"type":"debug"')).slice(6)).data:response.data.debug;
+        assert.deepEqual(preview.data.debug,debug);
+        assert.equal(debug.modelKey,'deepseek-v4-pro-0813');
+        assert.equal(debug.promptId,promptId==='parity'?'parity':'');
+      }
+    }
+    files.forEach((p,i)=>assert.deepEqual(fs.readFileSync(p),before[i]));
+  }finally{fs.rmSync(configDir,{recursive:true,force:true});}
+});
+
+test('explicit model selection keeps its original thinking settings and registry intact',async()=>{
+  const {getWeeklyReportModel}=require('../services/weeklyReportModelConfig.cjs');
+  const original=getWeeklyReportModel('deepseek-v4.1-flash');
+  assert.equal(original.thinking.type,'disabled');
+  for(const [keyword,expected] of [['江苏机关事务','disabled'],['公积金','disabled']]){
+    const app=loadApp();
+    await app.request('/api/generate-report',{...reportBody,keyword,modelKey:'deepseek-v4.1-flash',selectedNews:[governmentArticle]});
+    assert.equal(app.calls[0].options.modelConfig.thinking.type,expected);
+    assert.equal(app.calls[0].options.modelConfig.model,original.model);
+  }
+  assert.deepEqual(getWeeklyReportModel('deepseek-v4.1-flash'),original);
+});

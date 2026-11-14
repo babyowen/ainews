@@ -5,7 +5,7 @@ const mysql = require('mysql2/promise');
 const cors = require('cors');
 const path = require('path');
 const crypto = require('crypto');
-const { applyWeeklyNewsRules, buildNewsContent, buildPotentialCustomerNewsContent } = require('./services/weeklyReportNews.cjs');
+const { buildWeeklyReportRequest } = require('./services/weeklyReportRequest.cjs');
 const { countPeriodNews } = require('./services/reportNewsCount.cjs');
 const { applyWeeklyReportEditorialRules, appendWeeklyReportDateReminder } = require('./services/weeklyReportEditorial.cjs');
 const cron = require('node-cron');
@@ -1329,58 +1329,13 @@ app.post('/api/modify-report', async (req, res) => {
 
 // 预览周报生成消息（不实际调用大模型）
 app.post('/api/preview-report-message', async (req, res) => {
-  const { keyword, startDate, endDate, selectedNews, userPrompt, summaryVersion } = req.body;
-  
+  const { keyword, startDate, endDate, selectedNews } = req.body;
   if (!keyword || !startDate || !endDate || !selectedNews || selectedNews.length === 0) {
     return res.status(400).json({ error: 'Missing required parameters' });
   }
-  
   try {
-    // 读取标准提示词（默认层 + 运行时层合并后的生效配置）
-    const weeklyPrompts = promptStore.getWeeklyPrompts();
-    const systemPrompt = applyWeeklyNewsRules(applyWeeklyReportEditorialRules(weeklyPrompts.systemPrompt), selectedNews, keyword);
-    const userPromptTemplate = weeklyPrompts.userPrompt;
-
-    // 拼接新闻内容
-    const newsContent = buildNewsContent(selectedNews, summaryVersion, keyword, false);
-
-    // 拼接潜在客户专用新闻内容 {qianzai_news}
-    const qianzaiNewsContent = buildPotentialCustomerNewsContent(selectedNews, summaryVersion, keyword);
-    
-    // 替换用户提示词中的变量
-    const finalUserPrompt = appendWeeklyReportDateReminder(userPromptTemplate
-      .replace('{keyword}', keyword)
-      .replace('{startDate}', startDate)
-      .replace('{endDate}', endDate)
-      .replace('{news}', newsContent)
-      .replace('{qianzai_news}', qianzaiNewsContent)
-      .replace('{usertopic}', userPrompt || '无特别要求'), { startDate, endDate });
-    
-    // 计算字数和Token估算
-    const totalContent = systemPrompt + finalUserPrompt;
-    const totalChars = totalContent.length;
-    
-    // Token估算函数 (基于DeepSeek官方标准: 1个中文字符≈0.6token, 1个英文字符≈0.3token)
-    const estimateTokens = (text) => {
-      if (!text) return 0;
-      const chineseChars = (text.match(/[\u4e00-\u9fff]/g) || []).length;
-      const englishChars = (text.match(/[a-zA-Z]/g) || []).length;
-      const otherChars = text.length - chineseChars - englishChars;
-      return Math.ceil(chineseChars * 0.6 + englishChars * 0.3 + otherChars * 0.5);
-    };
-    
-    // 返回完整的消息预览，不调用大模型
-    res.json({
-      preview: true,
-      debug: {
-        systemPrompt,
-        userPrompt: finalUserPrompt,
-        newsCount: selectedNews.length,
-        model: getWeeklyReportModel().label,
-        totalChars,
-        estimatedTokens: estimateTokens(totalContent)
-      }
-    });
+    const { debug } = buildWeeklyReportRequest({ ...req.body, promptStore });
+    res.json({ preview: true, debug });
   } catch (err) {
     console.error('Preview report message error:', err);
     res.status(500).json({ error: 'Failed to preview message', details: err.message });
@@ -1571,7 +1526,7 @@ app.get('/api/auto-report/download/:logId', async (req, res) => {
 
 // 生成周报（实际调用大模型）
 app.post(['/api/generate-report', '/api/generate-kimi-report', '/api/generate-siliconflow-report'], async (req, res) => {
-  const { keyword, startDate, endDate, selectedNews, userPrompt, promptId, stream = false, summaryVersion, modelKey } = req.body;
+  const { keyword, startDate, endDate, selectedNews, stream = false } = req.body;
   
   if (!keyword || !startDate || !endDate || !selectedNews || selectedNews.length === 0) {
     return res.status(400).json({ error: 'Missing required parameters' });
@@ -1580,71 +1535,7 @@ app.post(['/api/generate-report', '/api/generate-kimi-report', '/api/generate-si
 
 
   try {
-    const modelConfig = getWeeklyReportModel(modelKey);
-
-    let systemPrompt = '';
-    let userPromptTemplate = '';
-
-    // 如果指定了promptId，使用关键词特定的prompt配置（默认层+运行时层合并后的生效配置）
-    if (promptId) {
-      try {
-        const selectedPrompt = promptStore.findKeywordPrompt(keyword, promptId);
-        if (selectedPrompt) {
-          systemPrompt = selectedPrompt.systemPrompt;
-          userPromptTemplate = selectedPrompt.userPrompt;
-          console.log(`使用关键词 ${keyword} 的自定义prompt配置 (ID: ${promptId})`);
-        }
-      } catch (error) {
-        console.warn('读取关键词prompt配置失败，使用默认配置:', error);
-      }
-    }
-
-    // 如果没有找到关键词特定的prompt，使用默认配置
-    if (!systemPrompt || !userPromptTemplate) {
-      const weeklyPrompts = promptStore.getWeeklyPrompts();
-      systemPrompt = weeklyPrompts.systemPrompt;
-      userPromptTemplate = weeklyPrompts.userPrompt;
-    }
-
-    systemPrompt = applyWeeklyNewsRules(applyWeeklyReportEditorialRules(systemPrompt), selectedNews, keyword);
-
-    // 拼接新闻内容
-    const newsContent = buildNewsContent(selectedNews, summaryVersion, keyword, false);
-
-    // 拼接潜在客户专用新闻内容 {qianzai_news}
-    const qianzaiNewsContent = buildPotentialCustomerNewsContent(selectedNews, summaryVersion, keyword);
-    
-    // 替换用户提示词中的变量
-    const finalUserPrompt = appendWeeklyReportDateReminder(userPromptTemplate
-      .replace('{keyword}', keyword)
-      .replace('{startDate}', startDate)
-      .replace('{endDate}', endDate)
-      .replace('{news}', newsContent)
-      .replace('{qianzai_news}', qianzaiNewsContent)
-      .replace('{usertopic}', userPrompt || '无特别要求'), { startDate, endDate });
-
-    // Token估算函数 (基于DeepSeek官方标准: 1个中文字符≈0.6token, 1个英文字符≈0.3token)
-    const estimateTokens = (text) => {
-      if (!text) return 0;
-      const chineseChars = (text.match(/[\u4e00-\u9fff]/g) || []).length;
-      const englishChars = (text.match(/[a-zA-Z]/g) || []).length;
-      const otherChars = text.length - chineseChars - englishChars;
-      return Math.ceil(chineseChars * 0.6 + englishChars * 0.3 + otherChars * 0.5);
-    };
-
-    // 计算字数和Token估算
-    const totalContent = systemPrompt + finalUserPrompt;
-    const totalChars = totalContent.length;
-    
-    const messages = [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: finalUserPrompt },
-    ];
-    const debug = {
-      systemPrompt, userPrompt: finalUserPrompt, newsCount: selectedNews.length,
-      model: modelConfig.label, modelKey: modelConfig.key, modelId: modelConfig.model,
-      totalChars, estimatedTokens: estimateTokens(totalContent),
-    };
+    const { modelConfig, messages, debug } = buildWeeklyReportRequest({ ...req.body, promptStore });
     let report;
     if (stream) {
       res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
