@@ -1,5 +1,5 @@
 const fs = require('fs');
-const { applySourceContextRules, buildNewsContent, buildPotentialCustomerNewsContent } = require('./weeklyReportNews.cjs');
+const { applyWeeklyNewsRules, buildNewsContent, buildPotentialCustomerNewsContent } = require('./weeklyReportNews.cjs');
 const path = require('path');
 const { extractSection: sharedExtractSection } = require('./promptStore.cjs');
 const { streamChat } = require('./modelClient.cjs');
@@ -456,7 +456,7 @@ function createAutoReportService(options) {
       return skipped;
     }
 
-    const systemPrompt = applySourceContextRules(promptPair.systemPrompt, newsRows, keyword);
+    const systemPrompt = applyWeeklyNewsRules(promptPair.systemPrompt, newsRows, keyword);
     const userPrompt = buildFinalUserPrompt({
       template: promptPair.userPromptTemplate,
       keyword,

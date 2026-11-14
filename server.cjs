@@ -5,7 +5,7 @@ const mysql = require('mysql2/promise');
 const cors = require('cors');
 const path = require('path');
 const crypto = require('crypto');
-const { applySourceContextRules, buildNewsContent, buildPotentialCustomerNewsContent } = require('./services/weeklyReportNews.cjs');
+const { applyWeeklyNewsRules, buildNewsContent, buildPotentialCustomerNewsContent } = require('./services/weeklyReportNews.cjs');
 const { countPeriodNews } = require('./services/reportNewsCount.cjs');
 const { applyWeeklyReportEditorialRules, appendWeeklyReportDateReminder } = require('./services/weeklyReportEditorial.cjs');
 const cron = require('node-cron');
@@ -1338,7 +1338,7 @@ app.post('/api/preview-report-message', async (req, res) => {
   try {
     // 读取标准提示词（默认层 + 运行时层合并后的生效配置）
     const weeklyPrompts = promptStore.getWeeklyPrompts();
-    const systemPrompt = applySourceContextRules(applyWeeklyReportEditorialRules(weeklyPrompts.systemPrompt), selectedNews, keyword);
+    const systemPrompt = applyWeeklyNewsRules(applyWeeklyReportEditorialRules(weeklyPrompts.systemPrompt), selectedNews, keyword);
     const userPromptTemplate = weeklyPrompts.userPrompt;
 
     // 拼接新闻内容
@@ -1606,7 +1606,7 @@ app.post(['/api/generate-report', '/api/generate-kimi-report', '/api/generate-si
       userPromptTemplate = weeklyPrompts.userPrompt;
     }
 
-    systemPrompt = applySourceContextRules(applyWeeklyReportEditorialRules(systemPrompt), selectedNews, keyword);
+    systemPrompt = applyWeeklyNewsRules(applyWeeklyReportEditorialRules(systemPrompt), selectedNews, keyword);
 
     // 拼接新闻内容
     const newsContent = buildNewsContent(selectedNews, summaryVersion, keyword, false);
