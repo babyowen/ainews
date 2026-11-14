@@ -662,3 +662,24 @@ test('automatic streaming retries transient failures once and discards partial o
     }
   } finally { delete process.env.AUTO_RETRY_TEST_KEY; }
 });
+
+test('automatic government weekly requests include verified geography, preserve custom prompts and source fields',async()=>{
+  const row={id:160215,keyword:'江苏机关事务',sourceapi:'极致了api',source:'鹭岛后勤',
+    link:'https://mp.weixin.qq.com/s?__biz=MzIwMTU0MzE1Nw%3D%3D&mid=123&idx=1',
+    title:'我局交流活动',short_summary:'我局赴浙江省杭州市交流。',content:'我局赴浙江省杭州市交流。完整正文。',score:4};
+  const before=structuredClone(row),outputDir=makeTempDir();
+  try {
+    const pool=makePool({'江苏机关事务':[row]});
+    let received;
+    const service=createAutoReportService({pool,config:baseConfig,outputDir,
+      getWeeklyReportModel:require('../services/weeklyReportModelConfig.cjs').getWeeklyReportModel,
+      callLlm:async p=>{received=p;return '完整测试报告';},renderPdf:async()=>Buffer.from('pdf')});
+    const result=await service.generateReportForKeyword({keyword:'江苏机关事务',startDate:'2026-11-08',endDate:'2026-11-14',minScore:4,summaryVersion:'short'});
+    assert.equal(result.status,'success');
+    assert.match(received.userPrompt,/来源上下文[^\n]*鹭岛后勤[^\n]*福建省厦门市/);
+    assert.ok(received.userPrompt.includes('我局赴浙江省杭州市交流。'));
+    assert.match(received.systemPrompt,/账号辖区不等于事件发生地/);
+    assert.match(pool.calls.find(c=>c.sql.includes('FROM scored_news')&&!c.sql.includes('COUNT')).sql,/\bsourceapi\b/);
+    assert.deepEqual(row,before);
+  } finally {fs.rmSync(outputDir,{recursive:true,force:true});}
+});
