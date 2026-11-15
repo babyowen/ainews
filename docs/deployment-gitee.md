@@ -10,6 +10,8 @@
 
 ## 本地同步到 Gitee
 
+2026-11-15实机核对：上海150服务器发布根目录为 `/www/wwwroot/keydigest-new`，`current` 指向 `release-20261114T154017Z-2e458fd90a9c`。当前入口是独立Node进程 `/www/wwwroot/keydigest-new/current/server.cjs`，不是PM2管理的应用。下方通用脚本默认使用PM2；下一次发布必须先重新确认进程归属，不能按示例直接启动第二个监听3456端口的实例。详见[阶段交接](government-wechat-20261115-handoff.md)。
+
 首次配置：
 
 ```bash

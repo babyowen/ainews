@@ -59,7 +59,7 @@ node --test test/production-config-baseline.test.cjs
 1. 保留历史基线记录，同时以上线时重新审计的配置和 main 已确认的模型迁移为准。
 2. `config/runtime/` 只保存生产相对默认层的运行时覆盖，不得进入 Git 或部署包。
 3. 所有配置读取和管理界面写入必须经过统一存储入口。
-4. 自动周报必须保留本次审计确认的启停、关键词和 Prompt 配置；模型统一使用 DeepSeek V4.1 Flash。
+4. 自动周报必须保留发布前审计确认的启停、关键词和 Prompt 配置；模型以当前注册表的 `autoReportModelKey` 为准，现为 DeepSeek V4 Pro，手动及其他分析默认仍为 Flash。上文单模型迁移记录属于历史状态。
 5. 用户密码、政策时间戳快照、数据库、PDF 和日志属于服务器共享运行时数据。
 6. 后续若修改 Prompt，必须在独立提交中更新对应行为测试或哈希说明，不与无关架构改动混合。
 

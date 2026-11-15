@@ -1,6 +1,10 @@
 # Agent Router 模型统一迁移
 
-## 变更
+## 当前模型分工
+
+当前所有入口仍通过 Agent Router 和共享客户端调用，`config/weekly-report-models.json` 分别定义 `defaultModelKey`（Flash，用于手动报告及其他分析）和 `autoReportModelKey`（Pro，自动周报开启思考）。下文单模型步骤为2026-09-22首次迁移记录，后续发布不得据此把自动任务改回Flash。现行运维见[自动周报](auto-weekly-report.md)和[部署手册](deployment-gitee.md)。
+
+## 2026-09-22 迁移变更（历史）
 
 所有模型生成入口统一为 Agent Router 的 `DeepSeek-V4.1-Flash`。手动周报、自动周报、周报修改、政策提取/比对、地区政策报告共用配置和客户端，前端移除模型选择。Google Custom Search 属于搜索 API，不在模型迁移范围内。
 
@@ -8,7 +12,7 @@
 
 流式解析支持跨网络分块的 SSE 与 UTF-8，收到完整结束后才保存报告；中途断流或截断返回错误。供应商模型列表检查失败、密钥缺失或 API 失败时，不回退到旧供应商。
 
-## 配置与部署
+## 2026-09-22 配置与部署步骤（历史）
 
 1. 备份服务器当前发布版本，以及 `.env`、关键词/地区/政策提示词、`config/auto-report-config.json`、`config/users.json` 和 `config/policies/`。保留现有数据库及 PDF 文件。
 2. 在服务器 `.env` 中新增 `AGENT_ROUTER_API_KEY`，填写相同供应商的有效密钥。不要把本地 `.env` 整体覆盖到服务器，不要输出密钥到日志。
