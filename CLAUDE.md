@@ -57,7 +57,7 @@ node --test test/auto-report-service.test.cjs
 
 - **Frontend**: React 19, React Router DOM 7, ECharts, html2canvas, html2pdf.js, docx, dayjs, react-markdown, TanStack Query.
 - **Backend**: Express 4, mysql2 (Promise-based pool), CORS.
-- **AI/LLM**: Agent Router DeepSeek V4.1 Flash (single model, no provider fallback), Google Custom Search API.
+- **AI/LLM**: Agent Router; manual reports and other analysis default to DeepSeek V4.1 Flash, automatic weekly reports use DeepSeek V4 Pro with thinking enabled. No provider fallback. Google Custom Search is separate.
 - **PDF Rendering**: Playwright (server-side) for report and policy comparison PDFs.
 
 ### High-Level Structure
@@ -80,7 +80,7 @@ Frontend (React + Vite)  ←→  Backend (Express + MySQL)
 
 1. **Single-file backend**: `server.cjs` registers Express routes and initializes the DB pool. Reusable configuration, model, housing-fund query and report logic live in `services/`; no controllers or middleware directory is required.
 2. **Layered runtime configuration**: `services/configStore.cjs` reads Git defaults from `config/` and merges ignored production differences from `config/runtime/`. `services/promptStore.cjs` is the only prompt parsing/CRUD entry point. Admin writes never modify Git defaults.
-3. **LLM abstraction**: `services/llmService.cjs` encapsulates AI calls and uses services/modelClient.cjs and the fixed Agent Router model from config/weekly-report-models.json; prompts come from promptStore. The compatibility reload endpoint requires admin authentication.
+3. **LLM abstraction**: `services/llmService.cjs` encapsulates AI calls and uses `services/modelClient.cjs`; `config/weekly-report-models.json` defines the default and automatic-report models separately. Prompts come from promptStore. The compatibility reload endpoint requires admin authentication.
 4. **Streaming reports**: Report generation endpoints (`/api/generate-report`, `/api/generate-kimi-report`, etc.) use SSE (text/event-stream) to stream LLM chunks to the frontend.
 5. **Server-side PDF rendering**: Report and policy comparison PDFs are rendered via Playwright in `server/pdf/`, not in the browser. The frontend posts report data; server templates produce the printable HTML and return a PDF buffer. Housing-fund exports require the signed generation snapshot.
 6. **Keyword-specific prompts**: `config/keyword-prompts.json` contains defaults. The config UI at `/config` manages runtime overrides and shows each entry's source.
@@ -177,7 +177,8 @@ Navigation metadata lives in `config/navigation.json`. `src/config/navigation.js
 - `services/configStore.cjs` — default/runtime merge engine and atomic runtime writes
 - `services/promptStore.cjs` — unified prompt parsing and CRUD
 - `services/llmService.cjs` — LLM abstraction layer
-- `services/llmService.cjs` — CommonJS compatibility service for LLM management
+- `services/weeklyReportRequest.cjs` — shared manual generation and debug-preview request assembly
+- `services/weeklyReportNews.cjs` — verified government WeChat source context and topic-scoped layout rules
 - `services/modelClient.cjs` — unified model discovery, generation, SSE parsing and response validation
 - `services/policyExtraction.cjs` — validated policy JSON extraction with one format repair
 - `services/loginAudit.cjs` — JSON-backed successful login audit helpers
@@ -193,7 +194,7 @@ Navigation metadata lives in `config/navigation.json`. `src/config/navigation.js
 - `server/pdf/renderRegionPolicyReportPdf.cjs` — region policy PDF renderer
 - `config/auto-report-config.json` — automatic weekly report Git defaults
 - `config/runtime/` — ignored production overrides; shared across releases
-- `config/weekly-report-models.json` — single shared model used by every generation workflow
+- `config/weekly-report-models.json` — shared registry with separate manual/default and automatic-report model keys
 - `config/prompts.md` — system/user/modify prompt templates
 - `config/keyword-prompts.json` — keyword-specific prompt overrides
 - `config/region-policy-report-prompts.json` — region policy prompt configs
@@ -201,3 +202,9 @@ Navigation metadata lives in `config/navigation.json`. `src/config/navigation.js
 - `scripts/prepare-production-runtime.cjs` — explicit first-cutover migration of production users, policy history, login audit, and report PDFs
 - `scripts/deploy-from-gitee.sh` — exact-commit release deployment, readiness check, rollback, and bounded retention
 - `docs/deployment-gitee.md` — GitHub→Gitee→production runbook
+
+## Government WeChat milestone (2026-11-15)
+
+See `docs/government-wechat-20261115-handoff.md` for the deployed scope and first automatic run. Preserve all fixed and production-custom prompts, especially unrelated topics. The content-quality redesign is paused by the user; findings about old news, omissions and deduplication scores are pending work, not implemented fixes. Debug parity shipped in PR #37 without changing model settings or automatic generation behavior.
+
+The Shanghai production process was verified as a standalone Node process at `/www/wwwroot/keydigest-new/current/server.cjs`, not a PM2-managed app. Recheck ownership before any authorized deployment. Local evidence lives under ignored `output/`; never commit raw production snapshots or credentials.

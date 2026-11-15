@@ -16,7 +16,7 @@
 admin 在页面中为每个关键词单独配置：
 
 - 是否启用自动运行
-- 统一使用 DeepSeek V4.1 Flash（用户无需选择模型）
+- 自动周报统一使用 DeepSeek V4 Pro（开启思考，用户无需选择模型）；手动及其他分析默认仍为 Flash
 - 使用哪个 Prompt
 - 最低新闻分数
 - 使用短摘要还是全文
@@ -101,20 +101,22 @@ node --test test/*.test.*
 
 ```bash
 node - <<'NODE'
-const fs = require('fs');
+const { createConfigStore } = require('./services/configStore.cjs');
 const { buildAutoReportConfig } = require('./services/autoReportService.cjs');
-const config = JSON.parse(fs.readFileSync('config/auto-report-config.json', 'utf8'));
+const config = createConfigStore().readEffectiveJson('auto-report-config.json');
 console.log(buildAutoReportConfig(config).enabledKeywords);
 NODE
 ```
 
 如果页面显示启用状态和自动任务不一致，优先检查：
 
-1. `config/auto-report-config.json` 中关键词项的 `enabled`。
-2. 关键词是否仍存在于 `config/users.json` 的 admin `keywords` 中。
-3. 对应 `promptId` 是否存在于 `config/keyword-prompts.json`。
+1. 通过 `configStore` 读取默认层和 `config/runtime/` 合并后的自动配置，核对关键词项的 `enabled`。
+2. 关键词是否仍存在于生效用户配置的 admin `keywords` 中。
+3. 对应 `promptId` 是否存在于 `promptStore` 读取的生效关键词模板中。
 4. `AGENT_ROUTER_API_KEY` 是否已配置，`config/weekly-report-models.json` 的精确模型 ID 是否在供应商实时列表中；旧模型 key 会兼容映射到统一模型。
 
 ## 已核验官微的来源地区
 
 「江苏机关事务」专题下已核验的极致了官微，在周报模型请求中独立附加发布账号、辖区和层级，帮助理解“我省、我市、我局”。手动与自动周报共用处理逻辑，来源地不直接视为事件发生地。固定和生产自定义提示词文件保持原样，规则只在符合条件的当次请求中追加。详见 [来源上下文与验证](weekly-wechat-context.md)。
+
+2026-11-15首轮已成功生成，但内容质量仍有遗漏和旧闻问题，见[阶段交接与逐项结论](government-wechat-20261115-handoff.md)。运行成功只表示生成和保存完成，不等于编辑质量验收通过。
